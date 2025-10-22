@@ -9,6 +9,12 @@ from .schemas import (
 )
 from .utils import summarize_columns
 from .ingestion import ECUReader, GPSReader
+from .fusion import (
+    FusionEngine,
+    StreamSpec,
+    estimate_offset_by_correlation,
+    synthesize_timestamps,
+)
 
 __all__ = [
     "PEMSConfig",
@@ -19,4 +25,8 @@ __all__ = [
     "summarize_columns",
     "GPSReader",
     "ECUReader",
+    "FusionEngine",
+    "StreamSpec",
+    "synthesize_timestamps",
+    "estimate_offset_by_correlation",
 ]
