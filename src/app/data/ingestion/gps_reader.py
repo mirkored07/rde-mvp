@@ -10,18 +10,42 @@ import gpxpy
 import numpy as np
 import pandas as pd
 import pynmea2
-from pandas.api.types import is_datetime64tz_dtype
 
 ORDERED = ["timestamp", "lat", "lon", "alt_m", "speed_m_s", "hdop", "fix_ok"]
 
 
 def _to_utc(ts: pd.Series) -> pd.Series:
-    """Coerce timestamps to timezone-aware UTC datetimes."""
+    """
+    Robust UTC converter:
+      - Accepts strings with 'Z', without 'Z', with 'T' or space.
+      - Accepts tz-aware datetimes and converts to UTC.
+      - Naive datetimes are assumed to be UTC.
+    """
 
-    converted = pd.to_datetime(ts, utc=True, errors="raise")
-    if not is_datetime64tz_dtype(converted.dtype):
-        converted = converted.dt.tz_localize("UTC")
-    return converted
+    converted = pd.to_datetime(ts, utc=False, errors="coerce")
+
+    if converted.isna().any():
+        def _one(x: object) -> pd.Timestamp:
+            if pd.isna(x):
+                return pd.NaT
+            try:
+                value = pd.Timestamp(x)
+            except Exception:
+                return pd.NaT
+            if value is pd.NaT:
+                return value
+            if value.tzinfo is None:
+                return value.tz_localize("UTC")
+            return value.tz_convert("UTC")
+
+        converted = ts.map(_one)
+        converted = pd.to_datetime(converted, utc=True, errors="coerce")
+        return converted
+
+    tz = converted.dt.tz
+    if tz is None:
+        return converted.dt.tz_localize("UTC")
+    return converted.dt.tz_convert("UTC")
 
 
 def _haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -38,7 +62,7 @@ def _haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
 def _derive_speed(df: pd.DataFrame) -> pd.Series:
     """Derive ground speed (m/s) from consecutive GPS fixes."""
 
-    timestamps = df["timestamp"].view("int64") / 1e9
+    timestamps = df["timestamp"].astype("int64") / 1e9
     lat = df["lat"].to_numpy()
     lon = df["lon"].to_numpy()
     speed = np.full(len(df), np.nan, dtype=float)
@@ -57,7 +81,7 @@ def _derive_speed(df: pd.DataFrame) -> pd.Series:
 def _anti_teleport(df: pd.DataFrame, threshold_m: float = 150.0) -> pd.Series:
     """Flag implausible jumps where the implied speed exceeds ``threshold_m`` m/s."""
 
-    timestamps = df["timestamp"].view("int64") / 1e9
+    timestamps = df["timestamp"].astype("int64") / 1e9
     lat = df["lat"].to_numpy()
     lon = df["lon"].to_numpy()
     jump = np.zeros(len(df), dtype=bool)
