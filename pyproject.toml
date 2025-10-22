@@ -2,7 +2,7 @@
 name = "rde-mvp"
 version = "0.1.0"
 description = "MVP for RDE homologation app"
-authors = ["<me>"]
+authors = ["RDE Team <noreply@example.com>"]
 readme = "README.md"
 packages = [{ include = "src" }]
 
