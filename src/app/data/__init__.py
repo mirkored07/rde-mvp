@@ -8,7 +8,7 @@ from .schemas import (
     PEMSConfig,
 )
 from .utils import summarize_columns
-from .ingestion import GPSReader
+from .ingestion import ECUReader, GPSReader
 
 __all__ = [
     "PEMSConfig",
@@ -18,4 +18,5 @@ __all__ = [
     "AUX_OPTIONAL",
     "summarize_columns",
     "GPSReader",
+    "ECUReader",
 ]
