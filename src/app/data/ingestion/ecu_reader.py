@@ -7,7 +7,9 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
-from pandas.api.types import is_datetime64tz_dtype, is_numeric_dtype
+from pandas.api.types import is_numeric_dtype
+
+from src.app.utils import to_utc_series
 
 ORDERED = [
     "timestamp",
@@ -89,21 +91,12 @@ def _ensure_timestamp(df: pd.DataFrame, *, start: pd.Timestamp) -> pd.DataFrame:
         return df
 
     raise ValueError("Timestamp column could not be inferred from MDF data.")
-
-
-def _to_utc(ts: pd.Series) -> pd.Series:
-    converted = pd.to_datetime(ts, utc=True, errors="raise")
-    if not is_datetime64tz_dtype(converted.dtype):
-        converted = converted.dt.tz_localize("UTC")
-    return converted
-
-
 def _normalize(df: pd.DataFrame) -> pd.DataFrame:
     if "timestamp" not in df.columns:
         raise ValueError("ECU data requires a 'timestamp' column.")
 
     df = df.copy()
-    df["timestamp"] = _to_utc(df["timestamp"])
+    df["timestamp"] = to_utc_series(df["timestamp"])
     df = df.sort_values("timestamp", kind="stable").reset_index(drop=True)
 
     available: list[str] = ["timestamp"]
