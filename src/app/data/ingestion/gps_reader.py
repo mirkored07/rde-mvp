@@ -11,43 +11,9 @@ import numpy as np
 import pandas as pd
 import pynmea2
 
+from src.app.utils import to_utc_series
+
 ORDERED = ["timestamp", "lat", "lon", "alt_m", "speed_m_s", "hdop", "fix_ok"]
-
-
-def _to_utc(ts: pd.Series) -> pd.Series:
-    """
-    Robust UTC converter:
-      - Accepts strings with 'Z', without 'Z', with 'T' or space.
-      - Accepts tz-aware datetimes and converts to UTC.
-      - Naive datetimes are assumed to be UTC.
-    """
-
-    converted = pd.to_datetime(ts, utc=False, errors="coerce")
-
-    if converted.isna().any():
-        def _one(x: object) -> pd.Timestamp:
-            if pd.isna(x):
-                return pd.NaT
-            try:
-                value = pd.Timestamp(x)
-            except Exception:
-                return pd.NaT
-            if value is pd.NaT:
-                return value
-            if value.tzinfo is None:
-                return value.tz_localize("UTC")
-            return value.tz_convert("UTC")
-
-        converted = ts.map(_one)
-        converted = pd.to_datetime(converted, utc=True, errors="coerce")
-        return converted
-
-    tz = converted.dt.tz
-    if tz is None:
-        return converted.dt.tz_localize("UTC")
-    return converted.dt.tz_convert("UTC")
-
-
 def _haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     """Return the great-circle distance between two WGS84 coordinates in metres."""
 
@@ -228,7 +194,7 @@ def _normalize(df: pd.DataFrame) -> pd.DataFrame:
         raise ValueError(f"Required GPS fields missing: {missing}.")
 
     df = df.copy()
-    df["timestamp"] = _to_utc(df["timestamp"])
+    df["timestamp"] = to_utc_series(df["timestamp"])
     df = df.sort_values("timestamp", kind="stable").reset_index(drop=True)
 
     numeric_cols = ["lat", "lon", "alt_m", "speed_m_s", "hdop"]
