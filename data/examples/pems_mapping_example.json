@@ -1,0 +1,13 @@
+{
+  "timestamp": "time",
+  "exhaust_flow_kg_s": "ExhFlow_kg_s",
+  "nox_ppm": "NOx_ppm",
+  "co_ppm": "CO_ppm",
+  "co2_ppm": "CO2_ppm",
+  "thc_ppm": "THC_ppm",
+  "nmhc_ppm": "NMHC_ppm",
+  "ch4_ppm": "CH4_ppm",
+  "nh3_ppm": "NH3_ppm",
+  "pn_1_s": "PN_1_s",
+  "temp_c": "T_exh_C"
+}
