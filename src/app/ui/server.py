@@ -14,15 +14,24 @@ from typing import Any
 
 import pandas as pd
 from fastapi import APIRouter, HTTPException, Request, status
-from fastapi.responses import FileResponse, HTMLResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response, StreamingResponse
 
 from src.app.data.analysis import AnalysisEngine, AnalysisResult, load_rules
 from src.app.data.regulation import PackEvaluation, evaluate_pack, load_pack
 from src.app.data.fusion import FusionEngine
 from src.app.data.fusion.specs import StreamSpec
-from src.app.data.ingestion import ECUReader, GPSReader
+from src.app.data.ingestion import ECUReader, GPSReader, PEMSReader
 from src.app.reporting.html import build_report_html
 from src.app.reporting.pdf import html_to_pdf_bytes
+from src.app.schemas import UNIT_HINTS, as_payload
+from src.app.utils.mappings import (
+    DatasetMapping,
+    MappingValidationError,
+    load_mapping_from_dict,
+    parse_mapping_payload,
+    serialise_mapping_state,
+    slugify_profile_name,
+)
 
 router = APIRouter(include_in_schema=False)
 
@@ -38,11 +47,87 @@ _project_root = pathlib.Path(__file__).resolve().parents[3]
 _rules_path = _project_root / "data" / "rules" / "demo_rules.json"
 _regpack_path = _project_root / "data" / "regpacks" / "eu7_demo.json"
 _samples_dir = _project_root / "data" / "samples"
+_mappings_dir = _project_root / "data" / "mappings"
 _SAMPLE_FILES: dict[str, pathlib.Path] = {
     path.name: path
     for path in _samples_dir.glob("*")
     if path.is_file()
 }
+
+
+def _ensure_mappings_dir() -> pathlib.Path:
+    _mappings_dir.mkdir(parents=True, exist_ok=True)
+    return _mappings_dir
+
+
+def _canonical_schema_json() -> str:
+    return json.dumps({"datasets": as_payload()}, separators=(",", ":"))
+
+
+def _unit_hints_json() -> str:
+    return json.dumps(UNIT_HINTS, separators=(",", ":"))
+
+
+def _profile_path(slug: str) -> pathlib.Path:
+    normalized = slugify_profile_name(slug)
+    if not normalized:
+        raise ValueError("Invalid mapping profile identifier.")
+    return _ensure_mappings_dir() / f"{normalized}.json"
+
+
+def _list_mapping_profiles() -> list[dict[str, str]]:
+    directory = _ensure_mappings_dir()
+    profiles: list[dict[str, str]] = []
+    for path in sorted(directory.glob("*.json")):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        slug = data.get("slug") or path.stem
+        name = data.get("name") or slug
+        if isinstance(slug, str) and isinstance(name, str):
+            profiles.append({"slug": slug, "name": name})
+    profiles.sort(key=lambda item: item["name"].lower())
+    return profiles
+
+
+def _load_mapping_profile(slug: str) -> dict[str, Any]:
+    path = _profile_path(slug)
+    if not path.exists():
+        raise FileNotFoundError
+    data = json.loads(path.read_text(encoding="utf-8"))
+    mapping_payload = data.get("mapping")
+    if not isinstance(mapping_payload, dict):
+        mapping_payload = {}
+    state = load_mapping_from_dict(mapping_payload)
+    name = data.get("name")
+    if not isinstance(name, str) or not name.strip():
+        name = data.get("slug") or path.stem
+    slug_value = data.get("slug") or slugify_profile_name(slug) or path.stem
+    return {
+        "name": name,
+        "slug": slug_value,
+        "mapping": serialise_mapping_state(state),
+    }
+
+
+def _save_mapping_profile(name: str, payload: dict[str, Any]) -> dict[str, Any]:
+    cleaned = (name or "").strip()
+    if not cleaned:
+        raise ValueError("Profile name is required.")
+    slug = slugify_profile_name(cleaned)
+    if not slug:
+        raise ValueError("Profile name must include letters or numbers.")
+    state = load_mapping_from_dict(payload)
+    data = {
+        "name": cleaned,
+        "slug": slug,
+        "mapping": serialise_mapping_state(state),
+    }
+    path = _ensure_mappings_dir() / f"{slug}.json"
+    path.write_text(json.dumps(data, indent=2, sort_keys=True), encoding="utf-8")
+    return data
+
 DEFAULT_RULES_CONFIG: dict[str, Any] = {
     "speed_bins": [
         {"name": "urban", "max_kmh": 60},
@@ -137,51 +222,41 @@ def _write_temp_file(
     return temp_path
 
 
-def _normalize_pems(df: pd.DataFrame) -> pd.DataFrame:
-    if df.empty:
-        raise ValueError("PEMS file does not contain any rows.")
-    if "timestamp" not in df.columns:
-        raise ValueError("PEMS data must include a 'timestamp' column.")
-
-    normalized = df.copy()
-    normalized["timestamp"] = pd.to_datetime(
-        normalized["timestamp"], utc=True, errors="coerce"
-    )
-    if normalized["timestamp"].isna().any():
-        raise ValueError("PEMS timestamps could not be parsed into UTC datetimes.")
-
-    for column in normalized.columns:
-        if column == "timestamp":
-            continue
-        normalized[column] = pd.to_numeric(normalized[column], errors="coerce")
-
-    normalized = normalized.sort_values("timestamp", kind="stable").reset_index(drop=True)
-    return normalized
-
-
-def _ingest_pems(filename: str | None, data: bytes) -> pd.DataFrame:
+def _ingest_pems(
+    filename: str | None,
+    data: bytes,
+    mapping: "DatasetMapping" | None = None,
+) -> pd.DataFrame:
     path = _write_temp_file(filename, data, label="PEMS", allowed=PEMS_EXTENSIONS)
     try:
-        frame = pd.read_csv(path)
-    except Exception as exc:  # pragma: no cover - pandas provides rich errors
-        raise ValueError("Unable to read the PEMS CSV file.") from exc
+        columns = mapping.column_mapping() if mapping else None
+        units = mapping.unit_mapping() if mapping else None
+        frame = PEMSReader.from_csv(str(path), columns=columns, units=units)
+    except Exception as exc:  # pragma: no cover - reader surfaces detailed errors
+        raise ValueError(str(exc)) from exc
     finally:
         path.unlink(missing_ok=True)
-    return _normalize_pems(frame)
+    return frame
 
 
-def _ingest_gps(filename: str | None, data: bytes) -> pd.DataFrame:
+def _ingest_gps(
+    filename: str | None,
+    data: bytes,
+    mapping: "DatasetMapping" | None = None,
+) -> pd.DataFrame:
     path = _write_temp_file(filename, data, label="GPS", allowed=GPS_EXTENSIONS)
     try:
         ext = _extension_for(filename)
         if ext == ".csv":
-            frame = GPSReader.from_csv(str(path))
+            columns = mapping.column_mapping() if mapping else None
+            frame = GPSReader.from_csv(str(path), mapping=columns)
         elif ext in {".nmea", ".txt"}:
             frame = GPSReader.from_nmea(str(path))
         elif ext == ".gpx":
             frame = GPSReader.from_gpx(str(path))
         else:  # pragma: no cover - guarded by extension check
-            frame = GPSReader.from_csv(str(path))
+            columns = mapping.column_mapping() if mapping else None
+            frame = GPSReader.from_csv(str(path), mapping=columns)
     finally:
         path.unlink(missing_ok=True)
     if frame.empty:
@@ -189,14 +264,20 @@ def _ingest_gps(filename: str | None, data: bytes) -> pd.DataFrame:
     return frame
 
 
-def _ingest_ecu(filename: str | None, data: bytes) -> pd.DataFrame:
+def _ingest_ecu(
+    filename: str | None,
+    data: bytes,
+    mapping: "DatasetMapping" | None = None,
+) -> pd.DataFrame:
     path = _write_temp_file(filename, data, label="ECU", allowed=ECU_EXTENSIONS)
     try:
         ext = _extension_for(filename)
         if ext == ".csv":
-            frame = ECUReader.from_csv(str(path))
+            columns = mapping.column_mapping() if mapping else None
+            frame = ECUReader.from_csv(str(path), mapping=columns)
         else:
-            frame = ECUReader.from_mdf(str(path))
+            columns = mapping.column_mapping() if mapping else None
+            frame = ECUReader.from_mdf(str(path), mapping=columns)
     finally:
         path.unlink(missing_ok=True)
     if frame.empty:
@@ -926,6 +1007,8 @@ def _render_index(results_html: str, *, max_upload_mb: int) -> str:
         _index_template_cache = (template_dir / "index.html").read_text(encoding="utf-8")
     page = _index_template_cache.replace("{{RESULTS_SECTION}}", results_html)
     page = page.replace("{{MAX_UPLOAD_MB}}", str(max_upload_mb))
+    page = page.replace("{{CANONICAL_SCHEMA_JSON}}", _canonical_schema_json())
+    page = page.replace("{{UNIT_HINTS_JSON}}", _unit_hints_json())
     return page
 
 
@@ -936,7 +1019,10 @@ async def index(request: Request) -> HTMLResponse:
     return HTMLResponse(page)
 
 
-async def _extract_files(request: Request) -> dict[str, tuple[str | None, bytes]]:
+
+async def _extract_form_data(
+    request: Request,
+) -> tuple[dict[str, tuple[str | None, bytes]], dict[str, str]]:
     content_type = request.headers.get("content-type", "")
     if "multipart/form-data" not in content_type:
         raise ValueError("Request must be multipart/form-data.")
@@ -949,7 +1035,7 @@ async def _extract_files(request: Request) -> dict[str, tuple[str | None, bytes]
             break
     if boundary_token is None:
         raise ValueError("Multipart boundary not found in Content-Type header.")
-    if boundary_token.startswith("\"") and boundary_token.endswith("\""):
+    if boundary_token.startswith(""") and boundary_token.endswith("""):
         boundary_token = boundary_token[1:-1]
 
     body = await request.body()
@@ -957,6 +1043,7 @@ async def _extract_files(request: Request) -> dict[str, tuple[str | None, bytes]
     delimiter = b"--" + boundary
 
     files: dict[str, tuple[str | None, bytes]] = {}
+    fields: dict[str, str] = {}
     for raw_part in body.split(delimiter):
         if not raw_part or raw_part in {b"", b"--", b"--\r\n"}:
             continue
@@ -986,9 +1073,12 @@ async def _extract_files(request: Request) -> dict[str, tuple[str | None, bytes]
         if not field:
             continue
         filename = params.get("filename")
-        files[field] = (filename, content)
+        if filename is not None:
+            files[field] = (filename, content)
+        else:
+            fields[field] = content.decode("utf-8", errors="ignore")
 
-    return files
+    return files, fields
 
 
 @router.post("/analyze", response_class=HTMLResponse)
@@ -997,10 +1087,18 @@ async def analyze(request: Request) -> HTMLResponse:
     results_payload: dict[str, Any] | None = None
 
     try:
-        files = await _extract_files(request)
+        files, fields = await _extract_form_data(request)
     except ValueError as exc:
         errors.append(str(exc))
         files = {}
+        fields = {}
+
+    mapping_state: dict[str, DatasetMapping] = {}
+    if not errors:
+        try:
+            mapping_state = parse_mapping_payload(fields.get("mapping_payload"))
+        except MappingValidationError as exc:
+            errors.append(str(exc))
 
     if not errors:
         required = {"pems_file", "gps_file", "ecu_file"}
@@ -1016,9 +1114,9 @@ async def analyze(request: Request) -> HTMLResponse:
             gps_name, gps_bytes = files["gps_file"]
             ecu_name, ecu_bytes = files["ecu_file"]
 
-            pems_df = _ingest_pems(pems_name, pems_bytes)
-            gps_df = _ingest_gps(gps_name, gps_bytes)
-            ecu_df = _ingest_ecu(ecu_name, ecu_bytes)
+            pems_df = _ingest_pems(pems_name, pems_bytes, mapping=mapping_state.get("pems"))
+            gps_df = _ingest_gps(gps_name, gps_bytes, mapping=mapping_state.get("gps"))
+            ecu_df = _ingest_ecu(ecu_name, ecu_bytes, mapping=mapping_state.get("ecu"))
             fused = _fuse_streams(pems_df, gps_df, ecu_df)
             engine = AnalysisEngine(_load_analysis_rules())
             analysis_result = engine.analyze(fused)
@@ -1037,6 +1135,67 @@ async def analyze(request: Request) -> HTMLResponse:
     page = _render_index(results_html, max_upload_mb=MAX_UPLOAD_MB)
     status_code = status.HTTP_400_BAD_REQUEST if errors else status.HTTP_200_OK
     return HTMLResponse(page, status_code=status_code)
+
+
+@router.get("/mapping_profiles", include_in_schema=False)
+async def list_mapping_profiles_endpoint() -> JSONResponse:
+    try:
+        profiles = _list_mapping_profiles()
+    except Exception as exc:  # pragma: no cover - defensive guard
+        raise HTTPException(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unable to list mapping profiles.",
+        ) from exc
+    return JSONResponse({"profiles": profiles})
+
+
+@router.get("/mapping_profiles/{slug}", include_in_schema=False)
+async def get_mapping_profile(slug: str) -> JSONResponse:
+    try:
+        profile = _load_mapping_profile(slug)
+    except FileNotFoundError:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Mapping profile not found.")
+    except MappingValidationError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    except Exception as exc:  # pragma: no cover - defensive guard
+        raise HTTPException(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unable to load mapping profile.",
+        ) from exc
+    return JSONResponse(profile)
+
+
+@router.post("/mapping_profiles", include_in_schema=False)
+async def save_mapping_profile(request: Request) -> JSONResponse:
+    try:
+        payload = await request.json()
+    except Exception as exc:  # pragma: no cover - FastAPI handles parsing
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Invalid JSON payload.") from exc
+
+    if not isinstance(payload, dict):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Payload must be an object.")
+
+    name = payload.get("name")
+    mapping_payload = payload.get("mapping")
+    if not isinstance(mapping_payload, dict):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Mapping payload must be an object.")
+    if not isinstance(name, str) or not name.strip():
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Profile name is required.")
+
+    try:
+        saved = _save_mapping_profile(name, mapping_payload)
+    except MappingValidationError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    except Exception as exc:  # pragma: no cover - filesystem guard
+        raise HTTPException(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unable to save mapping profile.",
+        ) from exc
+
+    return JSONResponse({"slug": saved["slug"], "name": saved["name"]})
+
 
 
 @router.post("/export_pdf", include_in_schema=False)
