@@ -22,6 +22,10 @@ Run the test suite:
 poetry run pytest
 ```
 
+## CI/CD
+
+> CI regenerates `poetry.lock` via `poetry lock --no-update` to prevent lock/pyproject drift errors.
+
 ## Quick guide: PEMS ingestion
 
 Use :class:`src.app.data.ingestion.PEMSReader` to normalize raw exports and
