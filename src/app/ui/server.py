@@ -4,15 +4,17 @@ from __future__ import annotations
 
 import functools
 import html
+import io
 import json
 import math
 import pathlib
 import tempfile
+import zipfile
 from typing import Any
 
 import pandas as pd
-from fastapi import APIRouter, Request, status
-from fastapi.responses import HTMLResponse
+from fastapi import APIRouter, HTTPException, Request, status
+from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 
 from src.app.data.analysis import AnalysisEngine, AnalysisResult, load_rules
 from src.app.data.fusion import FusionEngine
@@ -31,6 +33,12 @@ PEMS_EXTENSIONS = {".csv"}
 
 _project_root = pathlib.Path(__file__).resolve().parents[3]
 _rules_path = _project_root / "data" / "rules" / "demo_rules.json"
+_samples_dir = _project_root / "data" / "samples"
+_SAMPLE_FILES: dict[str, pathlib.Path] = {
+    path.name: path
+    for path in _samples_dir.glob("*")
+    if path.is_file()
+}
 DEFAULT_RULES_CONFIG: dict[str, Any] = {
     "speed_bins": [
         {"name": "urban", "max_kmh": 60},
@@ -45,6 +53,35 @@ DEFAULT_RULES_CONFIG: dict[str, Any] = {
         "PN_1_per_km": {"numerator": "pn_1_s", "denominator": "veh_speed_m_s"},
     },
 }
+
+
+def _get_sample_path(filename: str) -> pathlib.Path:
+    path = _SAMPLE_FILES.get(filename)
+    if path is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sample not found.")
+    return path
+
+
+@router.get("/samples/{filename}", include_in_schema=False)
+def download_sample(filename: str) -> FileResponse:
+    path = _get_sample_path(filename)
+    media_type = "text/csv" if path.suffix.lower() == ".csv" else "application/octet-stream"
+    return FileResponse(path, media_type=media_type, filename=path.name)
+
+
+@router.get("/samples.zip", include_in_schema=False)
+def download_samples_archive() -> StreamingResponse:
+    if not _SAMPLE_FILES:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sample not found.")
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for sample in sorted(_SAMPLE_FILES.values(), key=lambda item: item.name):
+            archive.write(sample, arcname=sample.name)
+
+    buffer.seek(0)
+    headers = {"Content-Disposition": "attachment; filename=samples.zip"}
+    return StreamingResponse(buffer, media_type="application/zip", headers=headers)
 
 
 @functools.lru_cache(maxsize=1)

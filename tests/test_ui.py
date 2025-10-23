@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import io
+import zipfile
+
 from fastapi.testclient import TestClient
 
 from src.main import app
@@ -13,6 +16,7 @@ def test_index_page_renders() -> None:
     response = client.get("/")
     assert response.status_code == 200
     assert "Upload PEMS, GPS, and ECU data" in response.text
+    assert "Download sample files" in response.text
 
 
 def test_static_assets_served() -> None:
@@ -53,3 +57,28 @@ def test_analysis_endpoint_returns_results() -> None:
     assert response.status_code == 200
     assert "Analysis Summary" in response.text
     assert "Overall status" in response.text
+
+
+def test_sample_file_downloads() -> None:
+    for name in ("pems_demo.csv", "gps_demo.csv", "ecu_demo.csv"):
+        response = client.get(f"/samples/{name}")
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("text/csv")
+        assert "timestamp" in response.text
+
+
+def test_samples_zip_download() -> None:
+    response = client.get("/samples.zip")
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/zip"
+
+    buffer = io.BytesIO(response.content)
+    with zipfile.ZipFile(buffer) as archive:
+        names = sorted(archive.namelist())
+        assert names == [
+            "ecu_demo.csv",
+            "gps_demo.csv",
+            "pems_demo.csv",
+        ]
+        pems_csv = archive.read("pems_demo.csv").decode("utf-8")
+        assert "nox_mg_s" in pems_csv
