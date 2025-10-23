@@ -21,6 +21,8 @@ from src.app.data.regulation import PackEvaluation, evaluate_pack, load_pack
 from src.app.data.fusion import FusionEngine
 from src.app.data.fusion.specs import StreamSpec
 from src.app.data.ingestion import ECUReader, GPSReader, PEMSReader
+from src.app.quality import Diagnostics, run_diagnostics, to_dict
+from src.app.reporting.archive import build_report_archive
 from src.app.reporting.html import build_report_html
 from src.app.reporting.pdf import html_to_pdf_bytes
 from src.app.schemas import UNIT_HINTS, as_payload
@@ -458,7 +460,11 @@ def _format_margin(margin: float | None, units: str | None) -> str | None:
     return formatted
 
 
-def _prepare_results(result: AnalysisResult, evaluation: PackEvaluation) -> dict[str, Any]:
+def _prepare_results(
+    result: AnalysisResult,
+    evaluation: PackEvaluation,
+    diagnostics: Diagnostics | dict[str, Any] | None = None,
+) -> dict[str, Any]:
     overall = result.analysis.get("overall", {})
     completeness = overall.get("completeness") or {}
     status_ok = bool(overall.get("valid"))
@@ -580,7 +586,7 @@ def _prepare_results(result: AnalysisResult, evaluation: PackEvaluation) -> dict
         },
     }
 
-    return {
+    payload: dict[str, Any] = {
         "regulation": regulation_summary,
         "evidence": evidence_rows,
         "analysis": {
@@ -592,6 +598,126 @@ def _prepare_results(result: AnalysisResult, evaluation: PackEvaluation) -> dict
             "map": map_payload,
         },
     }
+
+    if diagnostics is not None:
+        payload["diagnostics"] = to_dict(diagnostics) if isinstance(diagnostics, Diagnostics) else diagnostics
+
+    return payload
+
+
+def _render_diagnostics_panel(diagnostics: dict[str, Any] | None) -> str:
+    data = diagnostics or {}
+    checks = data.get("checks") or []
+    summary = data.get("summary") or {}
+    repaired = data.get("repaired_spans") or []
+
+    if not checks:
+        return (
+            '<div class="mt-6 rounded-3xl border border-dashed border-slate-300 bg-white/60 p-6 text-sm '
+            "text-slate-500 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-400">"
+            "No diagnostics were produced for this dataset.</div>"
+        )
+
+    def _summary_badge(level: str, count: int) -> str:
+        label = level.upper()
+        classes = {
+            "pass": "bg-emerald-500/15 text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-200",
+            "warn": "bg-amber-500/20 text-amber-600 dark:bg-amber-500/25 dark:text-amber-200",
+            "fail": "bg-rose-500/15 text-rose-600 dark:bg-rose-500/20 dark:text-rose-200",
+        }.get(level, "bg-slate-500/15 text-slate-600 dark:bg-slate-700/60 dark:text-slate-300")
+        return (
+            '<span class="inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-semibold '
+            f'{classes}"><span class="h-2 w-2 rounded-full bg-current"></span>'
+            f'{html.escape(label)}: {html.escape(str(count))}</span>'
+        )
+
+    summary_badges = [
+        _summary_badge("pass", int(summary.get("pass", 0))),
+        _summary_badge("warn", int(summary.get("warn", 0))),
+        _summary_badge("fail", int(summary.get("fail", 0))),
+    ]
+
+    def _level_badge(level: str) -> str:
+        label = (level or "warn").upper()
+        classes = {
+            "pass": "bg-emerald-500/15 text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-200",
+            "warn": "bg-amber-500/20 text-amber-600 dark:bg-amber-500/25 dark:text-amber-200",
+            "fail": "bg-rose-500/15 text-rose-600 dark:bg-rose-500/20 dark:text-rose-200",
+        }.get(level, "bg-slate-500/15 text-slate-600 dark:bg-slate-700/60 dark:text-slate-300")
+        return (
+            f'<span class="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold {classes}">'  # noqa: E501
+            f"{html.escape(label)}</span>"
+        )
+
+    items: list[str] = []
+    for entry in checks:
+        title = html.escape(str(entry.get("title", "")))
+        details = html.escape(str(entry.get("details", "")))
+        subject = entry.get("subject")
+        subject_html = (
+            f'<p class="text-[11px] font-semibold uppercase tracking-[0.3em] text-slate-400 dark:text-slate-500">{html.escape(str(subject))}</p>'
+            if subject
+            else ""
+        )
+        level = str(entry.get("level") or "warn").lower()
+        badge_html = _level_badge(level)
+        count = entry.get("count")
+        count_html = (
+            f'<p class="mt-2 text-xs text-slate-500 dark:text-slate-400">Occurrences: {html.escape(str(count))}</p>'
+            if isinstance(count, (int, float)) and count
+            else ""
+        )
+        items.append(
+            '<li class="rounded-2xl border border-slate-200 bg-white/85 p-4 shadow-sm '
+            'dark:border-slate-700 dark:bg-slate-900/70">'
+            '<div class="flex items-start justify-between gap-4">'
+            f'<div>{subject_html}<p class="text-sm font-semibold text-slate-900 dark:text-white">{title}</p></div>'
+            f'{badge_html}'
+            '</div>'
+            f'<p class="mt-2 text-sm text-slate-600 dark:text-slate-300">{details}</p>'
+            f'{count_html}'
+            '</li>'
+        )
+
+    repaired_html = ""
+    if repaired:
+        repairs_list = []
+        for span in repaired:
+            start = html.escape(str(span.get("start", "")))
+            end = html.escape(str(span.get("end", "")))
+            seconds = span.get("seconds")
+            inserted = span.get("inserted")
+            parts = []
+            if start or end:
+                parts.append(f"{start} → {end}")
+            if isinstance(seconds, (int, float)):
+                parts.append(f"{float(seconds):.2f} s")
+            if isinstance(inserted, (int, float)):
+                parts.append(f"{int(inserted)} rows")
+            repairs_list.append(f"<li>{' · '.join(parts)}</li>")
+        repairs_items = "".join(repairs_list)
+        repaired_html = (
+            '<div class="mt-4 rounded-2xl border border-dashed border-slate-200 bg-white/80 p-4 text-xs '
+            'text-slate-500 dark:border-slate-700 dark:bg-slate-900/60 dark:text-slate-400">'
+            '<p class="font-semibold uppercase tracking-[0.3em] text-slate-400 dark:text-slate-500">Repaired spans</p>'
+            f'<ul class="mt-2 list-disc space-y-1 pl-4">{repairs_items}</ul>'
+            '</div>'
+        )
+
+    return (
+        '<div class="mt-6 rounded-3xl border border-slate-200/70 bg-white/95 p-6 shadow-card '
+        'dark:border-slate-800/70 dark:bg-slate-900/80">'
+        '<div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">'
+        '<div>'
+        '<p class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-500 dark:text-slate-400">Data diagnostics</p>'
+        '<p class="mt-2 max-w-xl text-sm text-slate-500 dark:text-slate-400">Automated checks covering sampling cadence, gaps, GPS jumps, and speed spikes.</p>'
+        '</div>'
+        f'<div class="flex flex-wrap items-center gap-2">{"".join(summary_badges)}</div>'
+        '</div>'
+        f'<ul class="mt-6 space-y-3">{"".join(items)}</ul>'
+        f'{repaired_html}'
+        '</div>'
+    )
 
 
 def _render_results_html(
@@ -618,6 +744,7 @@ def _render_results_html(
 
     regulation = results.get("regulation") or {}
     analysis = results.get("analysis") or {}
+    diagnostics = results.get("diagnostics") or {}
     evidence = results.get("evidence") or []
 
     def _escape_text(value: Any) -> str:
@@ -831,6 +958,8 @@ def _render_results_html(
             'No regulation evidence available.</div>'
         )
 
+    diagnostics_block = _render_diagnostics_panel(diagnostics)
+
     metrics_html = "".join(
         (
             '<div class="rounded-2xl border border-slate-200 bg-white/80 px-5 py-4 text-center shadow-sm '
@@ -979,6 +1108,21 @@ def _render_results_html(
             '<line x1="12" y1="15" x2="12" y2="3"></line>'
             '</svg>'
             '</button>'
+            '<button type="button" '
+            'class="inline-flex items-center gap-2 rounded-full border border-slate-300 px-4 py-2 text-sm font-semibold '
+            'text-slate-700 transition hover:border-slate-400 hover:bg-slate-100 focus-visible:outline-none '
+            'focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-slate-400 dark:border-slate-600 '
+            'dark:text-slate-200 dark:hover:border-slate-500 dark:hover:bg-slate-800 dark:focus-visible:ring-slate-500" '
+            'data-download-zip>'
+            'Download ZIP'
+            '<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" '
+            'stroke-linecap="round" stroke-linejoin="round">'
+            '<path d="M7 3h7l5 5v13a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"></path>'
+            '<polyline points="12 12 12 17"></polyline>'
+            '<polyline points="9 14 12 17 15 14"></polyline>'
+            '<line x1="12" y1="3" x2="12" y2="9"></line>'
+            '</svg>'
+            '</button>'
             '</div>'
             '</div>'
             '<p data-export-error class="hidden text-sm font-medium text-rose-600 dark:text-rose-300"></p>'
@@ -991,6 +1135,7 @@ def _render_results_html(
         'backdrop-blur dark:border-slate-800/70 dark:bg-slate-900/80" data-component="analysis-results">'
         f'{export_controls}'
         f'{regulation_block}'
+        f'{diagnostics_block}'
         '<div class="mt-6">'
         '<h3 class="text-lg font-semibold text-slate-900 dark:text-white">Rule evidence</h3>'
         '<p class="mt-1 text-sm text-slate-500 dark:text-slate-400">Thresholds are demo placeholders and do not represent legal advice.</p>'
@@ -1118,11 +1263,22 @@ async def analyze(request: Request) -> HTMLResponse:
             gps_df = _ingest_gps(gps_name, gps_bytes, mapping=mapping_state.get("gps"))
             ecu_df = _ingest_ecu(ecu_name, ecu_bytes, mapping=mapping_state.get("ecu"))
             fused = _fuse_streams(pems_df, gps_df, ecu_df)
+            fused, diagnostics = run_diagnostics(
+                fused,
+                {
+                    "pems": pems_df,
+                    "gps": gps_df,
+                    "ecu": ecu_df,
+                },
+                gap_threshold_s=2.0,
+                repair_small_gaps=True,
+                repair_threshold_s=3.0,
+            )
             engine = AnalysisEngine(_load_analysis_rules())
             analysis_result = engine.analyze(fused)
             pack = _load_regulation_pack()
             evaluation = evaluate_pack(analysis_result.analysis, pack)
-            results_payload = _prepare_results(analysis_result, evaluation)
+            results_payload = _prepare_results(analysis_result, evaluation, diagnostics)
         except Exception as exc:  # pragma: no cover - user feedback path
             errors.append(str(exc))
 
@@ -1227,6 +1383,29 @@ async def export_pdf(request: Request) -> Response:
 
     headers = {"Content-Disposition": "attachment; filename=analysis-report.pdf"}
     return Response(content=pdf_bytes, media_type="application/pdf", headers=headers)
+
+
+@router.post("/export_zip", include_in_schema=False)
+async def export_zip(request: Request) -> Response:
+    try:
+        payload = await request.json()
+    except Exception as exc:  # pragma: no cover - FastAPI surfaces JSON errors
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Invalid JSON payload.") from exc
+
+    results_payload = payload.get("results") if isinstance(payload, dict) else None
+    if not isinstance(results_payload, dict):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Results payload is required.")
+
+    try:
+        archive_bytes = build_report_archive(results_payload)
+    except Exception as exc:  # pragma: no cover - defensive guard
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail="Unable to render report from supplied payload.",
+        ) from exc
+
+    headers = {"Content-Disposition": "attachment; filename=analysis-report.zip"}
+    return Response(content=archive_bytes, media_type="application/zip", headers=headers)
 
 
 __all__ = ["router"]

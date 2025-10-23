@@ -807,7 +807,8 @@
   }
 
   function setupExportButtons(container) {
-    const button = container.querySelector("[data-download-pdf]");
+    const pdfButton = container.querySelector("[data-download-pdf]");
+    const zipButton = container.querySelector("[data-download-zip]");
     const payloadEl = container.querySelector("[data-report-payload]");
     const errorEl = container.querySelector("[data-export-error]");
 
@@ -822,7 +823,8 @@
       }
     };
 
-    if (!button) {
+    const buttons = [pdfButton, zipButton].filter(Boolean);
+    if (!buttons.length) {
       if (errorEl) {
         errorEl.classList.add("hidden");
       }
@@ -830,33 +832,41 @@
     }
 
     if (!payloadEl) {
-      button.disabled = true;
-      showError("PDF export is unavailable for this result.");
+      buttons.forEach((btn) => {
+        btn.disabled = true;
+        btn.setAttribute("aria-disabled", "true");
+      });
+      showError("Report export is unavailable for this result.");
       return;
     }
 
-    button.addEventListener("click", async () => {
-      showError("");
-      let payload;
+    const parsePayload = () => {
       try {
-        payload = JSON.parse(payloadEl.textContent || "{}");
+        return JSON.parse(payloadEl.textContent || "{}");
       } catch (error) {
-        showError("Unable to prepare PDF payload.");
-        return;
+        showError("Unable to prepare export payload.");
+        return null;
       }
+    };
+
+    const download = async (button, endpoint, filename, failureMessage) => {
+      if (!button) return;
+      showError("");
+      const payload = parsePayload();
+      if (!payload) return;
 
       button.disabled = true;
       button.setAttribute("aria-busy", "true");
 
       try {
-        const response = await fetch("/export_pdf", {
+        const response = await fetch(endpoint, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ results: payload }),
         });
 
         if (!response.ok) {
-          let message = "Unable to generate PDF right now.";
+          let message = failureMessage;
           try {
             const data = await response.json();
             if (data && typeof data.detail === "string") {
@@ -876,18 +886,30 @@
         const url = URL.createObjectURL(blob);
         const link = document.createElement("a");
         link.href = url;
-        link.download = "analysis-report.pdf";
+        link.download = filename;
         document.body.appendChild(link);
         link.click();
         link.remove();
         URL.revokeObjectURL(url);
       } catch (error) {
-        showError("PDF download failed. Please try again.");
+        showError(failureMessage);
       } finally {
         button.disabled = false;
         button.removeAttribute("aria-busy");
       }
-    });
+    };
+
+    if (pdfButton) {
+      pdfButton.addEventListener("click", () => {
+        download(pdfButton, "/export_pdf", "analysis-report.pdf", "PDF download failed. Please try again.");
+      });
+    }
+
+    if (zipButton) {
+      zipButton.addEventListener("click", () => {
+        download(zipButton, "/export_zip", "analysis-report.zip", "ZIP download failed. Please try again.");
+      });
+    }
   }
 
   function initializeResults(root) {

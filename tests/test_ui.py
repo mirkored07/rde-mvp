@@ -100,6 +100,7 @@ def test_analysis_endpoint_returns_results() -> None:
 
     assert "Analysis Summary" in html_text
     assert "Regulation verdict" in html_text
+    assert "Data diagnostics" in html_text
     assert "Rule evidence" in html_text
     assert "Download PDF" in html_text
 
@@ -127,6 +128,25 @@ def test_samples_zip_download() -> None:
         ]
         pems_csv = archive.read("pems_demo.csv").decode("utf-8")
         assert "nox_mg_s" in pems_csv
+
+
+def test_export_zip_contains_diagnostics() -> None:
+    html_text = _post_analysis()
+    payload = _extract_results_payload(html_text)
+
+    response = client.post("/export_zip", json={"results": payload})
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/zip"
+
+    buffer = io.BytesIO(response.content)
+    with zipfile.ZipFile(buffer) as archive:
+        names = set(archive.namelist())
+        assert "index.html" in names
+        assert "diagnostics.json" in names
+        diagnostics_payload = json.loads(archive.read("diagnostics.json").decode("utf-8"))
+        assert "summary" in diagnostics_payload
+        index_html = archive.read("index.html").decode("utf-8")
+        assert "Data diagnostics" in index_html
 
 
 def test_analysis_applies_column_mapping() -> None:

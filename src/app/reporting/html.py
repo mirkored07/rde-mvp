@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import datetime as dt
 import html
-from typing import Any, Iterable
+from typing import Any, Iterable, Mapping
 
 __all__ = ["build_report_html"]
 
@@ -81,6 +81,10 @@ main.report {
 .badge--fail {
   background: rgba(239, 68, 68, 0.14);
   color: #b91c1c;
+}
+.badge--warn {
+  background: rgba(251, 191, 36, 0.18);
+  color: #b45309;
 }
 .section {
   margin-top: 36px;
@@ -313,6 +317,88 @@ def _render_counts(regulation: dict[str, Any]) -> str:
     return f"<div class=\"stat-grid\">{''.join(stat_items)}</div>"
 
 
+def _render_diagnostics(diagnostics: Mapping[str, Any]) -> str:
+    data = diagnostics or {}
+    summary = data.get("summary") or {}
+    checks = data.get("checks") or []
+    repaired = data.get("repaired_spans") or []
+
+    stat_specs = [
+        ("Pass checks", summary.get("pass", 0)),
+        ("Warnings", summary.get("warn", 0)),
+        ("Failures", summary.get("fail", 0)),
+    ]
+
+    summary_parts = [
+        (
+            "<div class=\"stat\">"
+            f"<div class=\"stat__label\">{_escape(label)}</div>"
+            f"<div class=\"stat__value\">{_escape(value)}</div>"
+            "</div>"
+        )
+        for label, value in stat_specs
+    ]
+    summary_html = (
+        f"<div class=\"stat-grid\">{''.join(summary_parts)}</div>"
+        if summary_parts
+        else "<p class=\"empty\">No diagnostics summary available.</p>"
+    )
+
+    badge_map = {
+        "pass": "badge--pass",
+        "warn": "badge--warn",
+        "fail": "badge--fail",
+    }
+
+    if checks:
+        entries: list[str] = []
+        for entry in checks:
+            level = str(entry.get("level") or "warn").lower()
+            badge_class = badge_map.get(level, "badge--warn")
+            subject = entry.get("subject")
+            subject_prefix = f"{_escape(subject)} · " if subject else ""
+            title = _escape(entry.get("title"))
+            details = _escape(entry.get("details"))
+            count = entry.get("count")
+            count_text = (
+                f" ({_escape(count)})"
+                if isinstance(count, (int, float)) and count
+                else ""
+            )
+            entries.append(
+                "<li>"
+                f"<span class=\"badge {badge_class}\">{level.upper()}</span> "
+                f"{subject_prefix}<strong>{title}</strong> — {details}{count_text}"
+                "</li>"
+            )
+        checks_html = f"<ul class=\"list-inline\">{''.join(entries)}</ul>"
+    else:
+        checks_html = "<p class=\"empty\">No diagnostic checks recorded.</p>"
+
+    repairs_html = ""
+    if repaired:
+        repairs: list[str] = []
+        for span in repaired:
+            start = _escape(span.get("start"))
+            end = _escape(span.get("end"))
+            seconds = span.get("seconds")
+            inserted = span.get("inserted")
+            parts: list[str] = []
+            if start or end:
+                parts.append(f"{start} → {end}")
+            if isinstance(seconds, (int, float)):
+                parts.append(f"{float(seconds):.2f} s")
+            if isinstance(inserted, (int, float)):
+                parts.append(f"{int(inserted)} rows")
+            repairs.append(f"<li>{' · '.join(parts)}</li>")
+        repairs_html = (
+            "<div class=\"notes\"><strong>Repaired spans:</strong>"
+            f"<ul class=\"list-inline\">{''.join(repairs)}</ul></div>"
+        )
+
+    return f"{summary_html}<div class=\"summary\">{checks_html}{repairs_html}</div>"
+
+
 def _render_metrics(metrics: Iterable[dict[str, Any]]) -> str:
     items = list(metrics or [])
     if not items:
@@ -442,6 +528,7 @@ def build_report_html(results: dict[str, Any]) -> str:
 
     regulation = results.get("regulation") or {}
     analysis = results.get("analysis") or {}
+    diagnostics = results.get("diagnostics") or {}
 
     generated_at = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     status_ok = bool(regulation.get("ok"))
@@ -474,6 +561,7 @@ def build_report_html(results: dict[str, Any]) -> str:
     metrics_html = _render_metrics(analysis.get("metrics") or [])
     bins_html = _render_bins(analysis.get("bins") or [])
     evidence_html = _render_evidence(results.get("evidence") or [])
+    diagnostics_html = _render_diagnostics(diagnostics)
     counts_html = _render_counts(regulation)
 
     document = (
@@ -501,6 +589,10 @@ def build_report_html(results: dict[str, Any]) -> str:
         "<section class=\"section\">"
         "<h2>Regulation summary</h2>"
         f"{counts_html}"
+        "</section>"
+        "<section class=\"section\">"
+        "<h2>Data diagnostics</h2>"
+        f"{diagnostics_html}"
         "</section>"
         "<section class=\"section\">"
         "<h2>Analysis overview</h2>"
