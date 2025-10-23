@@ -17,6 +17,7 @@ from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 
 from src.app.data.analysis import AnalysisEngine, AnalysisResult, load_rules
+from src.app.data.regulation import PackEvaluation, evaluate_pack, load_pack
 from src.app.data.fusion import FusionEngine
 from src.app.data.fusion.specs import StreamSpec
 from src.app.data.ingestion import ECUReader, GPSReader
@@ -33,6 +34,7 @@ PEMS_EXTENSIONS = {".csv"}
 
 _project_root = pathlib.Path(__file__).resolve().parents[3]
 _rules_path = _project_root / "data" / "rules" / "demo_rules.json"
+_regpack_path = _project_root / "data" / "regpacks" / "eu7_demo.json"
 _samples_dir = _project_root / "data" / "samples"
 _SAMPLE_FILES: dict[str, pathlib.Path] = {
     path.name: path
@@ -89,6 +91,13 @@ def _load_analysis_rules() -> Any:
     if _rules_path.exists():
         return load_rules(_rules_path)
     return load_rules(DEFAULT_RULES_CONFIG)
+
+
+@functools.lru_cache(maxsize=1)
+def _load_regulation_pack() -> Any:
+    if _regpack_path.exists():
+        return load_pack(_regpack_path)
+    raise FileNotFoundError("Default regulation pack not found.")
 
 
 def _extension_for(filename: str | None) -> str:
@@ -333,7 +342,40 @@ def _format_metric(label: str, value: float | None, suffix: str) -> dict[str, st
     return {"label": label, "value": display}
 
 
-def _prepare_results(result: AnalysisResult) -> dict[str, Any]:
+def _format_value(value: float | None, units: str | None, *, decimals: int | None = None) -> str:
+    if value is None or pd.isna(value):
+        return "n/a"
+
+    val = float(value)
+    if decimals is not None:
+        formatted = f"{val:.{decimals}f}"
+    else:
+        abs_val = abs(val)
+        if abs_val >= 1000 or (abs_val > 0 and abs_val < 0.01):
+            formatted = f"{val:.3g}"
+        else:
+            formatted = f"{val:.3f}"
+
+    if units:
+        return f"{formatted} {units}"
+    return formatted
+
+
+def _format_margin(margin: float | None, units: str | None) -> str | None:
+    if margin is None or pd.isna(margin):
+        return None
+    val = float(margin)
+    abs_val = abs(val)
+    if abs_val >= 1000 or (abs_val > 0 and abs_val < 0.01):
+        formatted = f"{val:+.3g}"
+    else:
+        formatted = f"{val:+.3f}"
+    if units:
+        return f"{formatted} {units}"
+    return formatted
+
+
+def _prepare_results(result: AnalysisResult, evaluation: PackEvaluation) -> dict[str, Any]:
     overall = result.analysis.get("overall", {})
     completeness = overall.get("completeness") or {}
     status_ok = bool(overall.get("valid"))
@@ -386,13 +428,86 @@ def _prepare_results(result: AnalysisResult) -> dict[str, Any]:
     chart_payload = _prepare_chart_payload(result.derived)
     map_payload = _prepare_map_payload(result.derived)
 
+    evidence_rows: list[dict[str, Any]] = []
+    for item in evaluation.evidence:
+        rule = item.rule
+        requirement_value = _format_value(rule.threshold, rule.units)
+        observed_value = _format_value(item.actual, rule.units)
+        requirement = (
+            f"{rule.comparator} {requirement_value}"
+            if requirement_value != "n/a"
+            else rule.comparator
+        )
+
+        context_items: list[dict[str, str]] = []
+        distance = item.context.get("distance_km")
+        if distance is not None and not pd.isna(distance):
+            context_items.append(
+                {
+                    "label": "Distance in bin",
+                    "value": _format_value(distance, "km", decimals=3),
+                }
+            )
+        time_spent = item.context.get("time_s")
+        if time_spent is not None and not pd.isna(time_spent):
+            context_items.append(
+                {
+                    "label": "Time in bin",
+                    "value": _format_value(time_spent, "s", decimals=1),
+                }
+            )
+        margin_text = _format_margin(item.margin, rule.units)
+        if margin_text:
+            context_items.append({"label": "Margin", "value": margin_text})
+        if item.bin_name:
+            context_items.append({"label": "Bin", "value": item.bin_name})
+
+        notes = [note for note in (rule.notes,) if note]
+
+        evidence_rows.append(
+            {
+                "id": rule.id,
+                "title": rule.title,
+                "legal_source": rule.legal_source,
+                "article": rule.article,
+                "scope": rule.scope,
+                "metric": rule.metric,
+                "mandatory": rule.mandatory,
+                "passed": item.passed,
+                "requirement": requirement,
+                "observed": observed_value,
+                "context": context_items,
+                "notes": notes,
+                "detail": item.detail,
+            }
+        )
+
+    regulation_summary = {
+        "label": "PASS" if evaluation.overall_passed else "FAIL",
+        "ok": evaluation.overall_passed,
+        "pack_id": evaluation.pack.id,
+        "pack_title": evaluation.pack.title,
+        "legal_source": evaluation.pack.legal_source,
+        "version": evaluation.pack.version,
+        "counts": {
+            "mandatory_passed": evaluation.mandatory_passed,
+            "mandatory_total": evaluation.mandatory_total,
+            "optional_passed": evaluation.optional_passed,
+            "optional_total": evaluation.optional_total,
+        },
+    }
+
     return {
-        "summary_md": result.summary_md,
-        "status": {"label": status_label, "ok": status_ok},
-        "metrics": metrics,
-        "bins": bin_rows,
-        "chart": chart_payload,
-        "map": map_payload,
+        "regulation": regulation_summary,
+        "evidence": evidence_rows,
+        "analysis": {
+            "summary_md": result.summary_md,
+            "status": {"label": status_label, "ok": status_ok},
+            "metrics": metrics,
+            "bins": bin_rows,
+            "chart": chart_payload,
+            "map": map_payload,
+        },
     }
 
 
@@ -413,16 +528,220 @@ def _render_results_html(results: dict[str, Any] | None, errors: list[str]) -> s
             "<p class='text-lg font-medium'>Upload your telemetry files to see KPIs, interactive charts, and a live map of the route.</p></div>"
         )
 
-    status = results.get("status", {})
-    status_ok = bool(status.get("ok"))
-    status_label = html.escape(str(status.get("label", "")))
+    regulation = results.get("regulation") or {}
+    analysis = results.get("analysis") or {}
+    evidence = results.get("evidence") or []
+
+    def _escape_text(value: Any) -> str:
+        return html.escape(str(value)) if value not in (None, "") else ""
+
+    reg_ok = bool(regulation.get("ok"))
+    reg_label = _escape_text(regulation.get("label") or ("PASS" if reg_ok else "FAIL"))
     status_classes = (
         "bg-emerald-500/15 text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-200"
-        if status_ok
+        if reg_ok
         else "bg-rose-500/15 text-rose-600 dark:bg-rose-500/20 dark:text-rose-200"
     )
-    ping_color = "bg-emerald-400/60" if status_ok else "bg-rose-400/60"
-    dot_color = "bg-emerald-500" if status_ok else "bg-rose-500"
+    ping_color = "bg-emerald-400/60" if reg_ok else "bg-rose-400/60"
+    dot_color = "bg-emerald-500" if reg_ok else "bg-rose-500"
+
+    pack_label_raw = (
+        regulation.get("pack_title")
+        or regulation.get("pack_id")
+        or "Regulation pack"
+    )
+    pack_label = _escape_text(pack_label_raw)
+    version_raw = regulation.get("version")
+    version_badge = (
+        f'<span class="ml-2 inline-flex items-center rounded-full bg-slate-500/10 px-2 py-0.5 text-xs font-semibold '
+        f'text-slate-600 dark:bg-slate-700/60 dark:text-slate-200">v{_escape_text(version_raw)}</span>'
+        if version_raw not in (None, "")
+        else ""
+    )
+    legal_source_html = _escape_text(regulation.get("legal_source"))
+    pack_id_html = _escape_text(regulation.get("pack_id"))
+
+    counts = regulation.get("counts") or {}
+
+    def _as_int(value: Any) -> int:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return 0
+
+    mandatory_passed = _as_int(counts.get("mandatory_passed"))
+    mandatory_total = _as_int(counts.get("mandatory_total"))
+    optional_passed = _as_int(counts.get("optional_passed"))
+    optional_total = _as_int(counts.get("optional_total"))
+
+    def _rule_card(label: str, passed: int, total: int, hint: str) -> str:
+        if total:
+            value_text = f"{passed}/{total}"
+            hint_text = hint
+        else:
+            value_text = "0"
+            hint_text = "Not configured"
+        return (
+            '<div class="rounded-2xl border border-slate-200 bg-white/80 px-5 py-4 text-center shadow-sm '
+            'dark:border-slate-700 dark:bg-slate-900/70">'
+            f'<dt class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400 dark:text-slate-500">{html.escape(label)}</dt>'
+            f'<dd class="mt-2 text-lg font-semibold text-slate-900 dark:text-white">{html.escape(value_text)}</dd>'
+            f'<p class="mt-1 text-xs text-slate-500 dark:text-slate-400">{html.escape(hint_text)}</p>'
+            '</div>'
+        )
+
+    regulation_cards = "".join(
+        (
+            _rule_card("Mandatory rules", mandatory_passed, mandatory_total, "All must pass"),
+            _rule_card("Optional rules", optional_passed, optional_total, "Informational"),
+        )
+    )
+
+    pack_line = (
+        '<p class="mt-3 text-sm text-slate-500 dark:text-slate-400">Pack: '
+        f'<span class="font-semibold text-slate-900 dark:text-white">{pack_label}</span>{version_badge}</p>'
+        if pack_label
+        else ""
+    )
+    legal_line = (
+        f'<p class="text-xs text-slate-500 dark:text-slate-400">Legal source: {legal_source_html}</p>'
+        if legal_source_html
+        else ""
+    )
+    id_line = (
+        f'<p class="text-xs text-slate-400 dark:text-slate-500">Identifier: <code>{pack_id_html}</code></p>'
+        if pack_id_html and pack_id_html != pack_label
+        else ""
+    )
+
+    regulation_block = (
+        '<div class="rounded-2xl border border-slate-200 bg-white/90 p-6 shadow-sm '
+        'dark:border-slate-700 dark:bg-slate-900/70">'
+        '<div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">'
+        '<div>'
+        '<p class="text-xs font-semibold uppercase tracking-[0.4em] text-slate-500 dark:text-slate-400">Regulation verdict</p>'
+        f'<span class="mt-3 inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold {status_classes}">' \
+        f'<span class="relative flex h-2.5 w-2.5"><span class="absolute inline-flex h-full w-full animate-ping rounded-full {ping_color}"></span>'
+        f'<span class="relative inline-flex h-2.5 w-2.5 rounded-full {dot_color}"></span></span>{reg_label}</span>'
+        f'{pack_line}{legal_line}{id_line}'
+        '</div>'
+        f'<dl class="grid gap-4 sm:grid-cols-2 lg:gap-6">{regulation_cards}</dl>'
+        '</div>'
+        '</div>'
+    )
+
+    evidence_rows = []
+    for entry in evidence:
+        passed = bool(entry.get("passed"))
+        status_badge = (
+            "bg-emerald-500/15 text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-200"
+            if passed
+            else "bg-rose-500/15 text-rose-600 dark:bg-rose-500/20 dark:text-rose-200"
+        )
+        mandatory = bool(entry.get("mandatory"))
+        mandatory_badge = (
+            "bg-amber-500/20 text-amber-600 dark:bg-amber-500/25 dark:text-amber-200"
+            if mandatory
+            else "bg-slate-500/15 text-slate-600 dark:bg-slate-700/60 dark:text-slate-300"
+        )
+        mandatory_label = "Mandatory" if mandatory else "Optional"
+        requirement = _escape_text(entry.get("requirement"))
+        observed = _escape_text(entry.get("observed"))
+
+        context_items = entry.get("context") or []
+        context_html = "".join(
+            f'<li><span class="font-medium text-slate-900 dark:text-white">{_escape_text(item.get("label"))}:</span> '
+            f'{_escape_text(item.get("value"))}</li>'
+            for item in context_items
+        )
+        if context_html:
+            context_html = (
+                "<ul class='mt-2 space-y-1 text-xs text-slate-500 dark:text-slate-400'>"
+                + context_html
+                + "</ul>"
+            )
+
+        detail = entry.get("detail")
+        detail_html = (
+            f'<p class="mt-2 text-xs text-amber-600 dark:text-amber-300">{_escape_text(detail)}</p>'
+            if detail
+            else ""
+        )
+
+        notes_list = entry.get("notes") or []
+        notes_html = "".join(
+            f'<p class="mt-2 text-xs italic text-slate-500 dark:text-slate-400">{_escape_text(note)}</p>'
+            for note in notes_list
+        )
+
+        citation_parts = []
+        legal_source = entry.get("legal_source")
+        article = entry.get("article")
+        if legal_source:
+            citation_parts.append(str(legal_source))
+        if article:
+            citation_parts.append(str(article))
+        citation_html = (
+            '<div class="mt-1 text-xs text-slate-500 dark:text-slate-400">'
+            + html.escape(" · ".join(citation_parts))
+            + '</div>'
+            if citation_parts
+            else ""
+        )
+
+        metric = entry.get("metric")
+        metric_html = (
+            f'<div class="mt-1 text-xs text-slate-500 dark:text-slate-400">Metric: <code>{_escape_text(metric)}</code></div>'
+            if metric
+            else ""
+        )
+
+        scope = entry.get("scope")
+        scope_badge = (
+            f'<span class="ml-2 inline-flex items-center rounded-full bg-slate-500/15 px-2 py-0.5 text-[11px] font-semibold '
+            f'uppercase tracking-wider text-slate-600 dark:bg-slate-700/60 dark:text-slate-300">{_escape_text(scope)}</span>'
+            if scope
+            else ""
+        )
+
+        evidence_rows.append(
+            '<tr>'
+            f'<td class="px-4 py-4 align-top">'
+            f'<div class="font-semibold text-slate-900 dark:text-white">{_escape_text(entry.get("title"))}{scope_badge}</div>'
+            f'{citation_html}{metric_html}{notes_html}'
+            '</td>'
+            f'<td class="px-4 py-4 align-top"><div class="font-semibold text-slate-900 dark:text-white">{requirement}</div></td>'
+            f'<td class="px-4 py-4 align-top"><div class="font-semibold text-slate-900 dark:text-white">{observed}</div>'
+            f'{context_html}{detail_html}</td>'
+            f'<td class="px-4 py-4 align-top"><div class="flex flex-col gap-2">'
+            f'<span class="inline-flex items-center justify-center rounded-full px-2.5 py-0.5 text-xs font-semibold {status_badge}">' \
+            f'{"Pass" if passed else "Fail"}</span>'
+            f'<span class="inline-flex items-center justify-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold {mandatory_badge}">' \
+            f'{mandatory_label}</span></div></td>'
+            '</tr>'
+        )
+
+    if evidence_rows:
+        evidence_table = (
+            '<div class="mt-6 overflow-hidden rounded-2xl border border-slate-200 bg-white/80 shadow-sm '
+            'dark:border-slate-700 dark:bg-slate-900/70">'
+            '<table class="min-w-full divide-y divide-slate-200 dark:divide-slate-700">'
+            '<thead class="bg-slate-50/70 text-xs font-semibold uppercase tracking-[0.3em] text-slate-500 '
+            'dark:bg-slate-900/60 dark:text-slate-400"><tr>'
+            '<th scope="col" class="px-4 py-3 text-left">Rule</th>'
+            '<th scope="col" class="px-4 py-3 text-left">Requirement</th>'
+            '<th scope="col" class="px-4 py-3 text-left">Observed</th>'
+            '<th scope="col" class="px-4 py-3 text-left">Status</th>'
+            '</tr></thead>'
+            f'<tbody class="divide-y divide-slate-200 bg-white/80 text-sm text-slate-600 '
+            f'dark:divide-slate-800 dark:bg-slate-900/60 dark:text-slate-300">{"".join(evidence_rows)}</tbody></table></div>'
+        )
+    else:
+        evidence_table = (
+            '<div class="mt-6 rounded-2xl border border-dashed border-slate-300 bg-slate-100/60 p-6 text-sm text-slate-500 '
+            'dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-400">'
+            'No regulation evidence available.</div>'
+        )
 
     metrics_html = "".join(
         (
@@ -433,11 +752,11 @@ def _render_results_html(results: dict[str, Any] | None, errors: list[str]) -> s
             f'<dd class="mt-2 text-lg font-semibold text-slate-900 dark:text-white">'
             f'{html.escape(metric.get("value", ""))}</dd></div>'
         )
-        for metric in results.get("metrics", [])
+        for metric in analysis.get("metrics", [])
     )
 
     bin_rows = []
-    for bin_info in results.get("bins", []):
+    for bin_info in analysis.get("bins", []):
         valid = bool(bin_info.get("valid"))
         badge_class = (
             "bg-emerald-500/15 text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-200"
@@ -490,23 +809,30 @@ def _render_results_html(results: dict[str, Any] | None, errors: list[str]) -> s
             'Configure speed bins and KPIs in <code>data/rules/demo_rules.json</code> to populate this view.</div>'
         )
 
-    summary_json = json.dumps(results.get("summary_md", ""))
-    chart_json = json.dumps(results.get("chart", {}))
-    map_json = json.dumps(results.get("map", {}))
+    analysis_status = analysis.get("status") or {}
+    analysis_ok = bool(analysis_status.get("ok"))
+    analysis_label = html.escape(str(analysis_status.get("label", "")))
+    analysis_status_classes = (
+        "bg-emerald-500/15 text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-200"
+        if analysis_ok
+        else "bg-rose-500/15 text-rose-600 dark:bg-rose-500/20 dark:text-rose-200"
+    )
 
-    return (
-        '<section class="relative overflow-hidden rounded-3xl border border-slate-200/70 bg-white/95 p-8 shadow-card '
-        'backdrop-blur dark:border-slate-800/70 dark:bg-slate-900/80" data-component="analysis-results">'
+    summary_json = json.dumps(analysis.get("summary_md", ""))
+    chart_json = json.dumps(analysis.get("chart", {}))
+    map_json = json.dumps(analysis.get("map", {}))
+
+    analysis_block = (
+        '<div class="mt-10 rounded-3xl border border-slate-200/70 bg-white/95 p-8 shadow-card '
+        'dark:border-slate-800/70 dark:bg-slate-900/80">'
         '<div class="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">'
         '<div>'
-        '<p class="text-xs font-semibold uppercase tracking-[0.4em] text-slate-500 dark:text-slate-400">Overall status</p>'
-        f'<span class="mt-3 inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold {status_classes}">' \
-        f'<span class="relative flex h-2.5 w-2.5"><span class="absolute inline-flex h-full w-full animate-ping rounded-full '
-        f'{ping_color}"></span><span class="relative inline-flex h-2.5 w-2.5 rounded-full {dot_color}"></span></span>'
-        f'{status_label}</span>'
-        '<p class="mt-3 max-w-xl text-sm text-slate-500 dark:text-slate-400">Results generated from the fused telemetry '
-        'streams. Toggle tabs to explore KPIs, charts, and the drive route.</p></div>'
-        f'<dl class="grid gap-4 sm:grid-cols-3">{metrics_html}</dl></div>'
+        '<p class="text-xs font-semibold uppercase tracking-[0.4em] text-slate-500 dark:text-slate-400">Analysis validity</p>'
+        f'<span class="mt-3 inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold {analysis_status_classes}">{analysis_label}</span>'
+        '<p class="mt-3 max-w-xl text-sm text-slate-500 dark:text-slate-400">Derived metrics from fused telemetry streams. Explore KPIs, charts, and the drive route.</p>'
+        '</div>'
+        f'<dl class="grid gap-4 sm:grid-cols-3">{metrics_html}</dl>'
+        '</div>'
         '<div class="mt-8">'
         '<div class="flex flex-wrap gap-2 border-b border-slate-200 dark:border-slate-700" role="tablist">'
         '<button type="button" class="tab-trigger is-active" data-tab-target="summary" '
@@ -537,6 +863,19 @@ def _render_results_html(results: dict[str, Any] | None, errors: list[str]) -> s
         f'<script id="summary-data" type="application/json">{summary_json}</script>'
         f'<script id="chart-data" type="application/json">{chart_json}</script>'
         f'<script id="map-data" type="application/json">{map_json}</script>'
+        '</div>'
+    )
+
+    return (
+        '<section class="relative overflow-hidden rounded-3xl border border-slate-200/70 bg-white/95 p-8 shadow-card '
+        'backdrop-blur dark:border-slate-800/70 dark:bg-slate-900/80" data-component="analysis-results">'
+        f'{regulation_block}'
+        '<div class="mt-6">'
+        '<h3 class="text-lg font-semibold text-slate-900 dark:text-white">Rule evidence</h3>'
+        '<p class="mt-1 text-sm text-slate-500 dark:text-slate-400">Thresholds are demo placeholders and do not represent legal advice.</p>'
+        f'{evidence_table}'
+        '</div>'
+        f'{analysis_block}'
         '</section>'
     )
 
@@ -643,7 +982,9 @@ async def analyze(request: Request) -> HTMLResponse:
             fused = _fuse_streams(pems_df, gps_df, ecu_df)
             engine = AnalysisEngine(_load_analysis_rules())
             analysis_result = engine.analyze(fused)
-            results_payload = _prepare_results(analysis_result)
+            pack = _load_regulation_pack()
+            evaluation = evaluate_pack(analysis_result.analysis, pack)
+            results_payload = _prepare_results(analysis_result, evaluation)
         except Exception as exc:  # pragma: no cover - user feedback path
             errors.append(str(exc))
 

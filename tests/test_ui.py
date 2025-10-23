@@ -56,7 +56,8 @@ def test_analysis_endpoint_returns_results() -> None:
 
     assert response.status_code == 200
     assert "Analysis Summary" in response.text
-    assert "Overall status" in response.text
+    assert "Regulation verdict" in response.text
+    assert "Rule evidence" in response.text
 
 
 def test_sample_file_downloads() -> None:
