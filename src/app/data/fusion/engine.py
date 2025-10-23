@@ -42,12 +42,12 @@ class FusionEngine:
             grid_hz=grid_hz,
             max_lag_s=max_lag_s,
         )
-        spec.clock_offset_s += offset
+        spec.clock_offset_s -= offset
 
         if spec.t0 is None:
             gps_ts = synthesize_timestamps(reference)
             if not gps_ts.empty:
-                spec.t0 = gps_ts.iloc[0] - pd.to_timedelta(spec.clock_offset_s, unit="s")
+                spec.t0 = gps_ts.iloc[0]
 
     def fuse(
         self,

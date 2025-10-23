@@ -35,6 +35,19 @@ def test_synthesize_timestamps_from_counter() -> None:
     pd.testing.assert_series_equal(ts.reset_index(drop=True), expected.reset_index(drop=True))
 
 
+def test_synthesize_timestamps_accepts_dataframe() -> None:
+    timeline = [
+        pd.Timestamp("2023-01-01T00:00:00Z"),
+        pd.Timestamp("2023-01-01T00:00:01Z"),
+    ]
+    df = pd.DataFrame({"timestamp": timeline, "speed_m_s": [10.0, 10.5]})
+
+    ts = synthesize_timestamps(df)
+
+    expected = pd.Series(timeline, name="timestamp", dtype="datetime64[ns, UTC]")
+    pd.testing.assert_series_equal(ts.reset_index(drop=True), expected.reset_index(drop=True))
+
+
 def test_estimate_offset_by_correlation() -> None:
     base = pd.Timestamp("2023-01-01T00:00:00Z")
     samples = 200
@@ -45,7 +58,7 @@ def test_estimate_offset_by_correlation() -> None:
     signal = np.sin(2 * np.pi * freq * time_s)
 
     gps_df = pd.DataFrame({"timestamp": timeline, "speed_m_s": signal})
-    gps_spec = StreamSpec(gps_df, ts_col="timestamp", name="gps")
+    gps_spec = StreamSpec(df=gps_df, ts_col="timestamp", name="gps")
 
     offset = 0.3
     shifted_signal = np.sin(2 * np.pi * freq * (time_s - offset))
@@ -53,12 +66,41 @@ def test_estimate_offset_by_correlation() -> None:
         "timestamp": timeline,
         "veh_speed_m_s": shifted_signal,
     })
-    ecu_spec = StreamSpec(ecu_df, ts_col="timestamp", name="ecu")
+    ecu_spec = StreamSpec(df=ecu_df, ts_col="timestamp", name="ecu")
 
     estimated = estimate_offset_by_correlation(
         ecu_spec,
         gps_spec,
         cols=("veh_speed_m_s", "speed_m_s"),
+        grid_hz=10.0,
+        max_lag_s=1.0,
+    )
+
+    assert estimated == pytest.approx(offset, abs=0.11)
+
+
+def test_estimate_offset_accepts_dataframe_inputs() -> None:
+    base = pd.Timestamp("2023-01-01T00:00:00Z")
+    samples = 200
+    dt = 0.1
+    timeline = base + pd.to_timedelta(np.arange(samples) * dt, unit="s")
+    freq = 0.25
+    time_s = np.arange(samples) * dt
+    signal = np.sin(2 * np.pi * freq * time_s)
+
+    gps_df = pd.DataFrame({"timestamp": timeline, "speed_m_s": signal})
+
+    offset = 0.3
+    shifted_signal = np.sin(2 * np.pi * freq * (time_s - offset))
+    ecu_df = pd.DataFrame({
+        "timestamp": timeline,
+        "veh_speed_m_s": shifted_signal,
+    })
+
+    estimated = estimate_offset_by_correlation(
+        ecu_df,
+        gps_df,
+        cols=(["veh_speed_m_s"], ["speed_m_s"]),
         grid_hz=10.0,
         max_lag_s=1.0,
     )
@@ -75,7 +117,12 @@ def test_fusion_engine_estimates_offset() -> None:
     signal = np.sin(time_s) + 20.0
 
     gps_df = pd.DataFrame({"timestamp": times, "speed_m_s": signal})
-    gps_spec = StreamSpec(gps_df, ts_col="timestamp", name="gps", ref_cols=["speed_m_s"])
+    gps_spec = StreamSpec(
+        df=gps_df,
+        ts_col="timestamp",
+        name="gps",
+        ref_cols=["speed_m_s"],
+    )
 
     offset = 0.4
     counter = np.arange(samples)
@@ -85,7 +132,7 @@ def test_fusion_engine_estimates_offset() -> None:
         "veh_speed_m_s": ecu_signal,
     })
     ecu_spec = StreamSpec(
-        ecu_df,
+        df=ecu_df,
         counter_col="sample",
         rate_hz=rate,
         ref_cols=["veh_speed_m_s"],
