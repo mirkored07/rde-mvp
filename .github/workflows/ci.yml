@@ -20,6 +20,9 @@ jobs:
       - name: Install Poetry
         run: pip install poetry
 
+      - name: Regenerate lock (no update)
+        run: poetry lock --no-update
+
       - name: Install dependencies
         run: poetry install --no-interaction --no-ansi
 
