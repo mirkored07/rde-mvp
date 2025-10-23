@@ -14,13 +14,15 @@ from typing import Any
 
 import pandas as pd
 from fastapi import APIRouter, HTTPException, Request, status
-from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, Response, StreamingResponse
 
 from src.app.data.analysis import AnalysisEngine, AnalysisResult, load_rules
 from src.app.data.regulation import PackEvaluation, evaluate_pack, load_pack
 from src.app.data.fusion import FusionEngine
 from src.app.data.fusion.specs import StreamSpec
 from src.app.data.ingestion import ECUReader, GPSReader
+from src.app.reporting.html import build_report_html
+from src.app.reporting.pdf import html_to_pdf_bytes
 
 router = APIRouter(include_in_schema=False)
 
@@ -511,7 +513,12 @@ def _prepare_results(result: AnalysisResult, evaluation: PackEvaluation) -> dict
     }
 
 
-def _render_results_html(results: dict[str, Any] | None, errors: list[str]) -> str:
+def _render_results_html(
+    results: dict[str, Any] | None,
+    errors: list[str],
+    *,
+    include_export_controls: bool = True,
+) -> str:
     if errors:
         items = "".join(f"<li>{html.escape(message)}</li>" for message in errors)
         return (
@@ -866,9 +873,42 @@ def _render_results_html(results: dict[str, Any] | None, errors: list[str]) -> s
         '</div>'
     )
 
+    export_controls = ""
+    if include_export_controls:
+        payload_json = html.escape(json.dumps(results))
+        export_controls = (
+            '<div class="mb-6 rounded-3xl border border-slate-200/70 bg-white/95 px-5 py-4 shadow-sm '
+            'dark:border-slate-700/60 dark:bg-slate-900/70">'
+            '<div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">'
+            '<div>'
+            '<p class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-500 dark:text-slate-400">Final report</p>'
+            '<p class="mt-1 text-sm text-slate-500 dark:text-slate-400">Download a portable version of the current results.</p>'
+            '</div>'
+            '<div class="flex flex-wrap items-center gap-2">'
+            '<button type="button" '
+            'class="inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 '
+            'px-4 py-2 text-sm font-semibold text-white shadow-md transition hover:shadow-lg focus-visible:outline-none '
+            'focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-slate-900 dark:from-sky-500 '
+            'dark:via-indigo-500 dark:to-indigo-600" data-download-pdf>'
+            'Download PDF'
+            '<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" '
+            'stroke-linecap="round" stroke-linejoin="round">'
+            '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>'
+            '<polyline points="7 10 12 15 17 10"></polyline>'
+            '<line x1="12" y1="15" x2="12" y2="3"></line>'
+            '</svg>'
+            '</button>'
+            '</div>'
+            '</div>'
+            '<p data-export-error class="hidden text-sm font-medium text-rose-600 dark:text-rose-300"></p>'
+            f'<script type="application/json" data-report-payload>{payload_json}</script>'
+            '</div>'
+        )
+
     return (
         '<section class="relative overflow-hidden rounded-3xl border border-slate-200/70 bg-white/95 p-8 shadow-card '
         'backdrop-blur dark:border-slate-800/70 dark:bg-slate-900/80" data-component="analysis-results">'
+        f'{export_controls}'
         f'{regulation_block}'
         '<div class="mt-6">'
         '<h3 class="text-lg font-semibold text-slate-900 dark:text-white">Rule evidence</h3>'
@@ -997,6 +1037,37 @@ async def analyze(request: Request) -> HTMLResponse:
     page = _render_index(results_html, max_upload_mb=MAX_UPLOAD_MB)
     status_code = status.HTTP_400_BAD_REQUEST if errors else status.HTTP_200_OK
     return HTMLResponse(page, status_code=status_code)
+
+
+@router.post("/export_pdf", include_in_schema=False)
+async def export_pdf(request: Request) -> Response:
+    try:
+        payload = await request.json()
+    except Exception as exc:  # pragma: no cover - FastAPI surfaces JSON errors
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Invalid JSON payload.") from exc
+
+    results_payload = payload.get("results") if isinstance(payload, dict) else None
+    if not isinstance(results_payload, dict):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Results payload is required.")
+
+    try:
+        html_document = build_report_html(results_payload)
+    except Exception as exc:  # pragma: no cover - defensive guard
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail="Unable to render report from supplied payload.",
+        ) from exc
+
+    try:
+        pdf_bytes = html_to_pdf_bytes(html_document)
+    except RuntimeError as exc:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
+
+    headers = {"Content-Disposition": "attachment; filename=analysis-report.pdf"}
+    return Response(content=pdf_bytes, media_type="application/pdf", headers=headers)
 
 
 __all__ = ["router"]
