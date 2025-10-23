@@ -15,6 +15,7 @@ from .fusion import (
     estimate_offset_by_correlation,
     synthesize_timestamps,
 )
+from .analysis import AnalysisEngine, AnalysisResult, AnalysisRules, SpeedBin, load_rules
 
 __all__ = [
     "PEMSConfig",
@@ -29,4 +30,9 @@ __all__ = [
     "StreamSpec",
     "synthesize_timestamps",
     "estimate_offset_by_correlation",
+    "AnalysisEngine",
+    "AnalysisResult",
+    "AnalysisRules",
+    "SpeedBin",
+    "load_rules",
 ]

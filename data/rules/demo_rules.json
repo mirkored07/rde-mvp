@@ -1,0 +1,14 @@
+{
+  "speed_bins": [
+    {"name": "urban", "max_kmh": 60},
+    {"name": "rural", "min_kmh": 60, "max_kmh": 90},
+    {"name": "motorway", "min_kmh": 90}
+  ],
+  "min_distance_km_per_bin": 5.0,
+  "min_time_s_per_bin": 300,
+  "completeness": {"max_gap_s": 3},
+  "kpi_defs": {
+    "NOx_mg_per_km": {"numerator": "nox_mg_s", "denominator": "veh_speed_m_s"},
+    "PN_1_per_km": {"numerator": "pn_1_s", "denominator": "veh_speed_m_s"}
+  }
+}
