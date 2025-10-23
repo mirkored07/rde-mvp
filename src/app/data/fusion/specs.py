@@ -17,7 +17,7 @@ def _ensure_utc(timestamp: pd.Timestamp) -> pd.Timestamp:
     return timestamp.tz_convert("UTC")
 
 
-@dataclass
+@dataclass(kw_only=True)
 class StreamSpec:
     """Describe an input data stream used during fusion."""
 
