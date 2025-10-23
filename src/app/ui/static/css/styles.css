@@ -1,0 +1,77 @@
+:root {
+  color-scheme: light;
+}
+
+html.dark {
+  color-scheme: dark;
+}
+
+body {
+  font-feature-settings: "liga" on, "kern" on;
+}
+
+.dropzone {
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+.dropzone.is-dragover {
+  border-color: rgba(59, 130, 246, 0.65);
+  box-shadow: 0 20px 40px -24px rgba(37, 99, 235, 0.9);
+  transform: translateY(-2px);
+}
+
+.dropzone.has-error {
+  border-color: rgba(244, 63, 94, 0.7);
+}
+
+.dropzone.has-file {
+  border-color: rgba(37, 99, 235, 0.45);
+}
+
+.tab-trigger {
+  position: relative;
+  padding: 0.75rem 1.25rem;
+  font-weight: 600;
+  font-size: 0.9375rem;
+  color: rgb(100 116 139);
+  border-bottom: 2px solid transparent;
+  transition: color 0.2s ease, border-color 0.2s ease, background-color 0.2s ease;
+}
+
+.tab-trigger:hover {
+  color: rgb(37 99 235);
+}
+
+.tab-trigger.is-active {
+  color: rgb(37 99 235);
+  border-color: rgb(37 99 235);
+}
+
+html.dark .tab-trigger {
+  color: rgb(148 163 184);
+}
+
+html.dark .tab-trigger.is-active {
+  color: rgb(129 140 248);
+  border-color: rgb(129 140 248);
+}
+
+.tab-panel[hidden] {
+  display: none;
+}
+
+.htmx-indicator {
+  display: none;
+}
+
+.htmx-request .htmx-indicator {
+  display: inline-flex;
+}
+
+.leaflet-container {
+  font-family: inherit;
+}
+
+[data-theme-icon] {
+  transition: opacity 0.2s ease;
+}

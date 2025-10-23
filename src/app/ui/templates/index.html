@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth antialiased">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>RDE MVP · Telemetry Analysis</title>
+    <meta name="color-scheme" content="light dark" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <script>
+      tailwind = { config: { darkMode: "class" } };
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            fontFamily: {
+              sans: [
+                "Inter var",
+                "Inter",
+                "system-ui",
+                "-apple-system",
+                "Segoe UI",
+                "sans-serif",
+              ],
+            },
+            boxShadow: {
+              card: "0 20px 45px -20px rgba(15, 23, 42, 0.25)",
+            },
+          },
+        },
+      };
+    </script>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,typography" defer></script>
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha512-sA+e2atY6pUaz2+miFj7XwjlzAIXazhbugzuDUFcPRl1BDpRP70dNDO7xjMnIKPQ4j/wZUpmA0RduCMsZ0p4hQ=="
+      crossorigin=""
+    />
+    <script
+      src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+      integrity="sha512-vu26PHkHtP0N6D+PfYZ7R6pujISiFDUFxIr05oig3NbS1Ry6j8TDIrKnGKuX3sI5pucs5cjox96D65Zj7B2o6g=="
+      crossorigin=""
+      defer
+    ></script>
+    <script src="https://unpkg.com/htmx.org@1.9.12" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js" defer></script>
+    <script src="https://cdn.plot.ly/plotly-2.26.0.min.js" defer></script>
+    <link rel="stylesheet" href="/static/css/styles.css" />
+    <script src="/static/js/app.js" defer></script>
+  </head>
+  <body class="bg-slate-50 text-slate-900 transition-colors duration-300 dark:bg-slate-950 dark:text-slate-100">
+    <div class="flex min-h-screen flex-col">
+      <header class="border-b border-slate-200/70 bg-white/80 backdrop-blur supports-[backdrop-filter]:bg-white/60 dark:border-slate-800/70 dark:bg-slate-950/80">
+        <div class="mx-auto flex w-full max-w-6xl items-center justify-between px-4 py-4 sm:px-6 lg:px-8">
+          <a href="/" class="flex items-center gap-3 text-left">
+            <span class="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-tr from-sky-500 via-blue-500 to-indigo-500 text-lg font-semibold text-white shadow-lg shadow-sky-500/30">
+              R
+            </span>
+            <span class="hidden sm:inline-flex flex-col">
+              <span class="text-xs font-semibold uppercase tracking-[0.25em] text-slate-500 dark:text-slate-400">
+                RDE MVP
+              </span>
+              <span class="text-base font-semibold text-slate-900 dark:text-white">Real Driving Emissions Lab</span>
+            </span>
+          </a>
+          <div class="flex items-center gap-3">
+            <button
+              type="button"
+              class="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 shadow-sm hover:border-sky-400 hover:text-sky-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 focus-visible:ring-offset-2 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:border-indigo-400 dark:hover:text-indigo-300"
+              data-theme-toggle
+            >
+              <span class="sr-only">Toggle color mode</span>
+              <svg
+                class="h-5 w-5 text-amber-500"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.8"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                data-theme-icon="light"
+              >
+                <circle cx="12" cy="12" r="5"></circle>
+                <line x1="12" y1="1" x2="12" y2="3"></line>
+                <line x1="12" y1="21" x2="12" y2="23"></line>
+                <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+                <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+                <line x1="1" y1="12" x2="3" y2="12"></line>
+                <line x1="21" y1="12" x2="23" y2="12"></line>
+                <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+                <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+              </svg>
+              <svg
+                class="hidden h-5 w-5 text-indigo-300"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.8"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                data-theme-icon="dark"
+              >
+                <path d="M21 12.79A9 9 0 0 1 11.21 3 7.5 7.5 0 1 0 21 12.79z"></path>
+              </svg>
+              <span data-theme-toggle-label class="hidden text-xs font-semibold uppercase tracking-[0.25em] text-slate-500 dark:text-slate-400 sm:inline-flex">
+                Dark mode
+              </span>
+            </button>
+          </div>
+        </div>
+      </header>
+      <main class="flex-1">
+        <section class="relative overflow-hidden bg-gradient-to-br from-slate-100 via-white to-slate-100/60 py-16 dark:from-slate-950 dark:via-slate-900/80 dark:to-slate-950">
+          <div class="pointer-events-none absolute inset-0 opacity-40 mix-blend-screen dark:opacity-30" aria-hidden="true">
+            <div class="absolute -top-24 left-1/3 h-96 w-96 rounded-full bg-sky-300/40 blur-3xl dark:bg-indigo-500/20"></div>
+            <div class="absolute bottom-0 right-1/3 h-96 w-96 rounded-full bg-emerald-300/30 blur-3xl dark:bg-emerald-500/10"></div>
+          </div>
+          <div class="relative z-10 mx-auto flex max-w-6xl flex-col gap-12 px-4 sm:px-6 lg:px-8">
+            <div class="mx-auto max-w-3xl text-center">
+              <span class="inline-flex items-center gap-2 rounded-full border border-sky-200/60 bg-white px-4 py-2 text-xs font-semibold uppercase tracking-[0.4em] text-sky-600 shadow-sm dark:border-indigo-500/30 dark:bg-slate-900/80 dark:text-indigo-200">
+                Modern RDE Workbench
+              </span>
+              <h1 class="mt-6 text-4xl font-bold tracking-tight text-slate-900 sm:text-5xl dark:text-white">
+                Upload PEMS, GPS, and ECU data to unlock rich KPIs, charts, and maps.
+              </h1>
+              <p class="mt-5 text-lg leading-7 text-slate-600 dark:text-slate-300">
+                Drag and drop your telemetry exports, validate them instantly, and review beautifully presented results powered by the existing FastAPI analysis pipeline.
+              </p>
+            </div>
+            <div class="grid gap-8 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
+              <div class="rounded-3xl border border-slate-200/80 bg-white/90 p-8 shadow-card backdrop-blur dark:border-slate-800/70 dark:bg-slate-900/70">
+                <header class="flex flex-col gap-3 border-b border-slate-200/70 pb-6 dark:border-slate-800">
+                  <h2 class="text-2xl font-semibold text-slate-900 dark:text-white">Telemetry ingestion</h2>
+                  <p class="text-sm text-slate-500 dark:text-slate-400">
+                    Supported formats: PEMS CSV (normalized), GPS CSV/NMEA/GPX, ECU CSV or MDF. Maximum file size {{MAX_UPLOAD_MB}} MB.
+                  </p>
+                </header>
+                <form
+                  id="telemetry-form"
+                  class="mt-6 space-y-6"
+                  hx-post="/analyze"
+                  hx-encoding="multipart/form-data"
+                  hx-target="#analysis-results"
+                  hx-swap="innerHTML"
+                  hx-indicator="#form-indicator"
+                  method="post"
+                  enctype="multipart/form-data"
+                >
+                  <div class="grid gap-5 md:grid-cols-2 lg:grid-cols-3">
+                    <div class="dropzone group flex flex-col rounded-2xl border border-slate-200 bg-white/70 p-5 shadow-sm transition dark:border-slate-800 dark:bg-slate-900/60" data-dropzone>
+                      <div class="flex items-center gap-3">
+                        <div class="flex h-12 w-12 items-center justify-center rounded-xl bg-sky-500/10 text-sky-600 dark:bg-sky-500/15 dark:text-sky-200">
+                          <svg class="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M10 2v8.5l-4 7A2 2 0 0 0 7.8 20h8.4a2 2 0 0 0 1.8-2.5l-4-7V2"></path>
+                            <line x1="8.5" y1="2" x2="15.5" y2="2"></line>
+                            <path d="M6.5 12h11"></path>
+                          </svg>
+                        </div>
+                        <div>
+                          <p class="text-base font-semibold text-slate-900 dark:text-white">PEMS emissions</p>
+                          <p class="text-sm text-slate-500 dark:text-slate-400">Normalized CSV with exhaust flow, NOx, PN and speed.</p>
+                        </div>
+                      </div>
+                      <div class="mt-5 flex flex-1 flex-col">
+                        <label class="flex flex-1 cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-slate-300 bg-slate-50/80 px-3 py-6 text-center text-sm font-medium text-slate-600 transition hover:border-sky-500 hover:text-sky-600 dark:border-slate-700 dark:bg-slate-800/60 dark:text-slate-300 dark:hover:border-indigo-400 dark:hover:text-indigo-200">
+                          <input type="file" class="sr-only" name="pems_file" id="pems_file" accept=".csv" required data-allowed=".csv" data-max-size-mb="{{MAX_UPLOAD_MB}}" />
+                          <span>Drop file here or <span class="text-sky-600 underline underline-offset-2 dark:text-indigo-200">browse</span></span>
+                          <span class="text-xs text-slate-400 dark:text-slate-500">.csv</span>
+                        </label>
+                        <p data-file-label class="mt-3 text-sm text-slate-500 dark:text-slate-400">No file selected</p>
+                        <p data-error class="mt-2 hidden text-sm font-medium text-rose-600 dark:text-rose-400"></p>
+                      </div>
+                    </div>
+                    <div class="dropzone group flex flex-col rounded-2xl border border-slate-200 bg-white/70 p-5 shadow-sm transition dark:border-slate-800 dark:bg-slate-900/60" data-dropzone>
+                      <div class="flex items-center gap-3">
+                        <div class="flex h-12 w-12 items-center justify-center rounded-xl bg-sky-500/10 text-sky-600 dark:bg-sky-500/15 dark:text-sky-200">
+                          <svg class="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M9 3 5 5v16l4-2 6 2 4-2V3l-4 2Z"></path>
+                            <path d="M9 3v16"></path>
+                            <path d="M15 5v16"></path>
+                          </svg>
+                        </div>
+                        <div>
+                          <p class="text-base font-semibold text-slate-900 dark:text-white">GPS trace</p>
+                          <p class="text-sm text-slate-500 dark:text-slate-400">CSV, NMEA, or GPX with UTC timestamps and coordinates.</p>
+                        </div>
+                      </div>
+                      <div class="mt-5 flex flex-1 flex-col">
+                        <label class="flex flex-1 cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-slate-300 bg-slate-50/80 px-3 py-6 text-center text-sm font-medium text-slate-600 transition hover:border-sky-500 hover:text-sky-600 dark:border-slate-700 dark:bg-slate-800/60 dark:text-slate-300 dark:hover:border-indigo-400 dark:hover:text-indigo-200">
+                          <input type="file" class="sr-only" name="gps_file" id="gps_file" accept=".csv,.nmea,.gpx,.txt" required data-allowed=".csv,.nmea,.gpx,.txt" data-max-size-mb="{{MAX_UPLOAD_MB}}" />
+                          <span>Drop file here or <span class="text-sky-600 underline underline-offset-2 dark:text-indigo-200">browse</span></span>
+                          <span class="text-xs text-slate-400 dark:text-slate-500">.csv · .nmea · .gpx · .txt</span>
+                        </label>
+                        <p data-file-label class="mt-3 text-sm text-slate-500 dark:text-slate-400">No file selected</p>
+                        <p data-error class="mt-2 hidden text-sm font-medium text-rose-600 dark:text-rose-400"></p>
+                      </div>
+                    </div>
+                    <div class="dropzone group flex flex-col rounded-2xl border border-slate-200 bg-white/70 p-5 shadow-sm transition dark:border-slate-800 dark:bg-slate-900/60" data-dropzone>
+                      <div class="flex items-center gap-3">
+                        <div class="flex h-12 w-12 items-center justify-center rounded-xl bg-sky-500/10 text-sky-600 dark:bg-sky-500/15 dark:text-sky-200">
+                          <svg class="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                            <rect x="3" y="3" width="7" height="7" rx="1"></rect>
+                            <rect x="14" y="3" width="7" height="7" rx="1"></rect>
+                            <rect x="14" y="14" width="7" height="7" rx="1"></rect>
+                            <rect x="3" y="14" width="7" height="7" rx="1"></rect>
+                          </svg>
+                        </div>
+                        <div>
+                          <p class="text-base font-semibold text-slate-900 dark:text-white">ECU signals</p>
+                          <p class="text-sm text-slate-500 dark:text-slate-400">Vehicle CAN export (.csv) or MDF recordings (.mf4/.mdf).</p>
+                        </div>
+                      </div>
+                      <div class="mt-5 flex flex-1 flex-col">
+                        <label class="flex flex-1 cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-slate-300 bg-slate-50/80 px-3 py-6 text-center text-sm font-medium text-slate-600 transition hover:border-sky-500 hover:text-sky-600 dark:border-slate-700 dark:bg-slate-800/60 dark:text-slate-300 dark:hover:border-indigo-400 dark:hover:text-indigo-200">
+                          <input type="file" class="sr-only" name="ecu_file" id="ecu_file" accept=".csv,.mf4,.mdf" required data-allowed=".csv,.mf4,.mdf" data-max-size-mb="{{MAX_UPLOAD_MB}}" />
+                          <span>Drop file here or <span class="text-sky-600 underline underline-offset-2 dark:text-indigo-200">browse</span></span>
+                          <span class="text-xs text-slate-400 dark:text-slate-500">.csv · .mf4 · .mdf</span>
+                        </label>
+                        <p data-file-label class="mt-3 text-sm text-slate-500 dark:text-slate-400">No file selected</p>
+                        <p data-error class="mt-2 hidden text-sm font-medium text-rose-600 dark:text-rose-400"></p>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                    <p class="text-sm text-slate-500 dark:text-slate-400">
+                      Your files stay on device until you submit. Client-side validation keeps uploads fast and reliable.
+                    </p>
+                    <div class="flex items-center gap-3">
+                      <div id="form-indicator" class="htmx-indicator hidden items-center gap-2 rounded-full border border-sky-200 bg-sky-50 px-4 py-2 text-sm font-medium text-sky-600 shadow-sm dark:border-indigo-400/40 dark:bg-indigo-500/10 dark:text-indigo-200">
+                        <svg class="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                          <circle cx="12" cy="12" r="10" class="opacity-20"></circle>
+                          <path d="M22 12a10 10 0 0 1-10 10" class="opacity-70"></path>
+                        </svg>
+                        <span>Analyzing…</span>
+                      </div>
+                      <button
+                        type="submit"
+                        class="inline-flex items-center justify-center gap-2 rounded-full bg-gradient-to-r from-sky-500 via-blue-600 to-indigo-600 px-6 py-2 text-sm font-semibold text-white shadow-lg shadow-sky-500/30 transition hover:shadow-sky-600/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-sky-500"
+                      >
+                        Run analysis
+                        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                          <path d="M5 12h14"></path>
+                          <path d="m13 5 7 7-7 7"></path>
+                        </svg>
+                      </button>
+                    </div>
+                  </div>
+                </form>
+                <section id="analysis-results" class="mt-8" hx-target="this" hx-swap="innerHTML">
+                  {{RESULTS_SECTION}}
+                </section>
+              </div>
+              <aside class="flex flex-col gap-6 rounded-3xl border border-slate-200/70 bg-white/70 p-8 shadow-card dark:border-slate-800/60 dark:bg-slate-900/60">
+                <h3 class="text-lg font-semibold text-slate-900 dark:text-white">Why teams love this UI</h3>
+                <ul class="space-y-5 text-sm text-slate-600 dark:text-slate-300">
+                  <li class="flex items-start gap-3">
+                    <span class="mt-1 flex h-8 w-8 items-center justify-center rounded-full bg-sky-500/15 text-sky-600 dark:bg-sky-500/20 dark:text-sky-200">
+                      <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="20 6 9 17 4 12"></polyline>
+                      </svg>
+                    </span>
+                    <span>
+                      <strong class="font-semibold text-slate-900 dark:text-white">Instant validation</strong><br />
+                      Detects file size and type before upload, keeping engineers on track.
+                    </span>
+                  </li>
+                  <li class="flex items-start gap-3">
+                    <span class="mt-1 flex h-8 w-8 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-200">
+                      <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M12 20v-6"></path>
+                        <path d="m6 20 6-6 6 6"></path>
+                        <path d="M20 4H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2Z"></path>
+                      </svg>
+                    </span>
+                    <span>
+                      <strong class="font-semibold text-slate-900 dark:text-white">HTMX powered</strong><br />
+                      Seamless partial updates keep the experience responsive with no SPA build.
+                    </span>
+                  </li>
+                  <li class="flex items-start gap-3">
+                    <span class="mt-1 flex h-8 w-8 items-center justify-center rounded-full bg-indigo-500/15 text-indigo-600 dark:bg-indigo-500/20 dark:text-indigo-200">
+                      <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="4"></circle>
+                        <path d="M12 2v2"></path>
+                        <path d="M12 20v2"></path>
+                        <path d="m4.93 4.93 1.41 1.41"></path>
+                        <path d="m17.66 17.66 1.41 1.41"></path>
+                        <path d="M2 12h2"></path>
+                        <path d="M20 12h2"></path>
+                        <path d="m6.34 17.66-1.41 1.41"></path>
+                        <path d="m19.07 4.93-1.41 1.41"></path>
+                      </svg>
+                    </span>
+                    <span>
+                      <strong class="font-semibold text-slate-900 dark:text-white">Dark mode native</strong><br />
+                      Toggle light/dark instantly—stored per browser with smooth transitions.
+                    </span>
+                  </li>
+                  <li class="flex items-start gap-3">
+                    <span class="mt-1 flex h-8 w-8 items-center justify-center rounded-full bg-rose-500/15 text-rose-600 dark:bg-rose-500/20 dark:text-rose-200">
+                      <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="m9 18 6-6-6-6"></path>
+                        <path d="M3 12h12"></path>
+                        <path d="M13 5h8"></path>
+                        <path d="M13 19h8"></path>
+                      </svg>
+                    </span>
+                    <span>
+                      <strong class="font-semibold text-slate-900 dark:text-white">Charts & maps</strong><br />
+                      Plotly and Leaflet via CDNs deliver interactive charts without a build step.
+                    </span>
+                  </li>
+                </ul>
+              </aside>
+            </div>
+          </div>
+        </section>
+      </main>
+      <footer class="border-t border-slate-200 bg-white/80 py-6 text-sm text-slate-500 dark:border-slate-800 dark:bg-slate-950/80 dark:text-slate-400">
+        <div class="mx-auto flex w-full max-w-6xl flex-col gap-2 px-4 sm:flex-row sm:items-center sm:justify-between sm:px-6 lg:px-8">
+          <p>&copy; 2024 RDE MVP. Built with FastAPI, Tailwind, and HTMX.</p>
+          <p class="flex items-center gap-2 text-xs uppercase tracking-[0.3em] text-slate-400 dark:text-slate-500">
+            Data in, insights out.
+          </p>
+        </div>
+      </footer>
+    </div>
+  </body>
+</html>
