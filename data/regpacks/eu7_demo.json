@@ -1,0 +1,60 @@
+{
+  "id": "eu7_demo",
+  "title": "EU7 (Demo)",
+  "legal_source": "Regulation (EU) X/XXXX — Demo Only",
+  "version": "0.1-demo",
+  "rules": [
+    {
+      "id": "cov_urban_min",
+      "title": "Minimum urban coverage",
+      "legal_source": "EU7 demo",
+      "article": "Annex III — demo",
+      "scope": "coverage",
+      "metric": "urban.distance_km",
+      "comparator": ">=",
+      "threshold": 5.0,
+      "units": "km",
+      "mandatory": true,
+      "notes": "Demo placeholder; not a legal value."
+    },
+    {
+      "id": "cov_rural_min",
+      "title": "Minimum rural coverage",
+      "legal_source": "EU7 demo",
+      "article": "Annex III — demo",
+      "scope": "coverage",
+      "metric": "rural.distance_km",
+      "comparator": ">=",
+      "threshold": 5.0,
+      "units": "km",
+      "mandatory": true,
+      "notes": "Demo placeholder."
+    },
+    {
+      "id": "kpi_nox_urban_max",
+      "title": "NOx per km — urban",
+      "legal_source": "EU7 demo",
+      "article": "Annex III — demo",
+      "scope": "kpi",
+      "metric": "kpis.NOx_mg_per_km.urban",
+      "comparator": "<=",
+      "threshold": 300.0,
+      "units": "mg/km",
+      "mandatory": true,
+      "notes": "Demo only; not legally accurate."
+    },
+    {
+      "id": "kpi_pn_total_max",
+      "title": "PN per km — total",
+      "legal_source": "EU7 demo",
+      "article": "Annex III — demo",
+      "scope": "kpi",
+      "metric": "kpis.PN_1_per_km.urban",
+      "comparator": "<=",
+      "threshold": 1e12,
+      "units": "1/km",
+      "mandatory": false,
+      "notes": "Demo only."
+    }
+  ]
+}
