@@ -1,13 +1,7 @@
 """FastAPI application entrypoint for the RDE MVP."""
-from fastapi import FastAPI
 
-app = FastAPI(title="RDE MVP")
+from __future__ import annotations
 
+from src.app.api.main import app, health
 
-@app.get("/health")
-def read_health() -> dict[str, str]:
-    """Simple health check endpoint for uptime monitoring."""
-    return {"status": "ok"}
-
-
-__all__ = ["app", "read_health"]
+__all__ = ["app", "health"]
