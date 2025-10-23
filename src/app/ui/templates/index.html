@@ -251,6 +251,45 @@
                 </section>
               </div>
               <aside class="flex flex-col gap-6 rounded-3xl border border-slate-200/70 bg-white/70 p-8 shadow-card dark:border-slate-800/60 dark:bg-slate-900/60">
+                <div class="rounded-2xl border border-sky-200/60 bg-sky-50/70 p-5 text-slate-700 shadow-sm dark:border-indigo-500/40 dark:bg-indigo-500/10 dark:text-indigo-100">
+                  <h3 class="text-base font-semibold text-slate-900 dark:text-white">Download sample files</h3>
+                  <p class="mt-2 text-sm text-slate-600 dark:text-slate-300">
+                    Need data to try the workflow? Grab ready-to-use telemetry exports matching the upload requirements.
+                  </p>
+                  <div class="mt-4 flex flex-col gap-3">
+                    <a
+                      href="/samples.zip"
+                      class="inline-flex items-center justify-center gap-2 rounded-full bg-gradient-to-r from-sky-500 via-blue-600 to-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-md shadow-sky-500/30 transition hover:shadow-sky-600/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-sky-500"
+                    >
+                      Download all samples (.zip)
+                      <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                        <polyline points="7 10 12 15 17 10"></polyline>
+                        <line x1="12" y1="15" x2="12" y2="3"></line>
+                      </svg>
+                    </a>
+                  </div>
+                  <ul class="mt-4 space-y-2 text-sm">
+                    <li>
+                      <a class="inline-flex items-center gap-2 text-sky-600 underline underline-offset-4 transition hover:text-sky-700 dark:text-indigo-200 dark:hover:text-indigo-100" href="/samples/pems_demo.csv">
+                        <span class="font-semibold">PEMS demo CSV</span>
+                        <span class="text-xs uppercase tracking-[0.2em] text-slate-400 dark:text-slate-500">.csv</span>
+                      </a>
+                    </li>
+                    <li>
+                      <a class="inline-flex items-center gap-2 text-sky-600 underline underline-offset-4 transition hover:text-sky-700 dark:text-indigo-200 dark:hover:text-indigo-100" href="/samples/gps_demo.csv">
+                        <span class="font-semibold">GPS demo CSV</span>
+                        <span class="text-xs uppercase tracking-[0.2em] text-slate-400 dark:text-slate-500">.csv</span>
+                      </a>
+                    </li>
+                    <li>
+                      <a class="inline-flex items-center gap-2 text-sky-600 underline underline-offset-4 transition hover:text-sky-700 dark:text-indigo-200 dark:hover:text-indigo-100" href="/samples/ecu_demo.csv">
+                        <span class="font-semibold">ECU demo CSV</span>
+                        <span class="text-xs uppercase tracking-[0.2em] text-slate-400 dark:text-slate-500">.csv</span>
+                      </a>
+                    </li>
+                  </ul>
+                </div>
                 <h3 class="text-lg font-semibold text-slate-900 dark:text-white">Why teams love this UI</h3>
                 <ul class="space-y-5 text-sm text-slate-600 dark:text-slate-300">
                   <li class="flex items-start gap-3">
