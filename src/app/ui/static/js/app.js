@@ -363,6 +363,90 @@
     }
   }
 
+  function setupExportButtons(container) {
+    const button = container.querySelector("[data-download-pdf]");
+    const payloadEl = container.querySelector("[data-report-payload]");
+    const errorEl = container.querySelector("[data-export-error]");
+
+    const showError = (message) => {
+      if (!errorEl) return;
+      if (message) {
+        errorEl.textContent = message;
+        errorEl.classList.remove("hidden");
+      } else {
+        errorEl.textContent = "";
+        errorEl.classList.add("hidden");
+      }
+    };
+
+    if (!button) {
+      if (errorEl) {
+        errorEl.classList.add("hidden");
+      }
+      return;
+    }
+
+    if (!payloadEl) {
+      button.disabled = true;
+      showError("PDF export is unavailable for this result.");
+      return;
+    }
+
+    button.addEventListener("click", async () => {
+      showError("");
+      let payload;
+      try {
+        payload = JSON.parse(payloadEl.textContent || "{}");
+      } catch (error) {
+        showError("Unable to prepare PDF payload.");
+        return;
+      }
+
+      button.disabled = true;
+      button.setAttribute("aria-busy", "true");
+
+      try {
+        const response = await fetch("/export_pdf", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ results: payload }),
+        });
+
+        if (!response.ok) {
+          let message = "Unable to generate PDF right now.";
+          try {
+            const data = await response.json();
+            if (data && typeof data.detail === "string") {
+              message = data.detail;
+            }
+          } catch (parseError) {
+            const fallback = await response.text();
+            if (fallback) {
+              message = fallback;
+            }
+          }
+          showError(message);
+          return;
+        }
+
+        const blob = await response.blob();
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = "analysis-report.pdf";
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(url);
+      } catch (error) {
+        showError("PDF download failed. Please try again.");
+      } finally {
+        button.disabled = false;
+        button.removeAttribute("aria-busy");
+      }
+    });
+  }
+
   function initializeResults(root) {
     const container = root.querySelector("[data-component='analysis-results']");
     if (!container) return;
@@ -370,6 +454,7 @@
     renderChart(container);
     renderMap(container);
     setupTabs(container);
+    setupExportButtons(container);
   }
 
   document.addEventListener("DOMContentLoaded", () => {
