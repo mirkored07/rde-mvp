@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Iterable, Optional, Sequence
+from typing import Iterable, Optional, Sequence, Union
 
 import numpy as np
 import pandas as pd
@@ -29,9 +29,23 @@ class StreamSpec:
     clock_offset_s: float = 0.0
     ref_cols: Sequence[str] = field(default_factory=list)
     name: str = "stream"
+    generated_ts: bool = False
 
 
-def synthesize_timestamps(spec: StreamSpec) -> pd.Series:
+SpecLike = Union[StreamSpec, pd.DataFrame]
+
+
+def as_spec(obj: SpecLike, *, default_name: str = "stream") -> StreamSpec:
+    """Coerce a :class:`StreamSpec` or raw dataframe into a :class:`StreamSpec`."""
+
+    if isinstance(obj, StreamSpec):
+        return obj
+    if isinstance(obj, pd.DataFrame):
+        return StreamSpec(df=obj, ts_col="timestamp", name=default_name)
+    raise TypeError(f"Unsupported type for spec: {type(obj)}")
+
+
+def synthesize_timestamps(spec: SpecLike) -> pd.Series:
     """Ensure a stream contains a UTC timestamp column.
 
     Parameters
@@ -46,48 +60,50 @@ def synthesize_timestamps(spec: StreamSpec) -> pd.Series:
         The UTC timestamp column.
     """
 
-    if spec.ts_col is None:
-        spec.ts_col = "timestamp"
+    stream = as_spec(spec)
 
-    df = spec.df
-    ts_col = spec.ts_col
+    if stream.ts_col is None:
+        stream.ts_col = "timestamp"
 
-    if ts_col in df and df[ts_col].notna().any():
+    df = stream.df
+    ts_col = stream.ts_col
+
+    has_existing = ts_col in df and df[ts_col].notna().any()
+
+    if has_existing and not stream.generated_ts:
         timestamps = pd.to_datetime(df[ts_col], utc=True, errors="coerce")
         if timestamps.isna().any():
-            raise ValueError(f"{spec.name}: unable to parse existing timestamps")
+            raise ValueError(f"{stream.name}: unable to parse existing timestamps")
+        stream.generated_ts = False
     else:
-        if not spec.counter_col or spec.rate_hz is None:
+        if not stream.counter_col or stream.rate_hz is None:
             raise ValueError(
-                f"{spec.name}: missing timestamp column and counter/rate information"
+                f"{stream.name}: missing timestamp column and counter/rate information"
             )
-        if spec.counter_col not in df:
+        if stream.counter_col not in df:
             raise KeyError(
-                f"{spec.name}: counter column '{spec.counter_col}' not in dataframe"
+                f"{stream.name}: counter column '{stream.counter_col}' not in dataframe"
             )
 
-        counter = pd.to_numeric(df[spec.counter_col], errors="coerce")
+        counter = pd.to_numeric(df[stream.counter_col], errors="coerce")
         if counter.isna().any():
-            raise ValueError(f"{spec.name}: counter column contains non numeric values")
+            raise ValueError(f"{stream.name}: counter column contains non numeric values")
 
         counter0 = counter.iloc[0]
-        elapsed = (counter - counter0) / float(spec.rate_hz)
+        elapsed = (counter - counter0) / float(stream.rate_hz)
 
-        if spec.t0 is None:
-            origin: pd.Timestamp | str = pd.Timestamp(0, unit="s", tz="UTC")
+        if stream.t0 is None:
+            origin = pd.Timestamp(0, unit="s", tz="UTC")
         else:
-            origin = _ensure_utc(spec.t0)
+            origin = _ensure_utc(stream.t0)
 
-        timestamps = pd.to_datetime(
-            elapsed,
-            unit="s",
-            origin=origin,
-            utc=True,
-        )
+        timestamps = origin + pd.to_timedelta(elapsed, unit="s")
+        stream.generated_ts = True
 
-    if spec.clock_offset_s:
-        timestamps = timestamps + pd.to_timedelta(spec.clock_offset_s, unit="s")
+    if stream.clock_offset_s:
+        timestamps = timestamps + pd.to_timedelta(stream.clock_offset_s, unit="s")
 
+    timestamps = timestamps.rename(ts_col)
     df[ts_col] = timestamps
 
     return timestamps
@@ -133,8 +149,8 @@ def _aggregate_reference_signal(
 
 
 def estimate_offset_by_correlation(
-    spec_a: StreamSpec,
-    spec_b: StreamSpec,
+    spec_a: SpecLike,
+    spec_b: SpecLike,
     cols: Sequence[Sequence[str] | str] | tuple[str, str] = (
         "veh_speed_m_s",
         "speed_m_s",
@@ -144,8 +160,9 @@ def estimate_offset_by_correlation(
 ) -> float:
     """Estimate the time offset between two streams using correlation.
 
-    Returns the offset (in seconds) that should be added to ``spec_a`` so that
-    it best aligns with ``spec_b``.
+    Returns the lag (in seconds) of ``spec_a`` relative to ``spec_b``. A positive
+    value indicates that ``spec_a`` should be advanced (i.e. its clock offset
+    reduced) to align with ``spec_b``.
     """
 
     if grid_hz <= 0:
@@ -153,8 +170,11 @@ def estimate_offset_by_correlation(
     if max_lag_s < 0:
         raise ValueError("max_lag_s must be non-negative")
 
+    stream_a = as_spec(spec_a, default_name="stream_a")
+    stream_b = as_spec(spec_b, default_name="stream_b")
+
     if cols is None:
-        cols = (spec_a.ref_cols, spec_b.ref_cols)
+        cols = (stream_a.ref_cols, stream_b.ref_cols)
 
     if len(cols) != 2:
         raise ValueError("cols must provide two column specifications")
@@ -164,16 +184,16 @@ def estimate_offset_by_correlation(
             return [value]
         return list(value)
 
-    cols_a = _as_iterable(cols[0]) if cols[0] else list(spec_a.ref_cols)
-    cols_b = _as_iterable(cols[1]) if cols[1] else list(spec_b.ref_cols)
+    cols_a = _as_iterable(cols[0]) if cols[0] else list(stream_a.ref_cols)
+    cols_b = _as_iterable(cols[1]) if cols[1] else list(stream_b.ref_cols)
 
     if not cols_a:
-        raise ValueError(f"{spec_a.name}: no reference columns provided")
+        raise ValueError(f"{stream_a.name}: no reference columns provided")
     if not cols_b:
-        raise ValueError(f"{spec_b.name}: no reference columns provided")
+        raise ValueError(f"{stream_b.name}: no reference columns provided")
 
-    signal_a = _aggregate_reference_signal(spec_a, cols_a)
-    signal_b = _aggregate_reference_signal(spec_b, cols_b)
+    signal_a = _aggregate_reference_signal(stream_a, cols_a)
+    signal_b = _aggregate_reference_signal(stream_b, cols_b)
 
     # Convert to relative seconds for interpolation.
     times_a = (signal_a.index - signal_a.index[0]).total_seconds()
@@ -197,9 +217,9 @@ def estimate_offset_by_correlation(
     std_a = interp_a.std()
     std_b = interp_b.std()
     if std_a == 0 or np.isnan(std_a):
-        raise ValueError(f"{spec_a.name}: interpolated signal has zero variance")
+        raise ValueError(f"{stream_a.name}: interpolated signal has zero variance")
     if std_b == 0 or np.isnan(std_b):
-        raise ValueError(f"{spec_b.name}: interpolated signal has zero variance")
+        raise ValueError(f"{stream_b.name}: interpolated signal has zero variance")
 
     interp_a /= std_a
     interp_b /= std_b
@@ -239,6 +259,8 @@ def estimate_offset_by_correlation(
 
 __all__ = [
     "StreamSpec",
+    "SpecLike",
+    "as_spec",
     "synthesize_timestamps",
     "estimate_offset_by_correlation",
 ]
