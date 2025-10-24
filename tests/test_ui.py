@@ -205,6 +205,53 @@ def test_analysis_applies_column_mapping() -> None:
     assert "NOx_mg_per_km" in kpis
 
 
+def test_analysis_accepts_inline_mapping_json() -> None:
+    mapping_json = json.dumps(
+        {
+            "pems": {
+                "timestamp": "Time",
+                "exhaust_flow_kg_s": "ExhFlow_g_s",
+                "nox_mg_s": "NOx_ug_s",
+                "pn_1_s": "PN_count",
+                "veh_speed_m_s": "Speed_m_s",
+            },
+            "gps": {
+                "timestamp": "Time",
+                "lat": "Latitude",
+                "lon": "Longitude",
+                "speed_m_s": "Speed_m_s",
+            },
+            "ecu": {
+                "timestamp": "Time",
+                "veh_speed_m_s": "VehicleSpeed",
+                "engine_speed_rpm": "EngineRPM",
+            },
+            "units": {
+                "nox_mg_s": "ug/s",
+                "exhaust_flow_kg_s": "g/s",
+            },
+        }
+    )
+
+    response = client.post(
+        "/analyze",
+        data={"mapping_json": mapping_json},
+        files={
+            "pems_file": ("pems.csv", CUSTOM_PEMS.encode("utf-8"), "text/csv"),
+            "gps_file": ("gps.csv", CUSTOM_GPS.encode("utf-8"), "text/csv"),
+            "ecu_file": ("ecu.csv", CUSTOM_ECU.encode("utf-8"), "text/csv"),
+        },
+    )
+    assert response.status_code == 200
+    payload = _extract_results_payload(response.text)
+
+    chart = payload.get("analysis", {}).get("chart", {})
+    pollutants = chart.get("pollutants", [])
+    nox_series = next((item for item in pollutants if item.get("key") == "NOx"), None)
+    assert nox_series is not None
+    assert nox_series["values"][0] == pytest.approx(120.0, rel=1e-6)
+
+
 def test_analysis_reports_missing_required_column_from_mapping() -> None:
     mapping_payload = {
         "gps": {
