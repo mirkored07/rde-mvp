@@ -609,6 +609,8 @@ def _prepare_results(
     result: AnalysisResult,
     evaluation: PackEvaluation,
     diagnostics: Diagnostics | dict[str, Any] | None = None,
+    *,
+    effective_mapping: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     overall = result.analysis.get("overall", {})
     completeness = overall.get("completeness") or {}
@@ -787,6 +789,22 @@ def _prepare_results(
 
     if diagnostics is not None:
         payload["diagnostics"] = to_dict(diagnostics) if isinstance(diagnostics, Diagnostics) else diagnostics
+
+    analysis_section = payload.get("analysis")
+    if isinstance(analysis_section, dict):
+        meta = analysis_section.get("meta")
+        if not isinstance(meta, dict):
+            meta = {}
+        if effective_mapping:
+            mapping_dict = dict(effective_mapping)
+            meta["mapping_applied"] = True
+            meta["mapping_keys"] = {
+                "pems": sorted(list((mapping_dict.get("pems") or {}).keys())),
+                "ecu": sorted(list((mapping_dict.get("ecu") or {}).keys())),
+            }
+        else:
+            meta["mapping_applied"] = False
+        analysis_section["meta"] = meta
 
     return payload
 
@@ -1063,27 +1081,58 @@ async def analyze(request: Request) -> Response:
                 repair_small_gaps=True,
                 repair_threshold_s=3.0,
             )
-            engine = AnalysisEngine(_load_analysis_rules())
-            analysis_result = engine.analyze(fused)
-            pack = _load_regulation_pack()
-            evaluation = evaluate_pack(analysis_result.analysis, pack)
-            results_payload = _prepare_results(analysis_result, evaluation, diagnostics)
-            if results_payload is not None:
-                analysis_section = results_payload.get("analysis") or {}
-                existing_chart = analysis_section.get("chart") or {}
-                try:
-                    df_for_chart = locals().get("fused") or pems_df
-                    pollutant_chart = build_pollutant_chart(df_for_chart)
-                except Exception:
-                    pollutant_chart = {"pollutants": []}
-                chart_payload = dict(existing_chart)
-                chart_payload.update(pollutant_chart)
-                analysis_section["chart"] = chart_payload
-                analysis_section["meta"] = analysis_section.get("meta", {})
-                analysis_section["meta"]["mapping_applied"] = bool(effective_mapping)
-                results_payload["analysis"] = analysis_section
-        except Exception as exc:  # pragma: no cover - user feedback path
-            errors.append(str(exc))
+           
+# --- build analysis & evaluation ---
+
+engine = AnalysisEngine(load_analysis_rules())
+analysis_result = engine.analyze(fused)
+pack = _load_regulation_pack()
+evaluation = evaluate_pack(analysis_result, analysis, pack)
+
+# Prepare payload section-by-section
+results_payload = _prepare_results(analysis_result, evaluation, diagnostics)
+if results_payload is None:
+    results_payload = {}
+
+# Ensure we have a proper analysis section
+analysis_section = results_payload.get("analysis") or {}
+existing_chart = analysis_section.get("chart") or {}
+
+# ---- Chart: inject pollutant time-series ----
+try:
+    from src.app.analysis.charts import build_pollutant_chart
+    # Prefer fully fused dataframe; if not present, use normalized PEMS
+    df_for_chart = locals().get("fused", None) or pems_df
+    pollutant_chart = build_pollutant_chart(df_for_chart)
+except Exception:
+    pollutant_chart = {"pollutants": []}
+
+# Merge/replace chart
+chart_out = dict(existing_chart)
+chart_out.update(pollutant_chart)  # guarantees key 'pollutants'
+analysis_section["chart"] = chart_out
+
+# ---- Mapping meta: let tests verify a mapping was applied ----
+meta = analysis_section.get("meta", {})
+meta["mapping_applied"] = bool(effective_mapping)
+if effective_mapping:
+    meta["mapping_keys"] = {
+        "pems": sorted(list((effective_mapping.get("pems") or {}).keys())),
+        "ecu":  sorted(list((effective_mapping.get("ecu") or {}).keys())),
+    }
+analysis_section["meta"] = meta
+
+# Write back
+results_payload["analysis"] = analysis_section
+
+# If the request came from a browser, render HTML; otherwise return JSON.
+try:
+    # keep the existing try/except structure you already have below
+    pass
+except Exception as exc:
+    ...
+
+ 
 
     status_code = status.HTTP_400_BAD_REQUEST if errors else status.HTTP_200_OK
 
