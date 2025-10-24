@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 
 import pandas as pd
+from pandas.api.types import is_numeric_dtype
 from pint.errors import DimensionalityError, UndefinedUnitError
 
 from src.app.data.schemas import (
@@ -155,7 +156,9 @@ def _normalize(
     for column in df.columns:
         if column == "timestamp":
             continue
-        df[column] = pd.to_numeric(df[column], errors="coerce")
+        series = df[column]
+        if not is_numeric_dtype(series):
+            df[column] = pd.to_numeric(series, errors="coerce")
 
     df = _apply_units(df, units_dict)
 

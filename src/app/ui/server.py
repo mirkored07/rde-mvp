@@ -1003,13 +1003,15 @@ async def analyze(request: Request) -> Response:
     mapping_state: dict[str, DatasetMapping] = {}
     resolved_mapping: dict[str, Any] = {}
     if not errors:
+        mapping_inline_raw = fields.get("mapping")
+        mapping_inline_raw = mapping_inline_raw if mapping_inline_raw else None
         mapping_json_raw = fields.get("mapping_json")
         mapping_json_raw = mapping_json_raw if mapping_json_raw else None
         mapping_name_raw = fields.get("mapping_name")
         mapping_name_raw = mapping_name_raw if mapping_name_raw else None
         try:
             mapping_state, resolved_mapping = _resolve_mapping(
-                mapping_json_raw,
+                mapping_inline_raw or mapping_json_raw,
                 mapping_name_raw,
                 fields.get("mapping_payload"),
             )
