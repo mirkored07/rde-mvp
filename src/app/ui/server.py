@@ -608,6 +608,8 @@ def _prepare_results(
     result: AnalysisResult,
     evaluation: PackEvaluation,
     diagnostics: Diagnostics | dict[str, Any] | None = None,
+    *,
+    effective_mapping: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     overall = result.analysis.get("overall", {})
     completeness = overall.get("completeness") or {}
@@ -786,6 +788,22 @@ def _prepare_results(
 
     if diagnostics is not None:
         payload["diagnostics"] = to_dict(diagnostics) if isinstance(diagnostics, Diagnostics) else diagnostics
+
+    analysis_section = payload.get("analysis")
+    if isinstance(analysis_section, dict):
+        meta = analysis_section.get("meta")
+        if not isinstance(meta, dict):
+            meta = {}
+        if effective_mapping:
+            mapping_dict = dict(effective_mapping)
+            meta["mapping_applied"] = True
+            meta["mapping_keys"] = {
+                "pems": sorted(list((mapping_dict.get("pems") or {}).keys())),
+                "ecu": sorted(list((mapping_dict.get("ecu") or {}).keys())),
+            }
+        else:
+            meta["mapping_applied"] = False
+        analysis_section["meta"] = meta
 
     return payload
 
@@ -1064,7 +1082,12 @@ async def analyze(request: Request) -> Response:
             analysis_result = engine.analyze(fused)
             pack = _load_regulation_pack()
             evaluation = evaluate_pack(analysis_result.analysis, pack)
-            results_payload = _prepare_results(analysis_result, evaluation, diagnostics)
+            results_payload = _prepare_results(
+                analysis_result,
+                evaluation,
+                diagnostics,
+                effective_mapping=resolved_mapping,
+            )
         except Exception as exc:  # pragma: no cover - user feedback path
             errors.append(str(exc))
 

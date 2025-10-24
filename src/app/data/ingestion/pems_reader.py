@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
+import numpy as np
 import pandas as pd
 from pandas.api.types import is_numeric_dtype
 from pint.errors import DimensionalityError, UndefinedUnitError
@@ -80,10 +81,15 @@ def _convert_series(
     converter,
 ) -> pd.Series:
     mask = series.notna()
+    converted = series.astype(float, copy=True)
     if not mask.any():
-        return series
-    converted = series.copy()
-    converted.loc[mask] = [converter(float(value), unit) for value in series.loc[mask]]
+        return converted
+
+    values = np.fromiter(
+        (converter(float(value), unit) for value in series.loc[mask]),
+        dtype=float,
+    )
+    converted.loc[mask] = values
     return converted
 
 
