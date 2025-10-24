@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import functools
-import html
 import io
 import json
 import math
@@ -14,7 +13,9 @@ from typing import Any
 
 import pandas as pd
 from fastapi import APIRouter, HTTPException, Request, status
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
+from fastapi.templating import Jinja2Templates
+from starlette.responses import TemplateResponse
 
 from src.app.data.analysis import AnalysisEngine, AnalysisResult, load_rules
 from src.app.data.regulation import PackEvaluation, evaluate_pack, load_pack
@@ -38,7 +39,10 @@ from src.app.utils.mappings import (
 router = APIRouter(include_in_schema=False)
 
 template_dir = pathlib.Path(__file__).resolve().parent / "templates"
-_index_template_cache: str | None = None
+templates = Jinja2Templates(directory=str(template_dir))
+
+BADGE_PASS = "px-2 py-1 rounded bg-green-600/10 text-green-700 dark:text-green-300 border border-green-600/20"
+BADGE_FAIL = "px-2 py-1 rounded bg-red-600/10 text-red-700 dark:text-red-300 border border-red-600/20"
 
 MAX_UPLOAD_MB = 50
 GPS_EXTENSIONS = {".csv", ".nmea", ".gpx", ".txt"}
@@ -605,177 +609,24 @@ def _prepare_results(
     return payload
 
 
-def _render_diagnostics_panel(diagnostics: dict[str, Any] | None) -> str:
-    data = diagnostics or {}
-    checks = data.get("checks") or []
-    summary = data.get("summary") or {}
-    repaired = data.get("repaired_spans") or []
-
-    if not checks:
-        return (
-            '<div class="mt-6 rounded-3xl border border-dashed border-slate-300 bg-white/60 p-6 text-sm '
-            "text-slate-500 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-400">"
-            "No diagnostics were produced for this dataset.</div>"
-        )
-
-    def _summary_badge(level: str, count: int) -> str:
-        label = level.upper()
-        classes = {
-            "pass": "bg-emerald-500/15 text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-200",
-            "warn": "bg-amber-500/20 text-amber-600 dark:bg-amber-500/25 dark:text-amber-200",
-            "fail": "bg-rose-500/15 text-rose-600 dark:bg-rose-500/20 dark:text-rose-200",
-        }.get(level, "bg-slate-500/15 text-slate-600 dark:bg-slate-700/60 dark:text-slate-300")
-        return (
-            '<span class="inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-semibold '
-            f'{classes}"><span class="h-2 w-2 rounded-full bg-current"></span>'
-            f'{html.escape(label)}: {html.escape(str(count))}</span>'
-        )
-
-    summary_badges = [
-        _summary_badge("pass", int(summary.get("pass", 0))),
-        _summary_badge("warn", int(summary.get("warn", 0))),
-        _summary_badge("fail", int(summary.get("fail", 0))),
-    ]
-
-    def _level_badge(level: str) -> str:
-        label = (level or "warn").upper()
-        classes = {
-            "pass": "bg-emerald-500/15 text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-200",
-            "warn": "bg-amber-500/20 text-amber-600 dark:bg-amber-500/25 dark:text-amber-200",
-            "fail": "bg-rose-500/15 text-rose-600 dark:bg-rose-500/20 dark:text-rose-200",
-        }.get(level, "bg-slate-500/15 text-slate-600 dark:bg-slate-700/60 dark:text-slate-300")
-        return (
-            f'<span class="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold {classes}">'  # noqa: E501
-            f"{html.escape(label)}</span>"
-        )
-
-    items: list[str] = []
-    for entry in checks:
-        title = html.escape(str(entry.get("title", "")))
-        details = html.escape(str(entry.get("details", "")))
-        subject = entry.get("subject")
-        subject_html = (
-            f'<p class="text-[11px] font-semibold uppercase tracking-[0.3em] text-slate-400 dark:text-slate-500">{html.escape(str(subject))}</p>'
-            if subject
-            else ""
-        )
-        level = str(entry.get("level") or "warn").lower()
-        badge_html = _level_badge(level)
-        count = entry.get("count")
-        count_html = (
-            f'<p class="mt-2 text-xs text-slate-500 dark:text-slate-400">Occurrences: {html.escape(str(count))}</p>'
-            if isinstance(count, (int, float)) and count
-            else ""
-        )
-        items.append(
-            '<li class="rounded-2xl border border-slate-200 bg-white/85 p-4 shadow-sm '
-            'dark:border-slate-700 dark:bg-slate-900/70">'
-            '<div class="flex items-start justify-between gap-4">'
-            f'<div>{subject_html}<p class="text-sm font-semibold text-slate-900 dark:text-white">{title}</p></div>'
-            f'{badge_html}'
-            '</div>'
-            f'<p class="mt-2 text-sm text-slate-600 dark:text-slate-300">{details}</p>'
-            f'{count_html}'
-            '</li>'
-        )
-
-    repaired_html = ""
-    if repaired:
-        repairs_list = []
-        for span in repaired:
-            start = html.escape(str(span.get("start", "")))
-            end = html.escape(str(span.get("end", "")))
-            seconds = span.get("seconds")
-            inserted = span.get("inserted")
-            parts = []
-            if start or end:
-                parts.append(f"{start} → {end}")
-            if isinstance(seconds, (int, float)):
-                parts.append(f"{float(seconds):.2f} s")
-            if isinstance(inserted, (int, float)):
-                parts.append(f"{int(inserted)} rows")
-            repairs_list.append(f"<li>{' · '.join(parts)}</li>")
-        repairs_items = "".join(repairs_list)
-        repaired_html = (
-            '<div class="mt-4 rounded-2xl border border-dashed border-slate-200 bg-white/80 p-4 text-xs '
-            'text-slate-500 dark:border-slate-700 dark:bg-slate-900/60 dark:text-slate-400">'
-            '<p class="font-semibold uppercase tracking-[0.3em] text-slate-400 dark:text-slate-500">Repaired spans</p>'
-            f'<ul class="mt-2 list-disc space-y-1 pl-4">{repairs_items}</ul>'
-            '</div>'
-        )
-
-    return (
-        '<div class="mt-6 rounded-3xl border border-slate-200/70 bg-white/95 p-6 shadow-card '
-        'dark:border-slate-800/70 dark:bg-slate-900/80">'
-        '<div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">'
-        '<div>'
-        '<p class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-500 dark:text-slate-400">Data diagnostics</p>'
-        '<p class="mt-2 max-w-xl text-sm text-slate-500 dark:text-slate-400">Automated checks covering sampling cadence, gaps, GPS jumps, and speed spikes.</p>'
-        '</div>'
-        f'<div class="flex flex-wrap items-center gap-2">{"".join(summary_badges)}</div>'
-        '</div>'
-        f'<ul class="mt-6 space-y-3">{"".join(items)}</ul>'
-        f'{repaired_html}'
-        '</div>'
-    )
-
-
-def _render_results_html(
+def _build_results_context(
     results: dict[str, Any] | None,
     errors: list[str],
     *,
     include_export_controls: bool = True,
-) -> str:
-    if errors:
-        items = "".join(f"<li>{html.escape(message)}</li>" for message in errors)
-        return (
-            '<div class="rounded-3xl border border-rose-200/70 bg-rose-50/70 p-6 text-rose-700 shadow-inner '
-            'dark:border-rose-500/40 dark:bg-rose-500/10 dark:text-rose-100">'
-            "<h3 class='text-lg font-semibold'>We couldn't analyze your files</h3>"
-            f"<ul class='mt-3 list-disc space-y-2 pl-5 text-sm'>{items}</ul></div>"
-        )
+) -> dict[str, Any]:
+    context: dict[str, Any] = {
+        "errors": errors,
+        "has_errors": bool(errors),
+        "include_export_controls": include_export_controls,
+        "has_results": bool(results) and not errors,
+        "results": results,
+    }
 
-    if results is None:
-        return (
-            '<div class="rounded-3xl border border-dashed border-slate-300 bg-white/60 p-10 text-center text-slate-500 '
-            'shadow-inner dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-400">'
-            "<p class='text-lg font-medium'>Upload your telemetry files to see KPIs, interactive charts, and a live map of the route.</p></div>"
-        )
+    if errors or results is None:
+        return context
 
     regulation = results.get("regulation") or {}
-    analysis = results.get("analysis") or {}
-    diagnostics = results.get("diagnostics") or {}
-    evidence = results.get("evidence") or []
-
-    def _escape_text(value: Any) -> str:
-        return html.escape(str(value)) if value not in (None, "") else ""
-
-    reg_ok = bool(regulation.get("ok"))
-    reg_label = _escape_text(regulation.get("label") or ("PASS" if reg_ok else "FAIL"))
-    status_classes = (
-        "bg-emerald-500/15 text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-200"
-        if reg_ok
-        else "bg-rose-500/15 text-rose-600 dark:bg-rose-500/20 dark:text-rose-200"
-    )
-    ping_color = "bg-emerald-400/60" if reg_ok else "bg-rose-400/60"
-    dot_color = "bg-emerald-500" if reg_ok else "bg-rose-500"
-
-    pack_label_raw = (
-        regulation.get("pack_title")
-        or regulation.get("pack_id")
-        or "Regulation pack"
-    )
-    pack_label = _escape_text(pack_label_raw)
-    version_raw = regulation.get("version")
-    version_badge = (
-        f'<span class="ml-2 inline-flex items-center rounded-full bg-slate-500/10 px-2 py-0.5 text-xs font-semibold '
-        f'text-slate-600 dark:bg-slate-700/60 dark:text-slate-200">v{_escape_text(version_raw)}</span>'
-        if version_raw not in (None, "")
-        else ""
-    )
-    legal_source_html = _escape_text(regulation.get("legal_source"))
-    pack_id_html = _escape_text(regulation.get("pack_id"))
-
     counts = regulation.get("counts") or {}
 
     def _as_int(value: Any) -> int:
@@ -784,385 +635,114 @@ def _render_results_html(
         except (TypeError, ValueError):
             return 0
 
-    mandatory_passed = _as_int(counts.get("mandatory_passed"))
-    mandatory_total = _as_int(counts.get("mandatory_total"))
-    optional_passed = _as_int(counts.get("optional_passed"))
-    optional_total = _as_int(counts.get("optional_total"))
+    reg_ok = bool(regulation.get("ok"))
+    reg_label = str(regulation.get("label") or ("PASS" if reg_ok else "FAIL"))
+    pack_title = regulation.get("pack_title") or regulation.get("pack_id") or "Regulation pack"
 
-    def _rule_card(label: str, passed: int, total: int, hint: str) -> str:
-        if total:
-            value_text = f"{passed}/{total}"
-            hint_text = hint
-        else:
-            value_text = "0"
-            hint_text = "Not configured"
-        return (
-            '<div class="rounded-2xl border border-slate-200 bg-white/80 px-5 py-4 text-center shadow-sm '
-            'dark:border-slate-700 dark:bg-slate-900/70">'
-            f'<dt class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400 dark:text-slate-500">{html.escape(label)}</dt>'
-            f'<dd class="mt-2 text-lg font-semibold text-slate-900 dark:text-white">{html.escape(value_text)}</dd>'
-            f'<p class="mt-1 text-xs text-slate-500 dark:text-slate-400">{html.escape(hint_text)}</p>'
-            '</div>'
-        )
+    regulation_view = {
+        "label": reg_label,
+        "ok": reg_ok,
+        "status_class": BADGE_PASS if reg_ok else BADGE_FAIL,
+        "ping_class": "bg-emerald-400/60" if reg_ok else "bg-rose-400/60",
+        "dot_class": "bg-emerald-500" if reg_ok else "bg-rose-500",
+        "pack_title": pack_title,
+        "version": regulation.get("version"),
+        "legal_source": regulation.get("legal_source"),
+        "pack_id": regulation.get("pack_id"),
+        "counts": {
+            "mandatory_passed": _as_int(counts.get("mandatory_passed")),
+            "mandatory_total": _as_int(counts.get("mandatory_total")),
+            "optional_passed": _as_int(counts.get("optional_passed")),
+            "optional_total": _as_int(counts.get("optional_total")),
+        },
+    }
 
-    regulation_cards = "".join(
-        (
-            _rule_card("Mandatory rules", mandatory_passed, mandatory_total, "All must pass"),
-            _rule_card("Optional rules", optional_passed, optional_total, "Informational"),
-        )
-    )
-
-    pack_line = (
-        '<p class="mt-3 text-sm text-slate-500 dark:text-slate-400">Pack: '
-        f'<span class="font-semibold text-slate-900 dark:text-white">{pack_label}</span>{version_badge}</p>'
-        if pack_label
-        else ""
-    )
-    legal_line = (
-        f'<p class="text-xs text-slate-500 dark:text-slate-400">Legal source: {legal_source_html}</p>'
-        if legal_source_html
-        else ""
-    )
-    id_line = (
-        f'<p class="text-xs text-slate-400 dark:text-slate-500">Identifier: <code>{pack_id_html}</code></p>'
-        if pack_id_html and pack_id_html != pack_label
-        else ""
-    )
-
-    regulation_block = (
-        '<div class="rounded-2xl border border-slate-200 bg-white/90 p-6 shadow-sm '
-        'dark:border-slate-700 dark:bg-slate-900/70">'
-        '<div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">'
-        '<div>'
-        '<p class="text-xs font-semibold uppercase tracking-[0.4em] text-slate-500 dark:text-slate-400">Regulation verdict</p>'
-        f'<span class="mt-3 inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold {status_classes}">' \
-        f'<span class="relative flex h-2.5 w-2.5"><span class="absolute inline-flex h-full w-full animate-ping rounded-full {ping_color}"></span>'
-        f'<span class="relative inline-flex h-2.5 w-2.5 rounded-full {dot_color}"></span></span>{reg_label}</span>'
-        f'{pack_line}{legal_line}{id_line}'
-        '</div>'
-        f'<dl class="grid gap-4 sm:grid-cols-2 lg:gap-6">{regulation_cards}</dl>'
-        '</div>'
-        '</div>'
-    )
-
-    evidence_rows = []
-    for entry in evidence:
-        passed = bool(entry.get("passed"))
-        status_badge = (
-            "bg-emerald-500/15 text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-200"
-            if passed
-            else "bg-rose-500/15 text-rose-600 dark:bg-rose-500/20 dark:text-rose-200"
-        )
-        mandatory = bool(entry.get("mandatory"))
-        mandatory_badge = (
-            "bg-amber-500/20 text-amber-600 dark:bg-amber-500/25 dark:text-amber-200"
-            if mandatory
-            else "bg-slate-500/15 text-slate-600 dark:bg-slate-700/60 dark:text-slate-300"
-        )
-        mandatory_label = "Mandatory" if mandatory else "Optional"
-        requirement = _escape_text(entry.get("requirement"))
-        observed = _escape_text(entry.get("observed"))
-
-        context_items = entry.get("context") or []
-        context_html = "".join(
-            f'<li><span class="font-medium text-slate-900 dark:text-white">{_escape_text(item.get("label"))}:</span> '
-            f'{_escape_text(item.get("value"))}</li>'
-            for item in context_items
-        )
-        if context_html:
-            context_html = (
-                "<ul class='mt-2 space-y-1 text-xs text-slate-500 dark:text-slate-400'>"
-                + context_html
-                + "</ul>"
-            )
-
-        detail = entry.get("detail")
-        detail_html = (
-            f'<p class="mt-2 text-xs text-amber-600 dark:text-amber-300">{_escape_text(detail)}</p>'
-            if detail
-            else ""
-        )
-
-        notes_list = entry.get("notes") or []
-        notes_html = "".join(
-            f'<p class="mt-2 text-xs italic text-slate-500 dark:text-slate-400">{_escape_text(note)}</p>'
-            for note in notes_list
-        )
-
-        citation_parts = []
-        legal_source = entry.get("legal_source")
-        article = entry.get("article")
-        if legal_source:
-            citation_parts.append(str(legal_source))
-        if article:
-            citation_parts.append(str(article))
-        citation_html = (
-            '<div class="mt-1 text-xs text-slate-500 dark:text-slate-400">'
-            + html.escape(" · ".join(citation_parts))
-            + '</div>'
-            if citation_parts
-            else ""
-        )
-
-        metric = entry.get("metric")
-        metric_html = (
-            f'<div class="mt-1 text-xs text-slate-500 dark:text-slate-400">Metric: <code>{_escape_text(metric)}</code></div>'
-            if metric
-            else ""
-        )
-
-        scope = entry.get("scope")
-        scope_badge = (
-            f'<span class="ml-2 inline-flex items-center rounded-full bg-slate-500/15 px-2 py-0.5 text-[11px] font-semibold '
-            f'uppercase tracking-wider text-slate-600 dark:bg-slate-700/60 dark:text-slate-300">{_escape_text(scope)}</span>'
-            if scope
-            else ""
-        )
-
-        evidence_rows.append(
-            '<tr>'
-            f'<td class="px-4 py-4 align-top">'
-            f'<div class="font-semibold text-slate-900 dark:text-white">{_escape_text(entry.get("title"))}{scope_badge}</div>'
-            f'{citation_html}{metric_html}{notes_html}'
-            '</td>'
-            f'<td class="px-4 py-4 align-top"><div class="font-semibold text-slate-900 dark:text-white">{requirement}</div></td>'
-            f'<td class="px-4 py-4 align-top"><div class="font-semibold text-slate-900 dark:text-white">{observed}</div>'
-            f'{context_html}{detail_html}</td>'
-            f'<td class="px-4 py-4 align-top"><div class="flex flex-col gap-2">'
-            f'<span class="inline-flex items-center justify-center rounded-full px-2.5 py-0.5 text-xs font-semibold {status_badge}">' \
-            f'{"Pass" if passed else "Fail"}</span>'
-            f'<span class="inline-flex items-center justify-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold {mandatory_badge}">' \
-            f'{mandatory_label}</span></div></td>'
-            '</tr>'
-        )
-
-    if evidence_rows:
-        evidence_table = (
-            '<div class="mt-6 overflow-hidden rounded-2xl border border-slate-200 bg-white/80 shadow-sm '
-            'dark:border-slate-700 dark:bg-slate-900/70">'
-            '<table class="min-w-full divide-y divide-slate-200 dark:divide-slate-700">'
-            '<thead class="bg-slate-50/70 text-xs font-semibold uppercase tracking-[0.3em] text-slate-500 '
-            'dark:bg-slate-900/60 dark:text-slate-400"><tr>'
-            '<th scope="col" class="px-4 py-3 text-left">Rule</th>'
-            '<th scope="col" class="px-4 py-3 text-left">Requirement</th>'
-            '<th scope="col" class="px-4 py-3 text-left">Observed</th>'
-            '<th scope="col" class="px-4 py-3 text-left">Status</th>'
-            '</tr></thead>'
-            f'<tbody class="divide-y divide-slate-200 bg-white/80 text-sm text-slate-600 '
-            f'dark:divide-slate-800 dark:bg-slate-900/60 dark:text-slate-300">{"".join(evidence_rows)}</tbody></table></div>'
-        )
-    else:
-        evidence_table = (
-            '<div class="mt-6 rounded-2xl border border-dashed border-slate-300 bg-slate-100/60 p-6 text-sm text-slate-500 '
-            'dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-400">'
-            'No regulation evidence available.</div>'
-        )
-
-    diagnostics_block = _render_diagnostics_panel(diagnostics)
-
-    metrics_html = "".join(
-        (
-            '<div class="rounded-2xl border border-slate-200 bg-white/80 px-5 py-4 text-center shadow-sm '
-            'dark:border-slate-700 dark:bg-slate-900/70">'
-            f'<dt class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400 dark:text-slate-500">'
-            f'{html.escape(metric.get("label", ""))}</dt>'
-            f'<dd class="mt-2 text-lg font-semibold text-slate-900 dark:text-white">'
-            f'{html.escape(metric.get("value", ""))}</dd></div>'
-        )
-        for metric in analysis.get("metrics", [])
-    )
-
-    bin_rows = []
-    for bin_info in analysis.get("bins", []):
-        valid = bool(bin_info.get("valid"))
-        badge_class = (
-            "bg-emerald-500/15 text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-200"
-            if valid
-            else "bg-rose-500/15 text-rose-600 dark:bg-rose-500/20 dark:text-rose-200"
-        )
-        kpis = bin_info.get("kpis") or []
-        if kpis:
-            kpi_html = "".join(
-                f'<li><span class="font-medium text-slate-900 dark:text-white">{html.escape(kpi.get("name", ""))}:</span> '
-                f'{html.escape(kpi.get("value", ""))}</li>'
-                for kpi in kpis
-            )
-            kpi_block = f"<ul class='space-y-1'>{kpi_html}</ul>"
-        else:
-            kpi_block = (
-                '<span class="text-xs uppercase tracking-[0.3em] text-slate-400 dark:text-slate-500">'
-                'No KPIs configured</span>'
-            )
-        bin_rows.append(
-            '<tr>'
-            f'<td class="px-4 py-4"><span class="font-semibold text-slate-900 dark:text-white">{html.escape(bin_info.get("name", ""))}</span>'
-            f'<span class="ml-2 inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold {badge_class}">' \
-            f'{"Pass" if valid else "Fail"}</span></td>'
-            f'<td class="px-4 py-4">{html.escape(bin_info.get("time", ""))}</td>'
-            f'<td class="px-4 py-4">{html.escape(bin_info.get("distance", ""))}</td>'
-            f'<td class="px-4 py-4">{kpi_block}</td>'
-            '</tr>'
-        )
-
-    if bin_rows:
-        bins_section = (
-            '<div class="overflow-hidden rounded-2xl border border-slate-200 bg-white/80 shadow-sm '
-            'dark:border-slate-700 dark:bg-slate-900/70">'
-            '<table class="min-w-full divide-y divide-slate-200 dark:divide-slate-700">'
-            '<thead class="bg-slate-50/70 text-xs font-semibold uppercase tracking-[0.3em] text-slate-500 '
-            'dark:bg-slate-900/60 dark:text-slate-400"><tr>'
-            '<th scope="col" class="px-4 py-3 text-left">Speed bin</th>'
-            '<th scope="col" class="px-4 py-3 text-left">Time (s)</th>'
-            '<th scope="col" class="px-4 py-3 text-left">Distance (km)</th>'
-            '<th scope="col" class="px-4 py-3 text-left">KPIs</th>'
-            '</tr></thead>'
-            f'<tbody class="divide-y divide-slate-200 bg-white/80 text-sm text-slate-600 '
-            f'dark:divide-slate-800 dark:bg-slate-900/60 dark:text-slate-300">{"".join(bin_rows)}</tbody></table></div>'
-        )
-    else:
-        bins_section = (
-            '<div class="rounded-2xl border border-dashed border-slate-300 bg-slate-100/60 p-6 text-sm text-slate-500 '
-            'dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-400">'
-            'Configure speed bins and KPIs in <code>data/rules/demo_rules.json</code> to populate this view.</div>'
-        )
-
+    analysis = results.get("analysis") or {}
     analysis_status = analysis.get("status") or {}
     analysis_ok = bool(analysis_status.get("ok"))
-    analysis_label = html.escape(str(analysis_status.get("label", "")))
-    analysis_status_classes = (
-        "bg-emerald-500/15 text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-200"
-        if analysis_ok
-        else "bg-rose-500/15 text-rose-600 dark:bg-rose-500/20 dark:text-rose-200"
+    analysis_label = str(analysis_status.get("label", ""))
+
+    analysis_view = {
+        "status": {
+            "ok": analysis_ok,
+            "label": analysis_label,
+            "class": BADGE_PASS if analysis_ok else BADGE_FAIL,
+        },
+        "metrics": analysis.get("metrics", []),
+        "bins": analysis.get("bins", []),
+        "summary_md": analysis.get("summary_md", ""),
+        "chart": analysis.get("chart", {}),
+        "map": analysis.get("map", {}),
+    }
+
+    diagnostics_data = results.get("diagnostics") or {}
+    diag_checks = diagnostics_data.get("checks") or []
+    diag_summary = diagnostics_data.get("summary") or {}
+    diag_repaired: list[str] = []
+    for span in diagnostics_data.get("repaired_spans") or []:
+        parts: list[str] = []
+        start_val = span.get("start")
+        end_val = span.get("end")
+        start_text = "" if start_val in (None, "") else str(start_val)
+        end_text = "" if end_val in (None, "") else str(end_val)
+        if start_text or end_text:
+            parts.append(f"{start_text} → {end_text}")
+        seconds = span.get("seconds")
+        if isinstance(seconds, (int, float)):
+            parts.append(f"{float(seconds):.2f} s")
+        inserted = span.get("inserted")
+        if isinstance(inserted, (int, float)):
+            parts.append(f"{int(inserted)} rows")
+        if parts:
+            diag_repaired.append(" · ".join(parts))
+
+    context.update(
+        {
+            "regulation": regulation_view,
+            "analysis": analysis_view,
+            "evidence": results.get("evidence", []),
+            "diagnostics": {
+                "checks": diag_checks,
+                "summary": diag_summary,
+                "repaired": diag_repaired,
+            },
+        }
     )
 
-    summary_json = json.dumps(analysis.get("summary_md", ""))
-    chart_json = json.dumps(analysis.get("chart", {}))
-    map_json = json.dumps(analysis.get("map", {}))
+    return context
 
-    analysis_block = (
-        '<div class="mt-10 rounded-3xl border border-slate-200/70 bg-white/95 p-8 shadow-card '
-        'dark:border-slate-800/70 dark:bg-slate-900/80">'
-        '<div class="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">'
-        '<div>'
-        '<p class="text-xs font-semibold uppercase tracking-[0.4em] text-slate-500 dark:text-slate-400">Analysis validity</p>'
-        f'<span class="mt-3 inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold {analysis_status_classes}">{analysis_label}</span>'
-        '<p class="mt-3 max-w-xl text-sm text-slate-500 dark:text-slate-400">Derived metrics from fused telemetry streams. Explore KPIs, charts, and the drive route.</p>'
-        '</div>'
-        f'<dl class="grid gap-4 sm:grid-cols-3">{metrics_html}</dl>'
-        '</div>'
-        '<div class="mt-8">'
-        '<div class="flex flex-wrap gap-2 border-b border-slate-200 dark:border-slate-700" role="tablist">'
-        '<button type="button" class="tab-trigger is-active" data-tab-target="summary" '
-        'aria-controls="analysis-tab-summary" aria-selected="true">Summary</button>'
-        '<button type="button" class="tab-trigger" data-tab-target="kpis" '
-        'aria-controls="analysis-tab-kpis" aria-selected="false">KPIs</button>'
-        '<button type="button" class="tab-trigger" data-tab-target="charts" '
-        'aria-controls="analysis-tab-charts" aria-selected="false">Charts</button>'
-        '<button type="button" class="tab-trigger" data-tab-target="map" '
-        'aria-controls="analysis-tab-map" aria-selected="false">Map</button>'
-        '</div>'
-        '<div class="mt-6 space-y-6">'
-        '<div id="analysis-tab-summary" class="tab-panel" data-tab-panel="summary">'
-        '<div id="analysis-summary" class="prose max-w-none prose-slate dark:prose-invert"></div></div>'
-        f'<div id="analysis-tab-kpis" class="tab-panel" data-tab-panel="kpis" hidden>{bins_section}</div>'
-        '<div id="analysis-tab-charts" class="tab-panel" data-tab-panel="charts" hidden>'
-        '<div id="analysis-chart" class="hidden h-80 w-full rounded-2xl border border-slate-200 bg-white/70 shadow-inner '
-        'dark:border-slate-700 dark:bg-slate-900/60" data-chart></div>'
-        '<div data-chart-empty class="flex h-80 items-center justify-center rounded-2xl border border-dashed border-slate-300 '
-        'bg-slate-100/60 text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-400">'
-        'Charts will appear once emissions or speed signals are available.</div></div>'
-        '<div id="analysis-tab-map" class="tab-panel" data-tab-panel="map" hidden>'
-        '<div id="analysis-map" class="hidden h-80 w-full overflow-hidden rounded-2xl border border-slate-200 '
-        'dark:border-slate-700" data-map></div>'
-        '<div data-map-empty class="flex h-80 items-center justify-center rounded-2xl border border-dashed border-slate-300 '
-        'bg-slate-100/60 text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-400">'
-        'Upload GPS data containing latitude and longitude to visualize the drive path.</div></div></div></div>'
-        f'<script id="summary-data" type="application/json">{summary_json}</script>'
-        f'<script id="chart-data" type="application/json">{chart_json}</script>'
-        f'<script id="map-data" type="application/json">{map_json}</script>'
-        '</div>'
-    )
 
-    export_controls = ""
-    if include_export_controls:
-        payload_json = html.escape(json.dumps(results))
-        export_controls = (
-            '<div class="mb-6 rounded-3xl border border-slate-200/70 bg-white/95 px-5 py-4 shadow-sm '
-            'dark:border-slate-700/60 dark:bg-slate-900/70">'
-            '<div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">'
-            '<div>'
-            '<p class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-500 dark:text-slate-400">Final report</p>'
-            '<p class="mt-1 text-sm text-slate-500 dark:text-slate-400">Download a portable version of the current results.</p>'
-            '</div>'
-            '<div class="flex flex-wrap items-center gap-2">'
-            '<button type="button" '
-            'class="inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 '
-            'px-4 py-2 text-sm font-semibold text-white shadow-md transition hover:shadow-lg focus-visible:outline-none '
-            'focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-slate-900 dark:from-sky-500 '
-            'dark:via-indigo-500 dark:to-indigo-600" data-download-pdf>'
-            'Download PDF'
-            '<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" '
-            'stroke-linecap="round" stroke-linejoin="round">'
-            '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>'
-            '<polyline points="7 10 12 15 17 10"></polyline>'
-            '<line x1="12" y1="15" x2="12" y2="3"></line>'
-            '</svg>'
-            '</button>'
-            '<button type="button" '
-            'class="inline-flex items-center gap-2 rounded-full border border-slate-300 px-4 py-2 text-sm font-semibold '
-            'text-slate-700 transition hover:border-slate-400 hover:bg-slate-100 focus-visible:outline-none '
-            'focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-slate-400 dark:border-slate-600 '
-            'dark:text-slate-200 dark:hover:border-slate-500 dark:hover:bg-slate-800 dark:focus-visible:ring-slate-500" '
-            'data-download-zip>'
-            'Download ZIP'
-            '<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" '
-            'stroke-linecap="round" stroke-linejoin="round">'
-            '<path d="M7 3h7l5 5v13a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"></path>'
-            '<polyline points="12 12 12 17"></polyline>'
-            '<polyline points="9 14 12 17 15 14"></polyline>'
-            '<line x1="12" y1="3" x2="12" y2="9"></line>'
-            '</svg>'
-            '</button>'
-            '</div>'
-            '</div>'
-            '<p data-export-error class="hidden text-sm font-medium text-rose-600 dark:text-rose-300"></p>'
-            f'<script type="application/json" data-report-payload>{payload_json}</script>'
-            '</div>'
+
+def _base_template_context(
+    request: Request,
+    *,
+    results: dict[str, Any] | None,
+    errors: list[str],
+    include_export_controls: bool = True,
+) -> dict[str, Any]:
+    context = {
+        "request": request,
+        "max_upload_mb": MAX_UPLOAD_MB,
+        "canonical_schema_json": _canonical_schema_json(),
+        "unit_hints_json": _unit_hints_json(),
+        "badge_pass": BADGE_PASS,
+        "badge_fail": BADGE_FAIL,
+    }
+    context.update(
+        _build_results_context(
+            results,
+            errors,
+            include_export_controls=include_export_controls,
         )
-
-    return (
-        '<section class="relative overflow-hidden rounded-3xl border border-slate-200/70 bg-white/95 p-8 shadow-card '
-        'backdrop-blur dark:border-slate-800/70 dark:bg-slate-900/80" data-component="analysis-results">'
-        f'{export_controls}'
-        f'{regulation_block}'
-        f'{diagnostics_block}'
-        '<div class="mt-6">'
-        '<h3 class="text-lg font-semibold text-slate-900 dark:text-white">Rule evidence</h3>'
-        '<p class="mt-1 text-sm text-slate-500 dark:text-slate-400">Thresholds are demo placeholders and do not represent legal advice.</p>'
-        f'{evidence_table}'
-        '</div>'
-        f'{analysis_block}'
-        '</section>'
     )
+    return context
 
 
-def _render_index(results_html: str, *, max_upload_mb: int) -> str:
-    global _index_template_cache
-    if _index_template_cache is None:
-        _index_template_cache = (template_dir / "index.html").read_text(encoding="utf-8")
-    page = _index_template_cache.replace("{{RESULTS_SECTION}}", results_html)
-    page = page.replace("{{MAX_UPLOAD_MB}}", str(max_upload_mb))
-    page = page.replace("{{CANONICAL_SCHEMA_JSON}}", _canonical_schema_json())
-    page = page.replace("{{UNIT_HINTS_JSON}}", _unit_hints_json())
-    return page
 
-
-@router.get("/", response_class=HTMLResponse)
-async def index(request: Request) -> HTMLResponse:
-    results_html = _render_results_html(None, [])
-    page = _render_index(results_html, max_upload_mb=MAX_UPLOAD_MB)
-    return HTMLResponse(page)
-
+@router.get("/")
+async def index(request: Request) -> TemplateResponse:
+    context = _base_template_context(request, results=None, errors=[])
+    return templates.TemplateResponse("index.html", context)
 
 
 async def _extract_form_data(
@@ -1226,8 +806,8 @@ async def _extract_form_data(
     return files, fields
 
 
-@router.post("/analyze", response_class=HTMLResponse)
-async def analyze(request: Request) -> HTMLResponse:
+@router.post("/analyze")
+async def analyze(request: Request) -> TemplateResponse:
     errors: list[str] = []
     results_payload: dict[str, Any] | None = None
 
@@ -1282,15 +862,32 @@ async def analyze(request: Request) -> HTMLResponse:
         except Exception as exc:  # pragma: no cover - user feedback path
             errors.append(str(exc))
 
-    results_html = _render_results_html(results_payload, errors)
+    status_code = status.HTTP_400_BAD_REQUEST if errors else status.HTTP_200_OK
 
     if request.headers.get("hx-request") == "true":
-        status_code = status.HTTP_400_BAD_REQUEST if errors else status.HTTP_200_OK
-        return HTMLResponse(results_html, status_code=status_code)
+        context = _build_results_context(
+            results_payload,
+            errors,
+            include_export_controls=True,
+        )
+        context.update({
+            "request": request,
+            "badge_pass": BADGE_PASS,
+            "badge_fail": BADGE_FAIL,
+        })
+        return templates.TemplateResponse(
+            "results.html",
+            context,
+            status_code=status_code,
+        )
 
-    page = _render_index(results_html, max_upload_mb=MAX_UPLOAD_MB)
-    status_code = status.HTTP_400_BAD_REQUEST if errors else status.HTTP_200_OK
-    return HTMLResponse(page, status_code=status_code)
+    context = _base_template_context(
+        request,
+        results=results_payload,
+        errors=errors,
+        include_export_controls=True,
+    )
+    return templates.TemplateResponse("index.html", context, status_code=status_code)
 
 
 @router.get("/mapping_profiles", include_in_schema=False)

@@ -1,0 +1,329 @@
+{% set diag_level_classes = {
+    'pass': 'bg-emerald-500/15 text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-200',
+    'warn': 'bg-amber-500/20 text-amber-600 dark:bg-amber-500/25 dark:text-amber-200',
+    'fail': 'bg-rose-500/15 text-rose-600 dark:bg-rose-500/20 dark:text-rose-200'
+} %}
+
+{% if has_errors %}
+<div class="rounded-3xl border border-rose-200/70 bg-rose-50/70 p-6 text-rose-700 shadow-inner dark:border-rose-500/40 dark:bg-rose-500/10 dark:text-rose-100">
+  <h3 class="text-lg font-semibold">We couldn't analyze your files</h3>
+  <ul class="mt-3 list-disc space-y-2 pl-5 text-sm">
+    {% for message in errors %}
+    <li>{{ message }}</li>
+    {% endfor %}
+  </ul>
+</div>
+{% elif not has_results %}
+<div class="rounded-3xl border border-dashed border-slate-300 bg-white/60 p-10 text-center text-slate-500 shadow-inner dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-400">
+  <p class="text-lg font-medium">Upload your telemetry files to see KPIs, interactive charts, and a live map of the route.</p>
+</div>
+{% else %}
+<section class="relative overflow-hidden rounded-3xl border border-slate-200/70 bg-white/95 p-8 shadow-card backdrop-blur dark:border-slate-800/70 dark:bg-slate-900/80" data-component="analysis-results">
+  {% if include_export_controls %}
+  <div class="mb-6 rounded-3xl border border-slate-200/70 bg-white/95 px-5 py-4 shadow-sm dark:border-slate-700/60 dark:bg-slate-900/70">
+    <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <div>
+        <p class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-500 dark:text-slate-400">Final report</p>
+        <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">Download a portable version of the current results.</p>
+      </div>
+      <div class="flex flex-wrap items-center gap-2">
+        <button type="button" class="inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 px-4 py-2 text-sm font-semibold text-white shadow-md transition hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-slate-900 dark:from-sky-500 dark:via-indigo-500 dark:to-indigo-600" data-download-pdf>
+          Download PDF
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <polyline points="7 10 12 15 17 10"></polyline>
+            <line x1="12" y1="15" x2="12" y2="3"></line>
+          </svg>
+        </button>
+        <button type="button" class="inline-flex items-center gap-2 rounded-full border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-400 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-slate-400 dark:border-slate-600 dark:text-slate-200 dark:hover:border-slate-500 dark:hover:bg-slate-800 dark:focus-visible:ring-slate-500" data-download-zip>
+          Download ZIP
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M7 3h7l5 5v13a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"></path>
+            <polyline points="8 7 12 7 12 11 16 11"></polyline>
+            <polyline points="8 15 10 15 10 19"></polyline>
+          </svg>
+        </button>
+        <button type="button" class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-600 shadow-sm transition hover:border-slate-300 hover:text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-slate-300 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:border-slate-500 dark:hover:text-white dark:focus-visible:ring-slate-500" data-download-json>
+          Export JSON
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 4h16v16H4z" opacity="0.2"></path>
+            <path d="M4 4h16v16H4z"></path>
+            <path d="M9 4v16"></path>
+            <path d="M15 4v16"></path>
+          </svg>
+        </button>
+      </div>
+    </div>
+    <p data-export-error class="hidden text-sm font-medium text-rose-600 dark:text-rose-300"></p>
+    <script type="application/json" data-report-payload>{{ results | tojson }}</script>
+  </div>
+  {% endif %}
+
+  <div class="rounded-2xl border border-slate-200 bg-white/90 p-6 shadow-sm dark:border-slate-700 dark:bg-slate-900/70">
+    <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+      <div>
+        <p class="text-xs font-semibold uppercase tracking-[0.4em] text-slate-500 dark:text-slate-400">Regulation verdict</p>
+        <span class="mt-3 inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold {{ regulation.status_class }}">
+          <span class="relative flex h-2.5 w-2.5">
+            <span class="absolute inline-flex h-full w-full animate-ping rounded-full {{ regulation.ping_class }}"></span>
+            <span class="relative inline-flex h-2.5 w-2.5 rounded-full {{ regulation.dot_class }}"></span>
+          </span>
+          {{ regulation.label }}
+        </span>
+        {% if regulation.pack_title %}
+        <p class="mt-3 text-sm text-slate-500 dark:text-slate-400">
+          Pack:
+          <span class="font-semibold text-slate-900 dark:text-white">{{ regulation.pack_title }}</span>
+          {% if regulation.version %}
+          <span class="ml-2 inline-flex items-center rounded-full bg-slate-500/10 px-2 py-0.5 text-xs font-semibold text-slate-600 dark:bg-slate-700/60 dark:text-slate-200">v{{ regulation.version }}</span>
+          {% endif %}
+        </p>
+        {% endif %}
+        {% if regulation.legal_source %}
+        <p class="text-xs text-slate-500 dark:text-slate-400">Legal source: {{ regulation.legal_source }}</p>
+        {% endif %}
+        {% if regulation.pack_id and regulation.pack_id != regulation.pack_title %}
+        <p class="text-xs text-slate-400 dark:text-slate-500">Identifier: <code>{{ regulation.pack_id }}</code></p>
+        {% endif %}
+      </div>
+      <dl class="grid gap-4 sm:grid-cols-2 lg:gap-6">
+        {% set mandatory_total = regulation.counts.mandatory_total %}
+        {% set optional_total = regulation.counts.optional_total %}
+        <div class="rounded-2xl border border-slate-200 bg-white/80 px-5 py-4 text-center shadow-sm dark:border-slate-700 dark:bg-slate-900/70">
+          <dt class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400 dark:text-slate-500">Mandatory rules</dt>
+          <dd class="mt-2 text-lg font-semibold text-slate-900 dark:text-white">{% if mandatory_total %}{{ regulation.counts.mandatory_passed }}/{{ mandatory_total }}{% else %}0{% endif %}</dd>
+          <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">{% if mandatory_total %}All must pass{% else %}Not configured{% endif %}</p>
+        </div>
+        <div class="rounded-2xl border border-slate-200 bg-white/80 px-5 py-4 text-center shadow-sm dark:border-slate-700 dark:bg-slate-900/70">
+          <dt class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400 dark:text-slate-500">Optional rules</dt>
+          <dd class="mt-2 text-lg font-semibold text-slate-900 dark:text-white">{% if optional_total %}{{ regulation.counts.optional_passed }}/{{ optional_total }}{% else %}0{% endif %}</dd>
+          <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">{% if optional_total %}Informational{% else %}Not configured{% endif %}</p>
+        </div>
+      </dl>
+    </div>
+  </div>
+
+  {% set diagnostics_checks = diagnostics.checks %}
+  {% if diagnostics_checks %}
+  <div class="mt-6 rounded-3xl border border-slate-200/70 bg-white/95 p-6 shadow-card dark:border-slate-800/70 dark:bg-slate-900/80">
+    <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+      <div>
+        <p class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-500 dark:text-slate-400">Data diagnostics</p>
+        <p class="mt-2 max-w-xl text-sm text-slate-500 dark:text-slate-400">Automated checks covering sampling cadence, gaps, GPS jumps, and speed spikes.</p>
+      </div>
+      <div class="flex flex-wrap items-center gap-2">
+        {% set diag_summary = diagnostics.summary %}
+        {% for level in ['pass', 'warn', 'fail'] %}
+        {% set level_class = diag_level_classes.get(level, 'bg-slate-500/15 text-slate-600 dark:bg-slate-700/60 dark:text-slate-300') %}
+        <span class="inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-semibold {{ level_class }}">
+          <span class="h-2 w-2 rounded-full bg-current"></span>{{ level.upper() }}: {{ diag_summary.get(level, 0) | int }}
+        </span>
+        {% endfor %}
+      </div>
+    </div>
+    <ul class="mt-6 space-y-3">
+      {% for entry in diagnostics_checks %}
+      {% set level = (entry.get('level') or 'warn') | string | lower %}
+      {% set level_class = diag_level_classes.get(level, 'bg-slate-500/15 text-slate-600 dark:bg-slate-700/60 dark:text-slate-300') %}
+      <li class="rounded-2xl border border-slate-200 bg-white/85 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900/70">
+        <div class="flex items-start justify-between gap-4">
+          <div>
+            {% if entry.get('subject') %}
+            <p class="text-[11px] font-semibold uppercase tracking-[0.3em] text-slate-400 dark:text-slate-500">{{ entry.subject }}</p>
+            {% endif %}
+            <p class="text-sm font-semibold text-slate-900 dark:text-white">{{ entry.title }}</p>
+          </div>
+          <span class="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold {{ level_class }}">{{ (entry.get('level') or 'warn') | string | upper }}</span>
+        </div>
+        <p class="mt-2 text-sm text-slate-600 dark:text-slate-300">{{ entry.details }}</p>
+        {% if entry.count %}
+        <p class="mt-2 text-xs text-slate-500 dark:text-slate-400">Occurrences: {{ entry.count }}</p>
+        {% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+    {% if diagnostics.repaired %}
+    <div class="mt-4 rounded-2xl border border-dashed border-slate-200 bg-white/80 p-4 text-xs text-slate-500 dark:border-slate-700 dark:bg-slate-900/60 dark:text-slate-400">
+      <p class="font-semibold uppercase tracking-[0.3em] text-slate-400 dark:text-slate-500">Repaired spans</p>
+      <ul class="mt-2 list-disc space-y-1 pl-4">
+        {% for span_text in diagnostics.repaired %}
+        <li>{{ span_text }}</li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% endif %}
+  </div>
+  {% else %}
+  <div class="mt-6 rounded-3xl border border-dashed border-slate-300 bg-white/60 p-6 text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-400">
+    No diagnostics were produced for this dataset.
+  </div>
+  {% endif %}
+
+  <div class="mt-6">
+    <h3 class="text-lg font-semibold text-slate-900 dark:text-white">Rule evidence</h3>
+    <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">Thresholds are demo placeholders and do not represent legal advice.</p>
+    {% if evidence %}
+    <div class="mt-6 overflow-hidden rounded-2xl border border-slate-200 bg-white/80 shadow-sm dark:border-slate-700 dark:bg-slate-900/70">
+      <table class="min-w-full divide-y divide-slate-200 dark:divide-slate-700">
+        <thead class="bg-slate-50/70 text-xs font-semibold uppercase tracking-[0.3em] text-slate-500 dark:bg-slate-900/60 dark:text-slate-400">
+          <tr>
+            <th scope="col" class="px-4 py-3 text-left">Rule</th>
+            <th scope="col" class="px-4 py-3 text-left">Requirement</th>
+            <th scope="col" class="px-4 py-3 text-left">Observed</th>
+            <th scope="col" class="px-4 py-3 text-left">Status</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-200 bg-white/80 text-sm text-slate-600 dark:divide-slate-800 dark:bg-slate-900/60 dark:text-slate-300">
+          {% for entry in evidence %}
+          {% set status_class = badge_pass if entry.passed else badge_fail %}
+          {% set mandatory_badge = 'bg-amber-500/20 text-amber-600 dark:bg-amber-500/25 dark:text-amber-200' if entry.mandatory else 'bg-slate-500/15 text-slate-600 dark:bg-slate-700/60 dark:text-slate-300' %}
+          <tr>
+            <td class="px-4 py-4 align-top">
+              <div class="font-semibold text-slate-900 dark:text-white">
+                {{ entry.title }}
+                {% if entry.scope %}
+                <span class="ml-2 inline-flex items-center rounded-full bg-slate-500/15 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wider text-slate-600 dark:bg-slate-700/60 dark:text-slate-300">{{ entry.scope }}</span>
+                {% endif %}
+              </div>
+              {% set citation_parts = [] %}
+              {% if entry.legal_source %}
+              {% set _ = citation_parts.append(entry.legal_source) %}
+              {% endif %}
+              {% if entry.article %}
+              {% set _ = citation_parts.append(entry.article) %}
+              {% endif %}
+              {% if citation_parts %}
+              <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">{{ citation_parts | join(' · ') }}</div>
+              {% endif %}
+              {% if entry.metric %}
+              <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">Metric: <code>{{ entry.metric }}</code></div>
+              {% endif %}
+              {% for note in entry.notes or [] %}
+              <p class="mt-2 text-xs italic text-slate-500 dark:text-slate-400">{{ note }}</p>
+              {% endfor %}
+            </td>
+            <td class="px-4 py-4 align-top">
+              <div class="font-semibold text-slate-900 dark:text-white">{{ entry.requirement }}</div>
+            </td>
+            <td class="px-4 py-4 align-top">
+              <div class="font-semibold text-slate-900 dark:text-white">{{ entry.observed }}</div>
+              {% if entry.context %}
+              <ul class="mt-2 space-y-1 text-xs text-slate-500 dark:text-slate-400">
+                {% for item in entry.context %}
+                <li><span class="font-medium text-slate-900 dark:text-white">{{ item.label }}:</span> {{ item.value }}</li>
+                {% endfor %}
+              </ul>
+              {% endif %}
+              {% if entry.detail %}
+              <p class="mt-2 text-xs text-amber-600 dark:text-amber-300">{{ entry.detail }}</p>
+              {% endif %}
+            </td>
+            <td class="px-4 py-4 align-top">
+              <div class="flex flex-col gap-2">
+                <span class="inline-flex items-center justify-center rounded-full px-2.5 py-0.5 text-xs font-semibold {{ status_class }}">{{ 'Pass' if entry.passed else 'Fail' }}</span>
+                <span class="inline-flex items-center justify-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold {{ mandatory_badge }}">{{ 'Mandatory' if entry.mandatory else 'Optional' }}</span>
+              </div>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="mt-6 rounded-2xl border border-dashed border-slate-300 bg-slate-100/60 p-6 text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-400">
+      No regulation evidence available.
+    </div>
+    {% endif %}
+  </div>
+
+  <div class="mt-10 rounded-3xl border border-slate-200/70 bg-white/95 p-8 shadow-card dark:border-slate-800/70 dark:bg-slate-900/80">
+    <div class="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
+      <div>
+        <p class="text-xs font-semibold uppercase tracking-[0.4em] text-slate-500 dark:text-slate-400">Analysis validity</p>
+        <span class="mt-3 inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold {{ analysis.status.class }}">{{ analysis.status.label }}</span>
+        <p class="mt-3 max-w-xl text-sm text-slate-500 dark:text-slate-400">Derived metrics from fused telemetry streams. Explore KPIs, charts, and the drive route.</p>
+      </div>
+      <dl class="grid gap-4 sm:grid-cols-3">
+        {% for metric in analysis.metrics %}
+        <div class="rounded-2xl border border-slate-200 bg-white/80 px-5 py-4 text-center shadow-sm dark:border-slate-700 dark:bg-slate-900/70">
+          <dt class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400 dark:text-slate-500">{{ metric.label }}</dt>
+          <dd class="mt-2 text-lg font-semibold text-slate-900 dark:text-white">{{ metric.value }}</dd>
+        </div>
+        {% endfor %}
+      </dl>
+    </div>
+    <div class="mt-8">
+      <div class="flex flex-wrap gap-2 border-b border-slate-200 dark:border-slate-700" role="tablist">
+        <button type="button" class="tab-trigger is-active" data-tab-target="summary" aria-controls="analysis-tab-summary" aria-selected="true">Summary</button>
+        <button type="button" class="tab-trigger" data-tab-target="kpis" aria-controls="analysis-tab-kpis" aria-selected="false">KPIs</button>
+        <button type="button" class="tab-trigger" data-tab-target="charts" aria-controls="analysis-tab-charts" aria-selected="false">Charts</button>
+        <button type="button" class="tab-trigger" data-tab-target="map" aria-controls="analysis-tab-map" aria-selected="false">Map</button>
+      </div>
+      <div class="mt-6 space-y-6">
+        <div id="analysis-tab-summary" class="tab-panel" data-tab-panel="summary">
+          <div id="analysis-summary" class="prose max-w-none prose-slate dark:prose-invert"></div>
+        </div>
+        <div id="analysis-tab-kpis" class="tab-panel" data-tab-panel="kpis" hidden>
+          {% if analysis.bins %}
+          <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white/80 shadow-sm dark:border-slate-700 dark:bg-slate-900/70">
+            <table class="min-w-full divide-y divide-slate-200 dark:divide-slate-700">
+              <thead class="bg-slate-50/70 text-xs font-semibold uppercase tracking-[0.3em] text-slate-500 dark:bg-slate-900/60 dark:text-slate-400">
+                <tr>
+                  <th scope="col" class="px-4 py-3 text-left">Speed bin</th>
+                  <th scope="col" class="px-4 py-3 text-left">Time (s)</th>
+                  <th scope="col" class="px-4 py-3 text-left">Distance (km)</th>
+                  <th scope="col" class="px-4 py-3 text-left">KPIs</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-slate-200 bg-white/80 text-sm text-slate-600 dark:divide-slate-800 dark:bg-slate-900/60 dark:text-slate-300">
+                {% for bin in analysis.bins %}
+                {% set bin_badge = badge_pass if bin.valid else badge_fail %}
+                <tr>
+                  <td class="px-4 py-4">
+                    <span class="font-semibold text-slate-900 dark:text-white">{{ bin.name }}</span>
+                    <span class="ml-2 inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold {{ bin_badge }}">{{ 'Pass' if bin.valid else 'Fail' }}</span>
+                  </td>
+                  <td class="px-4 py-4">{{ bin.time }}</td>
+                  <td class="px-4 py-4">{{ bin.distance }}</td>
+                  <td class="px-4 py-4">
+                    {% if bin.kpis %}
+                    <ul class="space-y-1">
+                      {% for kpi in bin.kpis %}
+                      <li><span class="font-medium text-slate-900 dark:text-white">{{ kpi.name }}:</span> {{ kpi.value }}</li>
+                      {% endfor %}
+                    </ul>
+                    {% else %}
+                    <span class="text-xs uppercase tracking-[0.3em] text-slate-400 dark:text-slate-500">No KPIs configured</span>
+                    {% endif %}
+                  </td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          {% else %}
+          <div class="rounded-2xl border border-dashed border-slate-300 bg-slate-100/60 p-6 text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-400">
+            Configure speed bins and KPIs in <code>data/rules/demo_rules.json</code> to populate this view.
+          </div>
+          {% endif %}
+        </div>
+        <div id="analysis-tab-charts" class="tab-panel" data-tab-panel="charts" hidden>
+          <div id="analysis-chart" class="hidden h-80 w-full rounded-2xl border border-slate-200 bg-white/70 shadow-inner dark:border-slate-700 dark:bg-slate-900/60" data-chart></div>
+          <div data-chart-empty class="flex h-80 items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-slate-100/60 text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-400">
+            Charts will appear once emissions or speed signals are available.
+          </div>
+        </div>
+        <div id="analysis-tab-map" class="tab-panel" data-tab-panel="map" hidden>
+          <div id="analysis-map" class="hidden h-80 w-full overflow-hidden rounded-2xl border border-slate-200 dark:border-slate-700" data-map></div>
+          <div data-map-empty class="flex h-80 items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-slate-100/60 text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-400">
+            Upload GPS data containing latitude and longitude to visualize the drive path.
+          </div>
+        </div>
+      </div>
+      <script id="summary-data" type="application/json">{{ analysis.summary_md | tojson }}</script>
+      <script id="chart-data" type="application/json">{{ analysis.chart | tojson }}</script>
+      <script id="map-data" type="application/json">{{ analysis.map | tojson }}</script>
+    </div>
+  </div>
+</section>
+{% endif %}

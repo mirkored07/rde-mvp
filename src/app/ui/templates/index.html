@@ -132,7 +132,7 @@
                 <header class="flex flex-col gap-3 border-b border-slate-200/70 pb-6 dark:border-slate-800">
                   <h2 class="text-2xl font-semibold text-slate-900 dark:text-white">Telemetry ingestion</h2>
                   <p class="text-sm text-slate-500 dark:text-slate-400">
-                    Supported formats: PEMS CSV (normalized), GPS CSV/NMEA/GPX, ECU CSV or MDF. Maximum file size {{MAX_UPLOAD_MB}} MB.
+                    Supported formats: PEMS CSV (normalized), GPS CSV/NMEA/GPX, ECU CSV or MDF. Maximum file size {{ max_upload_mb }} MB.
                   </p>
                 </header>
                 <form
@@ -163,7 +163,7 @@
                       </div>
                       <div class="mt-5 flex flex-1 flex-col">
                         <label class="flex flex-1 cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-slate-300 bg-slate-50/80 px-3 py-6 text-center text-sm font-medium text-slate-600 transition hover:border-sky-500 hover:text-sky-600 dark:border-slate-700 dark:bg-slate-800/60 dark:text-slate-300 dark:hover:border-indigo-400 dark:hover:text-indigo-200">
-                          <input type="file" class="sr-only" name="pems_file" id="pems_file" accept=".csv" required data-allowed=".csv" data-max-size-mb="{{MAX_UPLOAD_MB}}" />
+                          <input type="file" class="sr-only" name="pems_file" id="pems_file" accept=".csv" required data-allowed=".csv" data-max-size-mb="{{ max_upload_mb }}" />
                           <span>Drop file here or <span class="text-sky-600 underline underline-offset-2 dark:text-indigo-200">browse</span></span>
                           <span class="text-xs text-slate-400 dark:text-slate-500">.csv</span>
                         </label>
@@ -187,7 +187,7 @@
                       </div>
                       <div class="mt-5 flex flex-1 flex-col">
                         <label class="flex flex-1 cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-slate-300 bg-slate-50/80 px-3 py-6 text-center text-sm font-medium text-slate-600 transition hover:border-sky-500 hover:text-sky-600 dark:border-slate-700 dark:bg-slate-800/60 dark:text-slate-300 dark:hover:border-indigo-400 dark:hover:text-indigo-200">
-                          <input type="file" class="sr-only" name="gps_file" id="gps_file" accept=".csv,.nmea,.gpx,.txt" required data-allowed=".csv,.nmea,.gpx,.txt" data-max-size-mb="{{MAX_UPLOAD_MB}}" />
+                          <input type="file" class="sr-only" name="gps_file" id="gps_file" accept=".csv,.nmea,.gpx,.txt" required data-allowed=".csv,.nmea,.gpx,.txt" data-max-size-mb="{{ max_upload_mb }}" />
                           <span>Drop file here or <span class="text-sky-600 underline underline-offset-2 dark:text-indigo-200">browse</span></span>
                           <span class="text-xs text-slate-400 dark:text-slate-500">.csv · .nmea · .gpx · .txt</span>
                         </label>
@@ -212,7 +212,7 @@
                       </div>
                       <div class="mt-5 flex flex-1 flex-col">
                         <label class="flex flex-1 cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-slate-300 bg-slate-50/80 px-3 py-6 text-center text-sm font-medium text-slate-600 transition hover:border-sky-500 hover:text-sky-600 dark:border-slate-700 dark:bg-slate-800/60 dark:text-slate-300 dark:hover:border-indigo-400 dark:hover:text-indigo-200">
-                          <input type="file" class="sr-only" name="ecu_file" id="ecu_file" accept=".csv,.mf4,.mdf" required data-allowed=".csv,.mf4,.mdf" data-max-size-mb="{{MAX_UPLOAD_MB}}" />
+                          <input type="file" class="sr-only" name="ecu_file" id="ecu_file" accept=".csv,.mf4,.mdf" required data-allowed=".csv,.mf4,.mdf" data-max-size-mb="{{ max_upload_mb }}" />
                           <span>Drop file here or <span class="text-sky-600 underline underline-offset-2 dark:text-indigo-200">browse</span></span>
                           <span class="text-xs text-slate-400 dark:text-slate-500">.csv · .mf4 · .mdf</span>
                         </label>
@@ -293,7 +293,7 @@
                   </div>
                 </form>
                 <section id="analysis-results" class="mt-8" hx-target="this" hx-swap="innerHTML">
-                  {{RESULTS_SECTION}}
+                  {% include "results.html" %}
                 </section>
               </div>
               <aside class="flex flex-col gap-6 rounded-3xl border border-slate-200/70 bg-white/70 p-8 shadow-card dark:border-slate-800/60 dark:bg-slate-900/60">
@@ -410,7 +410,7 @@
         </div>
       </footer>
     </div>
-    <script type="application/json" id="canonical-schema">{{CANONICAL_SCHEMA_JSON}}</script>
-    <script type="application/json" id="unit-hints">{{UNIT_HINTS_JSON}}</script>
+    <script type="application/json" id="canonical-schema">{{ canonical_schema_json | safe }}</script>
+    <script type="application/json" id="unit-hints">{{ unit_hints_json | safe }}</script>
   </body>
 </html>
