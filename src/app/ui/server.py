@@ -1126,13 +1126,6 @@ analysis_section["meta"] = meta
 results_payload["analysis"] = analysis_section
 
 # If the request came from a browser, render HTML; otherwise return JSON.
-try:
-    # keep the existing try/except structure you already have below
-    pass
-except Exception as exc:
-    ...
-
- 
 
     status_code = status.HTTP_400_BAD_REQUEST if errors else status.HTTP_200_OK
 
