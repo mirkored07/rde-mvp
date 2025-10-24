@@ -74,6 +74,49 @@ _SAMPLE_FILES: dict[str, pathlib.Path] = {
 }
 
 
+def _apply_mapping(df: pd.DataFrame, mapping: dict[str, Any], domain: str) -> pd.DataFrame:
+    """Rename dataframe columns according to the provided mapping."""
+
+    section = mapping.get(domain, {}) or {}
+    if isinstance(section, Mapping):
+        if "columns" in section and isinstance(section["columns"], Mapping):
+            section = section["columns"]
+    if not isinstance(section, Mapping):
+        return df
+
+    rename = {
+        source: target
+        for target, source in section.items()
+        if isinstance(source, str) and source in df.columns
+    }
+
+    out = df.rename(columns=rename) if rename else df.copy()
+
+    numeric_like = [
+        "nox_mg_s",
+        "pn_1_s",
+        "co_mg_s",
+        "co2_g_s",
+        "thc_mg_s",
+        "nh3_mg_s",
+        "n2o_mg_s",
+        "pm_mg_s",
+        "veh_speed_m_s",
+        "speed_m_s",
+        "engine_speed_rpm",
+        "engine_load_pct",
+        "throttle_pct",
+        "exhaust_flow_kg_s",
+        "exhaust_temp_c",
+        "amb_temp_c",
+    ]
+    for column in numeric_like:
+        if column in out.columns:
+            out[column] = pd.to_numeric(out[column], errors="coerce")
+
+    return out
+
+
 def _ensure_mappings_dir() -> pathlib.Path:
     _mappings_dir.mkdir(parents=True, exist_ok=True)
     return _mappings_dir
@@ -146,6 +189,79 @@ def _save_mapping_profile(name: str, payload: dict[str, Any]) -> dict[str, Any]:
     path = _ensure_mappings_dir() / f"{slug}.json"
     path.write_text(json.dumps(data, indent=2, sort_keys=True), encoding="utf-8")
     return data
+
+
+def _normalise_mapping_payload(payload: Mapping[str, Any]) -> tuple[dict[str, Any], dict[str, str]]:
+    cleaned: dict[str, Any] = {}
+    inline_units: dict[str, str] = {}
+
+    source = payload
+    datasets = source.get("datasets") if isinstance(source.get("datasets"), Mapping) else None
+    if isinstance(datasets, Mapping):
+        source = datasets
+
+    for key, value in source.items():
+        if key == "units" and isinstance(value, Mapping):
+            for col, unit in value.items():
+                if isinstance(col, str) and isinstance(unit, str):
+                    inline_units[col] = unit
+            continue
+
+        if not isinstance(value, Mapping):
+            raise MappingValidationError(
+                "Mapping entries must be JSON objects.", dataset=str(key)
+            )
+
+        if "columns" in value or "units" in value:
+            cleaned[key] = value
+        else:
+            cleaned[key] = {"columns": dict(value)}
+
+    return cleaned, inline_units
+
+
+def _resolve_mapping(
+    raw_json: str | None,
+    profile: str | None,
+    payload_raw: str | bytes | None,
+) -> tuple[dict[str, DatasetMapping], dict[str, Any]]:
+    mapping_state: dict[str, DatasetMapping] = {}
+    resolved: dict[str, Any] = {}
+
+    inline_units: dict[str, str] = {}
+
+    if raw_json:
+        try:
+            data = json.loads(raw_json)
+        except json.JSONDecodeError as exc:
+            raise MappingValidationError("Column mapping JSON is not valid.") from exc
+        if not isinstance(data, Mapping):
+            raise MappingValidationError("Column mapping JSON must be an object.")
+        cleaned, inline_units = _normalise_mapping_payload(data)
+        mapping_state = load_mapping_from_dict(cleaned)
+    elif profile:
+        try:
+            loaded = _load_mapping_profile(profile)
+        except FileNotFoundError as exc:
+            raise MappingValidationError("Selected mapping profile was not found.") from exc
+        mapping_payload = loaded.get("mapping")
+        if not isinstance(mapping_payload, Mapping):
+            mapping_payload = {}
+        cleaned, inline_units = _normalise_mapping_payload(mapping_payload)
+        mapping_state = load_mapping_from_dict(cleaned)
+    elif payload_raw:
+        mapping_state = parse_mapping_payload(payload_raw)
+
+    units_flat: dict[str, str] = dict(inline_units)
+    for dataset, mapping in mapping_state.items():
+        if mapping.columns:
+            resolved[dataset] = dict(mapping.columns)
+
+    if units_flat:
+        resolved["units"] = units_flat
+
+    return mapping_state, resolved
+
 
 DEFAULT_RULES_CONFIG: dict[str, Any] = {
     "speed_bins": [
@@ -885,9 +1001,18 @@ async def analyze(request: Request) -> Response:
         fields = {}
 
     mapping_state: dict[str, DatasetMapping] = {}
+    resolved_mapping: dict[str, Any] = {}
     if not errors:
+        mapping_json_raw = fields.get("mapping_json")
+        mapping_json_raw = mapping_json_raw if mapping_json_raw else None
+        mapping_name_raw = fields.get("mapping_name")
+        mapping_name_raw = mapping_name_raw if mapping_name_raw else None
         try:
-            mapping_state = parse_mapping_payload(fields.get("mapping_payload"))
+            mapping_state, resolved_mapping = _resolve_mapping(
+                mapping_json_raw,
+                mapping_name_raw,
+                fields.get("mapping_payload"),
+            )
         except MappingValidationError as exc:
             errors.append(str(exc))
 
@@ -906,9 +1031,22 @@ async def analyze(request: Request) -> Response:
             ecu_name, ecu_bytes = files["ecu_file"]
 
             pems_df = _ingest_pems(pems_name, pems_bytes, mapping=mapping_state.get("pems"))
+            pems_df = _apply_mapping(pems_df, resolved_mapping, "pems")
             gps_df = _ingest_gps(gps_name, gps_bytes, mapping=mapping_state.get("gps"))
             ecu_df = _ingest_ecu(ecu_name, ecu_bytes, mapping=mapping_state.get("ecu"))
+            ecu_df = _apply_mapping(ecu_df, resolved_mapping, "ecu")
+            units_hint = {}
+            units_source = resolved_mapping.get("units", {})
+            if isinstance(units_source, Mapping):
+                units_hint = {
+                    str(col): str(unit)
+                    for col, unit in units_source.items()
+                    if isinstance(col, str) and isinstance(unit, str)
+                }
             fused = _fuse_streams(pems_df, gps_df, ecu_df)
+            if units_hint:
+                fused.attrs = dict(getattr(fused, "attrs", {}))
+                fused.attrs["units"] = units_hint
             fused, diagnostics = run_diagnostics(
                 fused,
                 {
