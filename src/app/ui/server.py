@@ -19,6 +19,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response, StreamingRes
 from fastapi.templating import Jinja2Templates
 
 from src.app.analysis.metrics import REGISTRY as KPI_REGISTRY, normalize_unit_series
+from src.app.analysis.charts import build_pollutant_chart
 from src.app.data.analysis import AnalysisEngine, AnalysisResult, load_rules
 from src.app.data.regulation import PackEvaluation, evaluate_pack, load_pack
 from src.app.data.fusion import FusionEngine
@@ -1002,6 +1003,7 @@ async def analyze(request: Request) -> Response:
 
     mapping_state: dict[str, DatasetMapping] = {}
     resolved_mapping: dict[str, Any] = {}
+    effective_mapping: dict[str, Any] = {}
     if not errors:
         mapping_inline_raw = fields.get("mapping")
         mapping_inline_raw = mapping_inline_raw if mapping_inline_raw else None
@@ -1015,6 +1017,7 @@ async def analyze(request: Request) -> Response:
                 mapping_name_raw,
                 fields.get("mapping_payload"),
             )
+            effective_mapping = {key: value for key, value in resolved_mapping.items() if value}
         except MappingValidationError as exc:
             errors.append(str(exc))
 
@@ -1065,6 +1068,20 @@ async def analyze(request: Request) -> Response:
             pack = _load_regulation_pack()
             evaluation = evaluate_pack(analysis_result.analysis, pack)
             results_payload = _prepare_results(analysis_result, evaluation, diagnostics)
+            if results_payload is not None:
+                analysis_section = results_payload.get("analysis") or {}
+                existing_chart = analysis_section.get("chart") or {}
+                try:
+                    df_for_chart = locals().get("fused") or pems_df
+                    pollutant_chart = build_pollutant_chart(df_for_chart)
+                except Exception:
+                    pollutant_chart = {"pollutants": []}
+                chart_payload = dict(existing_chart)
+                chart_payload.update(pollutant_chart)
+                analysis_section["chart"] = chart_payload
+                analysis_section["meta"] = analysis_section.get("meta", {})
+                analysis_section["meta"]["mapping_applied"] = bool(effective_mapping)
+                results_payload["analysis"] = analysis_section
         except Exception as exc:  # pragma: no cover - user feedback path
             errors.append(str(exc))
 
