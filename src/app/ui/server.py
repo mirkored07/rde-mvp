@@ -1048,112 +1048,109 @@ async def analyze(request: Request) -> Response:
             )
 
     if not errors:
+        pems_name, pems_bytes = files["pems_file"]
+        gps_name, gps_bytes = files["gps_file"]
+        ecu_name, ecu_bytes = files["ecu_file"]
+
+        pems_df = _ingest_pems(pems_name, pems_bytes, mapping=mapping_state.get("pems"))
+        pems_df = _apply_mapping(pems_df, resolved_mapping, "pems")
+        gps_df = _ingest_gps(gps_name, gps_bytes, mapping=mapping_state.get("gps"))
+        ecu_df = _ingest_ecu(ecu_name, ecu_bytes, mapping=mapping_state.get("ecu"))
+        ecu_df = _apply_mapping(ecu_df, resolved_mapping, "ecu")
+        units_hint = {}
+        units_source = resolved_mapping.get("units", {})
+        if isinstance(units_source, Mapping):
+            units_hint = {
+                str(col): str(unit)
+                for col, unit in units_source.items()
+                if isinstance(col, str) and isinstance(unit, str)
+            }
+        fused = _fuse_streams(pems_df, gps_df, ecu_df)
+        if units_hint:
+            fused.attrs = dict(getattr(fused, "attrs", {}))
+            fused.attrs["units"] = units_hint
+        fused, diagnostics = run_diagnostics(
+            fused,
+            {
+                "pems": pems_df,
+                "gps": gps_df,
+                "ecu": ecu_df,
+            },
+            gap_threshold_s=2.0,
+            repair_small_gaps=True,
+            repair_threshold_s=3.0,
+        )
+
+        # --- build analysis & evaluation ---
+        engine = AnalysisEngine(load_analysis_rules())
+        analysis_result = engine.analyze(fused)
+        pack = _load_regulation_pack()
+        evaluation = evaluate_pack(analysis_result, analysis, pack)
+
+        # Prepare payload section-by-section
+        results_payload = _prepare_results(analysis_result, evaluation, diagnostics)
+        if results_payload is None:
+            results_payload = {}
+
+        # Ensure we have a proper analysis section
+        analysis_section = results_payload.get("analysis") or {}
+        existing_chart = analysis_section.get("chart") or {}
+
+        # ---- Chart: inject pollutant time-series ----
         try:
-            pems_name, pems_bytes = files["pems_file"]
-            gps_name, gps_bytes = files["gps_file"]
-            ecu_name, ecu_bytes = files["ecu_file"]
+            from src.app.analysis.charts import build_pollutant_chart
+            # Prefer fully fused dataframe; if not present, use normalized PEMS
+            df_for_chart = locals().get("fused", None) or pems_df
+            pollutant_chart = build_pollutant_chart(df_for_chart)
+        except Exception:
+            pollutant_chart = {"pollutants": []}
 
-            pems_df = _ingest_pems(pems_name, pems_bytes, mapping=mapping_state.get("pems"))
-            pems_df = _apply_mapping(pems_df, resolved_mapping, "pems")
-            gps_df = _ingest_gps(gps_name, gps_bytes, mapping=mapping_state.get("gps"))
-            ecu_df = _ingest_ecu(ecu_name, ecu_bytes, mapping=mapping_state.get("ecu"))
-            ecu_df = _apply_mapping(ecu_df, resolved_mapping, "ecu")
-            units_hint = {}
-            units_source = resolved_mapping.get("units", {})
-            if isinstance(units_source, Mapping):
-                units_hint = {
-                    str(col): str(unit)
-                    for col, unit in units_source.items()
-                    if isinstance(col, str) and isinstance(unit, str)
-                }
-            fused = _fuse_streams(pems_df, gps_df, ecu_df)
-            if units_hint:
-                fused.attrs = dict(getattr(fused, "attrs", {}))
-                fused.attrs["units"] = units_hint
-            fused, diagnostics = run_diagnostics(
-                fused,
-                {
-                    "pems": pems_df,
-                    "gps": gps_df,
-                    "ecu": ecu_df,
-                },
-                gap_threshold_s=2.0,
-                repair_small_gaps=True,
-                repair_threshold_s=3.0,
+        # Merge/replace chart
+        chart_out = dict(existing_chart)
+        chart_out.update(pollutant_chart)  # guarantees key 'pollutants'
+        analysis_section["chart"] = chart_out
+
+        # ---- Mapping meta: let tests verify a mapping was applied ----
+        meta = analysis_section.get("meta", {})
+        meta["mapping_applied"] = bool(effective_mapping)
+        if effective_mapping:
+            meta["mapping_keys"] = {
+                "pems": sorted(list((effective_mapping.get("pems") or {}).keys())),
+                "ecu":  sorted(list((effective_mapping.get("ecu") or {}).keys())),
+            }
+        analysis_section["meta"] = meta
+
+        # Write back
+        results_payload["analysis"] = analysis_section
+
+        # If the request came from a browser, render HTML; otherwise return JSON.
+
+        status_code = status.HTTP_400_BAD_REQUEST if errors else status.HTTP_200_OK
+
+        if request.headers.get("hx-request") == "true":
+            context = _build_results_context(
+                results_payload,
+                errors,
+                include_export_controls=True,
             )
-           
-# --- build analysis & evaluation ---
+            context.update({
+                "request": request,
+                "badge_pass": BADGE_PASS,
+                "badge_fail": BADGE_FAIL,
+            })
+            return templates.TemplateResponse(
+                "results.html",
+                context,
+                status_code=status_code,
+            )
 
-engine = AnalysisEngine(load_analysis_rules())
-analysis_result = engine.analyze(fused)
-pack = _load_regulation_pack()
-evaluation = evaluate_pack(analysis_result, analysis, pack)
-
-# Prepare payload section-by-section
-results_payload = _prepare_results(analysis_result, evaluation, diagnostics)
-if results_payload is None:
-    results_payload = {}
-
-# Ensure we have a proper analysis section
-analysis_section = results_payload.get("analysis") or {}
-existing_chart = analysis_section.get("chart") or {}
-
-# ---- Chart: inject pollutant time-series ----
-try:
-    from src.app.analysis.charts import build_pollutant_chart
-    # Prefer fully fused dataframe; if not present, use normalized PEMS
-    df_for_chart = locals().get("fused", None) or pems_df
-    pollutant_chart = build_pollutant_chart(df_for_chart)
-except Exception:
-    pollutant_chart = {"pollutants": []}
-
-# Merge/replace chart
-chart_out = dict(existing_chart)
-chart_out.update(pollutant_chart)  # guarantees key 'pollutants'
-analysis_section["chart"] = chart_out
-
-# ---- Mapping meta: let tests verify a mapping was applied ----
-meta = analysis_section.get("meta", {})
-meta["mapping_applied"] = bool(effective_mapping)
-if effective_mapping:
-    meta["mapping_keys"] = {
-        "pems": sorted(list((effective_mapping.get("pems") or {}).keys())),
-        "ecu":  sorted(list((effective_mapping.get("ecu") or {}).keys())),
-    }
-analysis_section["meta"] = meta
-
-# Write back
-results_payload["analysis"] = analysis_section
-
-# If the request came from a browser, render HTML; otherwise return JSON.
-
-    status_code = status.HTTP_400_BAD_REQUEST if errors else status.HTTP_200_OK
-
-    if request.headers.get("hx-request") == "true":
-        context = _build_results_context(
-            results_payload,
-            errors,
+        context = _base_template_context(
+            request,
+            results=results_payload,
+            errors=errors,
             include_export_controls=True,
         )
-        context.update({
-            "request": request,
-            "badge_pass": BADGE_PASS,
-            "badge_fail": BADGE_FAIL,
-        })
-        return templates.TemplateResponse(
-            "results.html",
-            context,
-            status_code=status_code,
-        )
-
-    context = _base_template_context(
-        request,
-        results=results_payload,
-        errors=errors,
-        include_export_controls=True,
-    )
-    return templates.TemplateResponse("index.html", context, status_code=status_code)
-
+        return templates.TemplateResponse("index.html", context, status_code=status_code)
 
 @router.get("/mapping_profiles", include_in_schema=False)
 async def list_mapping_profiles_endpoint() -> JSONResponse:
