@@ -7,6 +7,7 @@ import io
 import json
 import math
 import pathlib
+from pathlib import Path
 import tempfile
 import zipfile
 from typing import Any
@@ -37,7 +38,7 @@ from src.app.utils.mappings import (
 
 router = APIRouter(include_in_schema=False)
 
-template_dir = pathlib.Path(__file__).resolve().parent / "templates"
+template_dir = Path(__file__).parent / "templates"
 templates = Jinja2Templates(directory=str(template_dir))
 
 BADGE_PASS = "px-2 py-1 rounded bg-green-600/10 text-green-700 dark:text-green-300 border border-green-600/20"
