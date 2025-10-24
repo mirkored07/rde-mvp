@@ -1074,7 +1074,7 @@ async def analyze(request: Request) -> Response:
             existing_chart = analysis_section.get("chart") or {}
 
             try:
-                pollutant_chart = build_pollutant_chart(fused)
+                pollutant_chart = build_pollutant_chart(fused, effective_mapping or {})
             except Exception:
                 pollutant_chart = {"pollutants": []}
 
