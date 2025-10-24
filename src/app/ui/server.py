@@ -1092,14 +1092,32 @@ async def analyze(request: Request) -> Response:
             analysis_section["meta"] = meta
 
             results_payload["analysis"] = analysis_section
+            # Back-compat for tests: mirror chart + mapping flags at the top level
+            results_payload["chart"] = analysis_section.get("chart", {})
+            results_payload["mapping_applied"] = (
+                analysis_section.get("meta", {}).get("mapping_applied", None)
+            )
+            # Optional: also expose keys for easier assertions
+            if "meta" in analysis_section and "mapping_keys" in analysis_section["meta"]:
+                results_payload["mapping_keys"] = analysis_section["meta"]["mapping_keys"]
         except ValueError as exc:
             errors.append(str(exc))
 
     if errors:
         analysis_section = results_payload.get("analysis", {})
+        error_payload = {
+            "errors": errors,
+            "analysis": analysis_section,
+            "chart": analysis_section.get("chart", {}),
+            "mapping_applied": analysis_section.get("meta", {}).get(
+                "mapping_applied", None
+            ),
+        }
+        if "meta" in analysis_section and "mapping_keys" in analysis_section["meta"]:
+            error_payload["mapping_keys"] = analysis_section["meta"]["mapping_keys"]
         return JSONResponse(
             status_code=status.HTTP_400_BAD_REQUEST,
-            content={"errors": errors, "analysis": analysis_section},
+            content=error_payload,
         )
 
     status_code = status.HTTP_200_OK
