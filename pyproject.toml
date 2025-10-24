@@ -17,6 +17,8 @@ gpxpy = "^1.6.2"
 pynmea2 = "^1.19.0"
 pint = "^0.23"
 weasyprint = {version = "^62.0", optional = true}
+jinja2 = "^3.1"
+python-multipart = "^0.0.9"
 
 [tool.poetry.extras]
 pdf = ["weasyprint"]
