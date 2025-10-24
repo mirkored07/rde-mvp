@@ -192,10 +192,17 @@ def test_analysis_applies_column_mapping() -> None:
     assert response.status_code == 200
     payload = _extract_results_payload(response.text)
     chart = payload.get("analysis", {}).get("chart", {})
-    traces = chart.get("traces", [])
-    speed_trace = next((trace for trace in traces if trace.get("name") == "Vehicle speed (m/s)"), None)
-    assert speed_trace is not None
-    assert speed_trace["y"][0] == pytest.approx(12.0, rel=1e-6)
+    speed = chart.get("speed", {})
+    assert speed and speed.get("values")
+    assert speed["values"][0] == pytest.approx(12.0, rel=1e-6)
+
+    pollutants = chart.get("pollutants", [])
+    nox_series = next((item for item in pollutants if item.get("key") == "NOx"), None)
+    assert nox_series is not None
+    assert nox_series["values"][0] == pytest.approx(120.0, rel=1e-6)
+
+    kpis = payload.get("analysis", {}).get("kpis", {})
+    assert "NOx_mg_per_km" in kpis
 
 
 def test_analysis_reports_missing_required_column_from_mapping() -> None:

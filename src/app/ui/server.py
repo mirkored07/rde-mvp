@@ -7,6 +7,7 @@ import io
 import json
 import math
 import pathlib
+from collections.abc import Mapping
 from pathlib import Path
 import tempfile
 import zipfile
@@ -17,6 +18,7 @@ from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.templating import Jinja2Templates
 
+from src.app.analysis.metrics import REGISTRY as KPI_REGISTRY, normalize_unit_series
 from src.app.data.analysis import AnalysisEngine, AnalysisResult, load_rules
 from src.app.data.regulation import PackEvaluation, evaluate_pack, load_pack
 from src.app.data.fusion import FusionEngine
@@ -48,6 +50,17 @@ MAX_UPLOAD_MB = 50
 GPS_EXTENSIONS = {".csv", ".nmea", ".gpx", ".txt"}
 ECU_EXTENSIONS = {".csv", ".mf4", ".mdf"}
 PEMS_EXTENSIONS = {".csv"}
+
+_POLLUTANT_COLORS: dict[str, str] = {
+    "NOx": "#dc2626",
+    "PN": "#9333ea",
+    "CO": "#f97316",
+    "CO2": "#0ea5e9",
+    "THC": "#f59e0b",
+    "NH3": "#22c55e",
+    "N2O": "#8b5cf6",
+    "PM": "#14b8a6",
+}
 
 _project_root = pathlib.Path(__file__).resolve().parents[3]
 _rules_path = _project_root / "data" / "rules" / "demo_rules.json"
@@ -335,55 +348,13 @@ def _to_iso(timestamp: pd.Timestamp) -> str:
 
 
 def _prepare_chart_payload(derived: pd.DataFrame) -> dict[str, Any]:
-    if derived.empty or "timestamp" not in derived.columns:
-        return {"traces": [], "layout": {}}
-
-    working = derived[[col for col in derived.columns if col in {"timestamp", "veh_speed_m_s", "nox_mg_s", "pn_1_s", "exhaust_flow_kg_s"}]].copy()
-    working = working.dropna(subset=["timestamp"])
-    working = working.sort_values("timestamp", kind="stable")
-    working = _reduce_rows(working)
-
-    times = [_to_iso(ts) for ts in working["timestamp"]]
-    traces: list[dict[str, Any]] = []
-
-    if "veh_speed_m_s" in working.columns:
-        traces.append(
-            {
-                "name": "Vehicle speed (m/s)",
-                "mode": "lines",
-                "x": times,
-                "y": [value if pd.notna(value) else None for value in working["veh_speed_m_s"]],
-                "line": {"color": "#2563eb", "width": 2.5},
-                "yaxis": "y1",
-            }
-        )
-
-    emission_series = [
-        ("NOx (mg/s)", "nox_mg_s", "#dc2626"),
-        ("PN (#/s)", "pn_1_s", "#9333ea"),
-        ("Exhaust flow (kg/s)", "exhaust_flow_kg_s", "#14b8a6"),
-    ]
-
-    for label, column, color in emission_series:
-        if column in working.columns and working[column].notna().any():
-            traces.append(
-                {
-                    "name": label,
-                    "mode": "lines",
-                    "x": times,
-                    "y": [value if pd.notna(value) else None for value in working[column]],
-                    "line": {"color": color, "width": 2},
-                    "yaxis": "y2",
-                }
-            )
-
     layout = {
         "margin": {"t": 32, "r": 32, "b": 40, "l": 48},
-        "legend": {"orientation": "h", "y": -0.2},
+        "legend": {"orientation": "h", "y": -0.25},
         "xaxis": {"title": "Time", "showgrid": False},
         "yaxis": {"title": "Speed (m/s)", "zeroline": False},
         "yaxis2": {
-            "title": "Emissions",
+            "title": "Emission rate",
             "overlaying": "y",
             "side": "right",
             "showgrid": False,
@@ -393,7 +364,60 @@ def _prepare_chart_payload(derived: pd.DataFrame) -> dict[str, Any]:
         "plot_bgcolor": "rgba(0,0,0,0)",
     }
 
-    return {"traces": traces, "layout": layout}
+    if derived.empty or "timestamp" not in derived.columns:
+        return {"times": [], "speed": None, "pollutants": [], "layout": layout}
+
+    columns: set[str] = {"timestamp", "veh_speed_m_s"}
+    columns.update(definition.col for definition in KPI_REGISTRY.values())
+    working = derived[[col for col in columns if col in derived.columns]].copy()
+    working = working.dropna(subset=["timestamp"])
+    if working.empty:
+        return {"times": [], "speed": None, "pollutants": [], "layout": layout}
+
+    working = working.sort_values("timestamp", kind="stable")
+    working = _reduce_rows(working)
+
+    times = [_to_iso(ts) for ts in working["timestamp"]]
+
+    units_map: Mapping[str, str] = {}
+    attrs = getattr(derived, "attrs", {})
+    if isinstance(attrs, Mapping):
+        raw_units = attrs.get("units")
+        if isinstance(raw_units, Mapping):
+            units_map = dict(raw_units)
+
+    speed_payload: dict[str, Any] | None = None
+    if "veh_speed_m_s" in working.columns:
+        speed_series = pd.to_numeric(working["veh_speed_m_s"], errors="coerce")
+        speed_payload = {
+            "label": "Vehicle speed (m/s)",
+            "unit": "m/s",
+            "values": [float(value) if pd.notna(value) else None for value in speed_series],
+            "color": "#2563eb",
+        }
+
+    pollutants: list[dict[str, Any]] = []
+    for pollutant, definition in KPI_REGISTRY.items():
+        column = definition.col
+        if column not in working.columns:
+            continue
+        series = pd.to_numeric(working[column], errors="coerce")
+        if not series.notna().any():
+            continue
+        from_unit = units_map.get(column, definition.si_unit)
+        series_si = normalize_unit_series(series, from_unit, definition.si_unit)
+        values = [float(value) if pd.notna(value) else None for value in series_si]
+        pollutants.append(
+            {
+                "key": pollutant,
+                "label": f"{pollutant} ({definition.si_unit})",
+                "unit": definition.si_unit,
+                "values": values,
+                "color": _POLLUTANT_COLORS.get(pollutant, "#dc2626"),
+            }
+        )
+
+    return {"times": times, "speed": speed_payload, "pollutants": pollutants, "layout": layout}
 
 
 def _prepare_map_payload(derived: pd.DataFrame) -> dict[str, Any]:
@@ -478,6 +502,7 @@ def _prepare_results(
     total_time = overall.get("total_time_s")
     largest_gap = completeness.get("largest_gap_s")
 
+    kpi_payload = result.analysis.get("kpis") or {}
     metrics: list[dict[str, str]] = []
     metrics.append(_format_metric("Total distance", float(total_distance) if isinstance(total_distance, (int, float)) else None, " km"))
     metrics.append(
@@ -495,19 +520,58 @@ def _prepare_results(
         )
     )
 
+    for key in kpi_payload:
+        info = kpi_payload.get(key)
+        if not isinstance(info, Mapping):
+            continue
+        total_entry = info.get("total")
+        raw_value = None
+        if isinstance(total_entry, Mapping):
+            raw_value = total_entry.get("value")
+        elif "value" in info:
+            raw_value = info.get("value")
+        value = None
+        if raw_value is not None and not pd.isna(raw_value):
+            value = float(raw_value)
+        label = str(info.get("label") or key)
+        unit = info.get("unit")
+        suffix = f" {unit}" if unit else ""
+        metrics.append(_format_metric(label, value, suffix))
+
     bins_payload = result.analysis.get("bins") or {}
+    kpi_order = [key for key in kpi_payload if isinstance(kpi_payload.get(key), Mapping)]
     bin_rows: list[dict[str, Any]] = []
     for name, info in bins_payload.items():
         time_s = info.get("time_s")
         distance_km = info.get("distance_km")
-        kpis = info.get("kpis") or {}
-        kpi_rows = []
-        for kpi_name, value in kpis.items():
-            if value is None or pd.isna(value):
+        raw_kpis = info.get("kpis")
+        kpi_map = dict(raw_kpis) if isinstance(raw_kpis, Mapping) else {}
+        kpi_rows: list[dict[str, str]] = []
+
+        for key in kpi_order:
+            metric_info = kpi_payload.get(key)
+            if not isinstance(metric_info, Mapping):
+                continue
+            label = str(metric_info.get("label") or key)
+            unit = metric_info.get("unit")
+            raw_value = kpi_map.get(key)
+            if raw_value is None or pd.isna(raw_value):
                 display = "n/a"
             else:
-                display = f"{float(value):.3f}"
-            kpi_rows.append({"name": kpi_name, "value": display})
+                display = f"{float(raw_value):.3f}"
+                if unit:
+                    display = f"{display} {unit}"
+            kpi_rows.append({"name": label, "value": display})
+
+        extra_keys = [extra for extra in kpi_map.keys() if extra not in kpi_order]
+        for extra in sorted(extra_keys):
+            raw_value = kpi_map.get(extra)
+            if raw_value is None or pd.isna(raw_value):
+                display = "n/a"
+            else:
+                display = f"{float(raw_value):.3f}"
+            kpi_rows.append({"name": extra, "value": display})
+
         bin_rows.append(
             {
                 "name": name,
@@ -598,6 +662,7 @@ def _prepare_results(
             "status": {"label": status_label, "ok": status_ok},
             "metrics": metrics,
             "bins": bin_rows,
+            "kpis": kpi_payload,
             "chart": chart_payload,
             "map": map_payload,
         },
@@ -670,6 +735,7 @@ def _build_results_context(
         },
         "metrics": analysis.get("metrics", []),
         "bins": analysis.get("bins", []),
+        "kpis": analysis.get("kpis", {}),
         "summary_md": analysis.get("summary_md", ""),
         "chart": analysis.get("chart", {}),
         "map": analysis.get("map", {}),
