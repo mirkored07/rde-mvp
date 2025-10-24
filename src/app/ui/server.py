@@ -15,7 +15,6 @@ import pandas as pd
 from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.templating import Jinja2Templates
-from starlette.responses import TemplateResponse
 
 from src.app.data.analysis import AnalysisEngine, AnalysisResult, load_rules
 from src.app.data.regulation import PackEvaluation, evaluate_pack, load_pack
@@ -740,7 +739,7 @@ def _base_template_context(
 
 
 @router.get("/")
-async def index(request: Request) -> TemplateResponse:
+async def index(request: Request) -> Response:
     context = _base_template_context(request, results=None, errors=[])
     return templates.TemplateResponse("index.html", context)
 
@@ -807,7 +806,7 @@ async def _extract_form_data(
 
 
 @router.post("/analyze")
-async def analyze(request: Request) -> TemplateResponse:
+async def analyze(request: Request) -> Response:
     errors: list[str] = []
     results_payload: dict[str, Any] | None = None
 
