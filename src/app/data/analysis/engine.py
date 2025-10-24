@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Mapping
+from typing import Any
 
 import numpy as np
 import pandas as pd
+
+from src.app.analysis.metrics import compute_distance_normalized_kpis
 
 from .rules import AnalysisRules, SpeedBin
 
@@ -76,6 +79,10 @@ class AnalysisEngine:
             return AnalysisResult(derived=derived, analysis=analysis, summary_md=summary)
 
         df = fused.copy()
+        try:
+            df.attrs = dict(getattr(fused, "attrs", {}))
+        except AttributeError:
+            df.attrs = {}
         df = df.sort_values(self.timestamp_col).reset_index(drop=True)
 
         ts = pd.to_datetime(df[self.timestamp_col], utc=True, errors="coerce")
@@ -107,6 +114,7 @@ class AnalysisEngine:
 
         speed_kmh = speed * 3.6
         bin_payload: dict[str, Any] = {}
+        bin_masks: dict[str, pd.Series] = {}
         bin_valid_flags: list[bool] = []
 
         total_distance_km = float(distance_m.sum() / 1000.0)
@@ -115,6 +123,7 @@ class AnalysisEngine:
             mask = self._compute_bin_mask(speed_kmh, bin_spec)
             mask_col = self._sanitize_bin_name(bin_spec.name)
             df[mask_col] = mask
+            bin_masks[bin_spec.name] = mask
 
             time_s = float((dt * mask).sum())
             distance_km = float((distance_m * mask).sum() / 1000.0)
@@ -127,7 +136,7 @@ class AnalysisEngine:
             if self.rules.min_time_s_per_bin is not None:
                 meets_time = time_s >= self.rules.min_time_s_per_bin
 
-            kpis = self._compute_bin_kpis(df, mask, speed_col)
+            kpis = dict(self._compute_bin_kpis(df, mask, speed_col))
 
             valid = bool(meets_distance and meets_time)
             bin_valid_flags.append(valid)
@@ -147,7 +156,35 @@ class AnalysisEngine:
 
         overall_valid = completeness_ok and all(bin_valid_flags) if bin_valid_flags else completeness_ok
 
-        analysis_payload: Mapping[str, Any] = {
+        attrs = getattr(df, "attrs", {}) if hasattr(df, "attrs") else {}
+        units_map: Mapping[str, str] | None = None
+        if isinstance(attrs, Mapping):
+            raw_units = attrs.get("units")
+            if isinstance(raw_units, Mapping):
+                units_map = dict(raw_units)
+
+        distance_kpis = compute_distance_normalized_kpis(
+            df,
+            rate_units=units_map,
+            bin_masks=bin_masks,
+        )
+
+        if distance_kpis:
+            for metric_key, data in distance_kpis.items():
+                for bin_name, entry in data.items():
+                    if bin_name in {"label", "unit", "total"}:
+                        continue
+                    if bin_name not in bin_payload:
+                        continue
+                    value = entry.get("value") if isinstance(entry, Mapping) else None
+                    bin_payload[bin_name].setdefault("kpis", {})[metric_key] = value
+
+        overall_kpis = {
+            metric_key: data.get("total", {}).get("value")
+            for metric_key, data in distance_kpis.items()
+        }
+
+        analysis_payload: dict[str, Any] = {
             "overall": {
                 "total_time_s": total_time_s,
                 "total_distance_km": total_distance_km,
@@ -160,6 +197,12 @@ class AnalysisEngine:
             },
             "bins": bin_payload,
         }
+
+        if distance_kpis:
+            overall_section = dict(analysis_payload["overall"])
+            overall_section["kpis"] = overall_kpis
+            analysis_payload["overall"] = overall_section
+            analysis_payload["kpis"] = distance_kpis
 
         summary_md = self._build_summary(overall_valid, analysis_payload)
 

@@ -60,6 +60,54 @@ html.dark .tab-trigger.is-active {
   display: none;
 }
 
+.chart-toggle-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.chart-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.5rem 1.125rem;
+  border-radius: 9999px;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: rgb(30 41 59);
+  background-color: rgba(15, 23, 42, 0.06);
+  border: 1px solid rgba(148, 163, 184, 0.4);
+  transition: color 0.2s ease, background-color 0.2s ease, border-color 0.2s ease;
+}
+
+.chart-toggle:hover {
+  color: rgb(37 99 235);
+  border-color: rgba(37, 99, 235, 0.35);
+}
+
+.chart-toggle.is-active {
+  color: rgb(255 255 255);
+  background-color: rgb(37 99 235);
+  border-color: rgb(37 99 235);
+}
+
+html.dark .chart-toggle {
+  color: rgb(226 232 240);
+  background-color: rgba(15, 23, 42, 0.5);
+  border-color: rgba(148, 163, 184, 0.35);
+}
+
+html.dark .chart-toggle:hover {
+  color: rgb(129 140 248);
+  border-color: rgba(129, 140, 248, 0.5);
+}
+
+html.dark .chart-toggle.is-active {
+  color: rgb(15 23 42);
+  background-color: rgb(129 140 248);
+  border-color: rgb(129, 140, 248);
+}
+
 .htmx-indicator {
   display: none;
 }

@@ -653,6 +653,7 @@
   function renderChart(container) {
     const chart = container.querySelector("#analysis-chart");
     const empty = container.querySelector("[data-chart-empty]");
+    const switcher = container.querySelector("[data-chart-switcher]");
     const dataEl = container.querySelector("#chart-data");
     if (!chart || !dataEl) return;
 
@@ -663,24 +664,126 @@
       config = null;
     }
 
-    if (!config || !config.traces || !config.traces.length) {
+    const pollutants = Array.isArray(config?.pollutants)
+      ? config.pollutants.filter((item) => Array.isArray(item.values))
+      : [];
+    const hasPollutants = pollutants.some((item) => item.values.some((value) => value !== null && value !== undefined));
+
+    if (!config || !hasPollutants || !window.Plotly) {
+      if (switcher) {
+        switcher.innerHTML = "";
+        switcher.classList.add("hidden");
+      }
       if (empty) empty.classList.remove("hidden");
       chart.classList.add("hidden");
       chart.dataset.chartReady = "false";
+      if (window.Plotly) {
+        window.Plotly.purge(chart);
+      }
       return;
+    }
+
+    const times = Array.isArray(config.times) ? config.times : [];
+    const speed = config.speed;
+    const baseLayout = config.layout || {
+      margin: { t: 32, r: 32, b: 40, l: 48 },
+      legend: { orientation: "h", y: -0.25 },
+      xaxis: { title: "Time", showgrid: false },
+      yaxis: { title: "Speed (m/s)", zeroline: false },
+      yaxis2: {
+        title: "Emission rate",
+        overlaying: "y",
+        side: "right",
+        showgrid: false,
+        zeroline: false,
+      },
+      paper_bgcolor: "rgba(0,0,0,0)",
+      plot_bgcolor: "rgba(0,0,0,0)",
+    };
+
+    const buttons = [];
+    if (switcher) {
+      switcher.innerHTML = "";
+    }
+
+    const renderPollutant = (pollutant) => {
+      if (!pollutant) return;
+      const traces = [];
+      if (speed && Array.isArray(speed.values) && speed.values.some((value) => value !== null && value !== undefined)) {
+        traces.push({
+          name: speed.label || "Vehicle speed",
+          mode: "lines",
+          x: times,
+          y: speed.values.map((value) => (value === null || value === undefined ? null : Number(value))),
+          line: { color: speed.color || "#2563eb", width: 2.5 },
+          yaxis: "y",
+        });
+      }
+
+      traces.push({
+        name: pollutant.label || pollutant.key || "Pollutant",
+        mode: "lines",
+        x: times,
+        y: pollutant.values.map((value) => (value === null || value === undefined ? null : Number(value))),
+        line: { color: pollutant.color || "#dc2626", width: 2 },
+        yaxis: "y2",
+      });
+
+      const layout = JSON.parse(JSON.stringify(baseLayout));
+      if (pollutant.label) {
+        layout.yaxis2.title = pollutant.label;
+      }
+      if (speed?.label) {
+        layout.yaxis.title = speed.label;
+      }
+
+      if (chart.dataset.chartReady === "true") {
+        window.Plotly.react(chart, traces, layout, { displayModeBar: false, responsive: true });
+      } else {
+        window.Plotly.newPlot(chart, traces, layout, { displayModeBar: false, responsive: true });
+        chart.dataset.chartReady = "true";
+      }
+      chart.dataset.currentPollutant = pollutant.key || "";
+      applyChartTheme();
+    };
+
+    if (switcher) {
+      pollutants.forEach((pollutant, index) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "chart-toggle";
+        button.textContent = pollutant.label || pollutant.key || `Option ${index + 1}`;
+        button.addEventListener("click", () => {
+          if (chart.dataset.currentPollutant === (pollutant.key || "")) {
+            return;
+          }
+          buttons.forEach((btn) => btn.classList.remove("is-active"));
+          button.classList.add("is-active");
+          chart.dataset.chartReady = "false";
+          window.Plotly.purge(chart);
+          renderPollutant(pollutant);
+        });
+        buttons.push(button);
+        switcher.appendChild(button);
+      });
+      if (buttons.length) {
+        switcher.classList.remove("hidden");
+      } else {
+        switcher.classList.add("hidden");
+      }
     }
 
     if (empty) empty.classList.add("hidden");
     chart.classList.remove("hidden");
+    window.Plotly.purge(chart);
+    chart.dataset.chartReady = "false";
 
-    if (window.Plotly) {
-      window.Plotly.purge(chart);
-      window.Plotly.newPlot(chart, config.traces, config.layout, {
-        displayModeBar: false,
-        responsive: true,
-      });
-      chart.dataset.chartReady = "true";
-      applyChartTheme();
+    const initial = pollutants.find((pollutant) => pollutant && Array.isArray(pollutant.values));
+    if (initial) {
+      if (buttons.length) {
+        buttons[0].classList.add("is-active");
+      }
+      renderPollutant(initial);
     }
   }
 
