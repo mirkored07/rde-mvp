@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import functools
 import io
 import json
@@ -334,6 +335,18 @@ def build_results_payload(
     """Build a canonical ``results_payload`` dictionary for UI responses."""
 
     regulation_payload = _ensure_dict(regulation) or {}
+    regulation_defaults = {
+        "pack_id": "",
+        "pack_title": "",
+        "legal_source": "",
+        "subject": "",
+        "label": "",
+        "ok": False,
+    }
+    for key, default_value in regulation_defaults.items():
+        if key not in regulation_payload or regulation_payload.get(key) is None:
+            regulation_payload[key] = default_value
+
     analysis_payload = _ensure_dict(analysis) or {}
 
     chart_payload = _ensure_dict(chart) or _ensure_dict(analysis_payload.get("chart")) or {}
@@ -347,6 +360,8 @@ def build_results_payload(
 
     quality_payload = _ensure_dict(quality) or {}
     evidence_payload = _normalise_rule_evidence(rule_evidence)
+    if isinstance(rule_evidence, str) and rule_evidence.strip():
+        summary_rule_evidence_source = rule_evidence
     summary_rule_evidence_source: Any = None
     if not evidence_payload and "evidence" in analysis_payload:
         evidence_payload = _normalise_rule_evidence(analysis_payload.get("evidence"))
@@ -370,6 +385,34 @@ def build_results_payload(
         errors_list,
     )
     metadata_payload = _normalise_metadata(metadata, regulation_payload, quality_payload)
+
+    for meta_key in ("pack_id", "pack_title", "legal_source", "subject"):
+        if not regulation_payload.get(meta_key):
+            regulation_payload[meta_key] = metadata_payload.get(meta_key, "")
+
+    counts_payload = _ensure_dict(regulation_payload.get("counts")) or {}
+    counts_defaults = {
+        "mandatory_passed": 0,
+        "mandatory_total": 0,
+        "optional_passed": 0,
+        "optional_total": 0,
+    }
+    for key, default_value in counts_defaults.items():
+        if key not in counts_payload or counts_payload.get(key) is None:
+            counts_payload[key] = default_value
+        else:
+            try:
+                counts_payload[key] = int(counts_payload.get(key))
+            except (TypeError, ValueError):
+                counts_payload[key] = default_value
+    regulation_payload["counts"] = counts_payload
+
+    label_value = regulation_payload.get("label") or regulation_payload.get("verdict")
+    if not isinstance(label_value, str) or not label_value.strip():
+        regulation_payload["label"] = "PASS" if regulation_payload.get("ok") else "FAIL"
+    else:
+        regulation_payload["label"] = label_value.strip()
+    regulation_payload["ok"] = bool(regulation_payload.get("ok"))
 
     existing_summary = analysis_payload.get("summary")
     existing_rule_evidence = None
@@ -419,7 +462,8 @@ def build_results_payload(
         "errors": errors_list,
         "summary": summary_payload,
         "metadata": metadata_payload,
-        "rule_evidence": evidence_payload,
+        "rule_evidence": rule_evidence_text,
+        "rule_evidence_entries": evidence_payload,
         "evidence": evidence_payload,
         "quality": quality_payload,
         "diagnostics_text": diagnostics_text,
@@ -451,6 +495,7 @@ def send_results_response(
     metadata: Optional[Mapping[str, Any]] = None,
     quality: Optional[Mapping[str, Any]] = None,
     http_status: int = 200,
+    **extra_fields: Any,
 ) -> JSONResponse:
     """
     Universal response wrapper for all analysis/export endpoints.
@@ -478,6 +523,7 @@ def send_results_response(
         metadata=metadata,
         quality=quality,
         http_status=http_status,
+        **extra_fields,
     )
 
     script = rp.get("payload_script")
@@ -511,7 +557,11 @@ def _build_payload_from_source(
     http_status_value: int | None = None
 
     if isinstance(source, Mapping):
-        rule_evidence_value = source.get("rule_evidence", source.get("evidence"))
+        rule_evidence_value = source.get("rule_evidence_entries")
+        if rule_evidence_value is None:
+            rule_evidence_value = source.get("evidence")
+        if rule_evidence_value is None:
+            rule_evidence_value = source.get("rule_evidence")
         summary_candidate = source.get("summary")
         if isinstance(summary_candidate, Mapping):
             summary_value = summary_candidate
@@ -548,26 +598,18 @@ def _send_payload_response(
     *,
     http_status: int = status.HTTP_200_OK,
 ) -> JSONResponse:
-    regulation_payload = _ensure_dict(payload.get("regulation")) or {}
-    analysis_payload = _ensure_dict(payload.get("analysis")) or {}
-    chart_payload = _ensure_dict(payload.get("chart")) or _ensure_dict(
-        analysis_payload.get("chart")
-    ) or {}
-
-    return send_results_response(
-        regulation=regulation_payload,
-        analysis=analysis_payload,
-        chart=chart_payload,
-        mapping_applied=payload.get("mapping_applied"),
-        mapping_keys=_normalise_mapping_keys(payload.get("mapping_keys")),
-        diagnostics=_ensure_string_list(payload.get("diagnostics")),
-        errors=_ensure_string_list(payload.get("errors")),
-        rule_evidence=payload.get("rule_evidence") or payload.get("evidence"),
-        summary=_ensure_dict(payload.get("summary")) or None,
-        metadata=_ensure_dict(payload.get("metadata")) or None,
-        quality=_ensure_dict(payload.get("quality")) or None,
-        http_status=http_status,
-    )
+    payload = dict(payload)
+    payload["http_status"] = http_status
+    script = payload.get("payload_script")
+    if not isinstance(script, str) or "<script" not in script:
+        _embed_payload_script(payload)
+        script = payload.get("payload_script", "")
+    content = {
+        "results_payload": payload,
+        "payload_script": script or "",
+        "status_code": http_status,
+    }
+    return JSONResponse(status_code=status.HTTP_200_OK, content=content)
 
 
 def _apply_mapping(df: pd.DataFrame, mapping: dict[str, Any], domain: str) -> pd.DataFrame:
@@ -1785,8 +1827,24 @@ async def export_pdf(request: Request) -> Response:
             )
             return _send_payload_response(results_payload)
 
-        headers = {"Content-Disposition": "attachment; filename=analysis-report.pdf"}
-        return Response(content=pdf_bytes, media_type="application/pdf", headers=headers)
+        diagnostics.append("export generated: pdf")
+        encoded_pdf = base64.b64encode(pdf_bytes).decode("ascii")
+        results_payload = _build_payload_from_source(
+            results_copy,
+            diagnostics=diagnostics,
+            errors=soft_errors,
+        )
+        attachments = list(results_payload.get("attachments", []))
+        attachments.append(
+            {
+                "filename": "analysis-report.pdf",
+                "media_type": "application/pdf",
+                "content_base64": encoded_pdf,
+            }
+        )
+        results_payload["attachments"] = attachments
+        _embed_payload_script(results_payload)
+        return _send_payload_response(results_payload)
 
     except Exception as exc:  # pragma: no cover - unexpected failure guard
         return send_results_response(
@@ -1852,8 +1910,24 @@ async def export_zip(request: Request) -> Response:
             )
             return _send_payload_response(results_payload)
 
-        headers = {"Content-Disposition": "attachment; filename=analysis-report.zip"}
-        return Response(content=archive_bytes, media_type="application/zip", headers=headers)
+        diagnostics.append("export generated: zip")
+        encoded_zip = base64.b64encode(archive_bytes).decode("ascii")
+        results_payload = _build_payload_from_source(
+            results_copy,
+            diagnostics=diagnostics,
+            errors=soft_errors,
+        )
+        attachments = list(results_payload.get("attachments", []))
+        attachments.append(
+            {
+                "filename": "analysis-report.zip",
+                "media_type": "application/zip",
+                "content_base64": encoded_zip,
+            }
+        )
+        results_payload["attachments"] = attachments
+        _embed_payload_script(results_payload)
+        return _send_payload_response(results_payload)
 
     except Exception as exc:  # pragma: no cover - unexpected failure guard
         return send_results_response(
