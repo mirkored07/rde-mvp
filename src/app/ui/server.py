@@ -758,7 +758,9 @@ def _prepare_results(
     }
 
     if diagnostics is not None:
-        payload["diagnostics"] = to_dict(diagnostics) if isinstance(diagnostics, Diagnostics) else diagnostics
+        payload["quality"] = (
+            to_dict(diagnostics) if isinstance(diagnostics, Diagnostics) else diagnostics
+        )
 
     analysis_section = payload.get("analysis")
     if isinstance(analysis_section, dict):
@@ -846,7 +848,11 @@ def _build_results_context(
         "map": analysis.get("map", {}),
     }
 
-    diagnostics_data = results.get("diagnostics") or {}
+    diagnostics_data = (
+        results.get("quality")
+        or results.get("diagnostics")
+        or {}
+    )
     diag_checks = diagnostics_data.get("checks") or []
     diag_summary = diagnostics_data.get("summary") or {}
     diag_repaired: list[str] = []
@@ -979,188 +985,209 @@ async def _extract_form_data(
 
 @router.post("/analyze")
 async def analyze(request: Request) -> Response:
-    errors: list[str] = []
+    diagnostics_messages: list[Any] = []
+    soft_errors: list[str] = []
     results_payload: dict[str, Any] = {}
-    diagnostics: Diagnostics | dict[str, Any] | None = None
+    diagnostics_result: Diagnostics | dict[str, Any] | None = None
+    units_hint_applied: dict[str, str] | None = None
+
+    files: dict[str, tuple[str | None, bytes]] = {}
+    fields: dict[str, str] = {}
 
     try:
-        files, fields = await _extract_form_data(request)
-    except ValueError as exc:
-        errors.append(str(exc))
-        files = {}
-        fields = {}
-
-    mapping_state: dict[str, DatasetMapping] = {}
-    resolved_mapping: dict[str, Any] = {}
-    effective_mapping: dict[str, Any] = {}
-    if not errors:
-        mapping_inline_raw = fields.get("mapping") or None
-        mapping_json_raw = fields.get("mapping_json") or None
-        mapping_name_raw = fields.get("mapping_name") or None
         try:
-            mapping_state, resolved_mapping = _resolve_mapping(
-                mapping_inline_raw or mapping_json_raw,
-                mapping_name_raw,
-                fields.get("mapping_payload"),
-            )
-            effective_mapping = {
-                key: value for key, value in resolved_mapping.items() if value
-            }
-        except MappingValidationError as exc:
-            errors.append(str(exc))
-
-    if not errors:
-        required = {"pems_file", "gps_file", "ecu_file"}
-        missing = required - set(files)
-        if missing:
-            errors.append(
-                "Please provide PEMS, GPS, and ECU files to run the analysis."
-            )
-
-    if not errors:
-        try:
-            pems_name, pems_bytes = files["pems_file"]
-            gps_name, gps_bytes = files["gps_file"]
-            ecu_name, ecu_bytes = files["ecu_file"]
-
-            pems_df = _ingest_pems(
-                pems_name, pems_bytes, mapping=mapping_state.get("pems")
-            )
-            pems_df = _apply_mapping(pems_df, resolved_mapping, "pems")
-            gps_df = _ingest_gps(
-                gps_name, gps_bytes, mapping=mapping_state.get("gps")
-            )
-            ecu_df = _ingest_ecu(
-                ecu_name, ecu_bytes, mapping=mapping_state.get("ecu")
-            )
-            ecu_df = _apply_mapping(ecu_df, resolved_mapping, "ecu")
-
-            units_hint = {}
-            units_source = resolved_mapping.get("units", {})
-            if isinstance(units_source, Mapping):
-                units_hint = {
-                    str(col): str(unit)
-                    for col, unit in units_source.items()
-                    if isinstance(col, str) and isinstance(unit, str)
-                }
-
-            fused = _fuse_streams(pems_df, gps_df, ecu_df)
-            if units_hint:
-                fused.attrs = dict(getattr(fused, "attrs", {}))
-                fused.attrs["units"] = units_hint
-            fused, diagnostics = run_diagnostics(
-                fused,
-                {
-                    "pems": pems_df,
-                    "gps": gps_df,
-                    "ecu": ecu_df,
-                },
-                gap_threshold_s=2.0,
-                repair_small_gaps=True,
-                repair_threshold_s=3.0,
-            )
-
-            engine = AnalysisEngine(load_analysis_rules())
-            analysis_result = engine.analyze(fused)
-            pack = load_regulation_pack()
-            evaluation = evaluate_pack(analysis_result, pack)
-
-            results_payload = _prepare_results(
-                analysis_result,
-                evaluation,
-                diagnostics,
-            )
-            analysis_section = results_payload.get("analysis") or {}
-            existing_chart = analysis_section.get("chart") or {}
-
-            df_for_chart = (
-                locals().get("fused", None)
-                or locals().get("pems_df", None)
-                or locals().get("p_df", None)
-            )
-
-            try:
-                pollutant_chart = build_pollutant_chart(
-                    df_for_chart, effective_mapping or {}
-                )
-            except Exception:
-                pollutant_chart = {"pollutants": []}
-
-            chart_out = dict(existing_chart)
-            chart_out.update(pollutant_chart)
-            analysis_section["chart"] = chart_out
-
-            meta = analysis_section.get("meta", {})
-            meta["mapping_applied"] = bool(effective_mapping)
-            if effective_mapping:
-                meta["mapping_keys"] = {
-                    "pems": sorted(list((effective_mapping.get("pems") or {}).keys())),
-                    "ecu": sorted(list((effective_mapping.get("ecu") or {}).keys())),
-                }
-            analysis_section["meta"] = meta
-
-            results_payload["analysis"] = analysis_section
-            # Back-compat for tests: mirror chart + mapping flags at the top level
-            results_payload["chart"] = analysis_section.get("chart", {})
-            results_payload["mapping_applied"] = (
-                analysis_section.get("meta", {}).get("mapping_applied", None)
-            )
-            # Optional: also expose keys for easier assertions
-            if "meta" in analysis_section and "mapping_keys" in analysis_section["meta"]:
-                results_payload["mapping_keys"] = analysis_section["meta"]["mapping_keys"]
+            files, fields = await _extract_form_data(request)
         except ValueError as exc:
-            errors.append(str(exc))
+            soft_errors.append(str(exc))
 
-    if errors:
-        analysis_section = results_payload.get("analysis", {})
-        error_payload = {
-            "errors": errors,
-            "analysis": analysis_section,
-            "chart": analysis_section.get("chart", {}),
-            "mapping_applied": analysis_section.get("meta", {}).get(
-                "mapping_applied", None
-            ),
+        mapping_state: dict[str, DatasetMapping] = {}
+        resolved_mapping: dict[str, Any] = {}
+        effective_mapping: dict[str, Any] = {}
+
+        if not soft_errors:
+            mapping_inline_raw = fields.get("mapping") or None
+            mapping_json_raw = fields.get("mapping_json") or None
+            mapping_name_raw = fields.get("mapping_name") or None
+            try:
+                mapping_state, resolved_mapping = _resolve_mapping(
+                    mapping_inline_raw or mapping_json_raw,
+                    mapping_name_raw,
+                    fields.get("mapping_payload"),
+                )
+                effective_mapping = {
+                    key: value for key, value in resolved_mapping.items() if value
+                }
+            except MappingValidationError as exc:
+                soft_errors.append(str(exc))
+
+        if not soft_errors:
+            required = {"pems_file", "gps_file", "ecu_file"}
+            missing = required - set(files)
+            if missing:
+                soft_errors.append(
+                    "Please provide PEMS, GPS, and ECU files to run the analysis."
+                )
+
+        if not soft_errors:
+            try:
+                pems_name, pems_bytes = files["pems_file"]
+                gps_name, gps_bytes = files["gps_file"]
+                ecu_name, ecu_bytes = files["ecu_file"]
+
+                pems_df = _ingest_pems(
+                    pems_name, pems_bytes, mapping=mapping_state.get("pems")
+                )
+                pems_df = _apply_mapping(pems_df, resolved_mapping, "pems")
+                gps_df = _ingest_gps(
+                    gps_name, gps_bytes, mapping=mapping_state.get("gps")
+                )
+                ecu_df = _ingest_ecu(
+                    ecu_name, ecu_bytes, mapping=mapping_state.get("ecu")
+                )
+                ecu_df = _apply_mapping(ecu_df, resolved_mapping, "ecu")
+
+                units_hint = {}
+                units_source = resolved_mapping.get("units", {})
+                if isinstance(units_source, Mapping):
+                    units_hint = {
+                        str(col): str(unit)
+                        for col, unit in units_source.items()
+                        if isinstance(col, str) and isinstance(unit, str)
+                    }
+                    if units_hint:
+                        units_hint_applied = dict(units_hint)
+
+                fused = _fuse_streams(pems_df, gps_df, ecu_df)
+                if units_hint:
+                    fused.attrs = dict(getattr(fused, "attrs", {}))
+                    fused.attrs["units"] = units_hint
+                fused, diagnostics_result = run_diagnostics(
+                    fused,
+                    {
+                        "pems": pems_df,
+                        "gps": gps_df,
+                        "ecu": ecu_df,
+                    },
+                    gap_threshold_s=2.0,
+                    repair_small_gaps=True,
+                    repair_threshold_s=3.0,
+                )
+
+                engine = AnalysisEngine(load_analysis_rules())
+                analysis_result = engine.analyze(fused)
+                pack = load_regulation_pack()
+                evaluation = evaluate_pack(analysis_result, pack)
+
+                results_payload = _prepare_results(
+                    analysis_result,
+                    evaluation,
+                    diagnostics_result,
+                    effective_mapping=effective_mapping,
+                )
+                analysis_section = results_payload.get("analysis") or {}
+                existing_chart = analysis_section.get("chart") or {}
+
+                df_for_chart = fused
+
+                try:
+                    pollutant_chart = build_pollutant_chart(
+                        df_for_chart, effective_mapping or {}
+                    )
+                except Exception:
+                    pollutant_chart = {"pollutants": []}
+
+                chart_out = dict(existing_chart)
+                chart_out.update(pollutant_chart)
+                analysis_section["chart"] = chart_out
+                results_payload["analysis"] = analysis_section
+            except ValueError as exc:
+                soft_errors.append(str(exc))
+
+        raw_analysis_section = results_payload.get("analysis")
+        if isinstance(raw_analysis_section, Mapping):
+            analysis_section = dict(raw_analysis_section)
+        else:
+            analysis_section = {}
+
+        chart_payload = analysis_section.get("chart")
+        if isinstance(chart_payload, Mapping):
+            chart_payload = dict(chart_payload)
+        else:
+            chart_payload = {}
+        analysis_section["chart"] = chart_payload
+        results_payload["analysis"] = analysis_section
+        results_payload["chart"] = chart_payload
+
+        meta_payload = analysis_section.get("meta")
+        if isinstance(meta_payload, Mapping):
+            meta = dict(meta_payload)
+        else:
+            meta = {}
+        analysis_section["meta"] = meta
+
+        mapping_applied_value = meta.get("mapping_applied")
+        if mapping_applied_value is None and effective_mapping:
+            mapping_applied_value = True
+        results_payload["mapping_applied"] = mapping_applied_value
+
+        mapping_keys_value = meta.get("mapping_keys")
+        if isinstance(mapping_keys_value, Mapping):
+            mapping_keys_value = dict(mapping_keys_value)
+        elif mapping_keys_value is None:
+            mapping_keys_value = []
+        results_payload["mapping_keys"] = mapping_keys_value
+
+        if units_hint_applied:
+            diagnostics_messages.append({"units_hint_applied": units_hint_applied})
+
+        if results_payload.get("mapping_applied"):
+            diagnostics_messages.append(
+                {
+                    "mapping": {
+                        "applied": True,
+                        "keys": mapping_keys_value,
+                    }
+                }
+            )
+
+        quality_payload = results_payload.get("quality")
+        if quality_payload:
+            diagnostics_messages.append({"quality": quality_payload})
+
+        results_payload["diagnostics"] = diagnostics_messages
+        results_payload["errors"] = soft_errors
+
+        if request.headers.get("hx-request") == "true":
+            context = _build_results_context(
+                results_payload,
+                soft_errors,
+                include_export_controls=True,
+            )
+            context.update(
+                {
+                    "request": request,
+                    "badge_pass": BADGE_PASS,
+                    "badge_fail": BADGE_FAIL,
+                }
+            )
+            return templates.TemplateResponse(
+                request,
+                "results.html",
+                context,
+                status_code=status.HTTP_200_OK,
+            )
+
+        return JSONResponse(status_code=status.HTTP_200_OK, content=results_payload)
+
+    except Exception as exc:  # pragma: no cover - unexpected failure guard
+        fail_payload = {
+            "errors": [f"internal error: {str(exc)}"],
+            "diagnostics": diagnostics_messages,
         }
-        if "meta" in analysis_section and "mapping_keys" in analysis_section["meta"]:
-            error_payload["mapping_keys"] = analysis_section["meta"]["mapping_keys"]
         return JSONResponse(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            content=error_payload,
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content=fail_payload,
         )
-
-    status_code = status.HTTP_200_OK
-    if request.headers.get("hx-request") == "true":
-        context = _build_results_context(
-            results_payload,
-            errors,
-            include_export_controls=True,
-        )
-        context.update(
-            {
-                "request": request,
-                "badge_pass": BADGE_PASS,
-                "badge_fail": BADGE_FAIL,
-            }
-        )
-        return templates.TemplateResponse(
-            request,
-            "results.html",
-            context,
-            status_code=status_code,
-        )
-
-    context = _base_template_context(
-        request,
-        results=results_payload,
-        errors=errors,
-        include_export_controls=True,
-    )
-    return templates.TemplateResponse(
-        request,
-        "index.html",
-        context,
-        status_code=status.HTTP_200_OK,
-    )
 @router.get("/mapping_profiles", include_in_schema=False)
 async def list_mapping_profiles_endpoint() -> JSONResponse:
     try:
@@ -1224,56 +1251,121 @@ async def save_mapping_profile(request: Request) -> JSONResponse:
 
 @router.post("/export_pdf", include_in_schema=False)
 async def export_pdf(request: Request) -> Response:
-    try:
-        payload = await request.json()
-    except Exception as exc:  # pragma: no cover - FastAPI surfaces JSON errors
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Invalid JSON payload.") from exc
-
-    results_payload = payload.get("results") if isinstance(payload, dict) else None
-    if not isinstance(results_payload, dict):
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Results payload is required.")
+    diagnostics: list[Any] = []
+    soft_errors: list[str] = []
 
     try:
-        html_document = build_report_html(results_payload)
-    except Exception as exc:  # pragma: no cover - defensive guard
-        raise HTTPException(
-            status.HTTP_400_BAD_REQUEST,
-            detail="Unable to render report from supplied payload.",
-        ) from exc
+        try:
+            payload = await request.json()
+        except Exception:
+            soft_errors.append("Invalid JSON payload.")
+            return JSONResponse(
+                status_code=status.HTTP_200_OK,
+                content={"ok": False, "diagnostics": diagnostics, "errors": soft_errors},
+            )
 
-    try:
-        pdf_bytes = html_to_pdf_bytes(html_document)
-    except RuntimeError as exc:
-        raise HTTPException(
-            status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=str(exc),
-        ) from exc
+        if not isinstance(payload, Mapping):
+            soft_errors.append("Payload must be a JSON object.")
+            return JSONResponse(
+                status_code=status.HTTP_200_OK,
+                content={"ok": False, "diagnostics": diagnostics, "errors": soft_errors},
+            )
 
-    headers = {"Content-Disposition": "attachment; filename=analysis-report.pdf"}
-    return Response(content=pdf_bytes, media_type="application/pdf", headers=headers)
+        results_payload = payload.get("results") if isinstance(payload, Mapping) else None
+        if not isinstance(results_payload, Mapping):
+            soft_errors.append("Results payload is required.")
+            return JSONResponse(
+                status_code=status.HTTP_200_OK,
+                content={"ok": False, "diagnostics": diagnostics, "errors": soft_errors},
+            )
+
+        try:
+            html_document = build_report_html(dict(results_payload))
+        except Exception as exc:  # pragma: no cover - defensive guard
+            soft_errors.append("Unable to render report from supplied payload.")
+            diagnostics.append({"detail": str(exc)})
+            return JSONResponse(
+                status_code=status.HTTP_200_OK,
+                content={"ok": False, "diagnostics": diagnostics, "errors": soft_errors},
+            )
+
+        try:
+            pdf_bytes = html_to_pdf_bytes(html_document)
+        except RuntimeError as exc:
+            soft_errors.append(str(exc))
+            return JSONResponse(
+                status_code=status.HTTP_200_OK,
+                content={"ok": False, "diagnostics": diagnostics, "errors": soft_errors},
+            )
+
+        headers = {"Content-Disposition": "attachment; filename=analysis-report.pdf"}
+        return Response(content=pdf_bytes, media_type="application/pdf", headers=headers)
+
+    except Exception as exc:  # pragma: no cover - unexpected failure guard
+        fail_payload = {
+            "ok": False,
+            "diagnostics": diagnostics,
+            "errors": [f"internal error: {str(exc)}"],
+        }
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content=fail_payload,
+        )
 
 
 @router.post("/export_zip", include_in_schema=False)
 async def export_zip(request: Request) -> Response:
-    try:
-        payload = await request.json()
-    except Exception as exc:  # pragma: no cover - FastAPI surfaces JSON errors
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Invalid JSON payload.") from exc
-
-    results_payload = payload.get("results") if isinstance(payload, dict) else None
-    if not isinstance(results_payload, dict):
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Results payload is required.")
+    diagnostics: list[Any] = []
+    soft_errors: list[str] = []
 
     try:
-        archive_bytes = build_report_archive(results_payload)
-    except Exception as exc:  # pragma: no cover - defensive guard
-        raise HTTPException(
-            status.HTTP_400_BAD_REQUEST,
-            detail="Unable to render report from supplied payload.",
-        ) from exc
+        try:
+            payload = await request.json()
+        except Exception:
+            soft_errors.append("Invalid JSON payload.")
+            return JSONResponse(
+                status_code=status.HTTP_200_OK,
+                content={"ok": False, "diagnostics": diagnostics, "errors": soft_errors},
+            )
 
-    headers = {"Content-Disposition": "attachment; filename=analysis-report.zip"}
-    return Response(content=archive_bytes, media_type="application/zip", headers=headers)
+        if not isinstance(payload, Mapping):
+            soft_errors.append("Payload must be a JSON object.")
+            return JSONResponse(
+                status_code=status.HTTP_200_OK,
+                content={"ok": False, "diagnostics": diagnostics, "errors": soft_errors},
+            )
+
+        results_payload = payload.get("results") if isinstance(payload, Mapping) else None
+        if not isinstance(results_payload, Mapping):
+            soft_errors.append("Results payload is required.")
+            return JSONResponse(
+                status_code=status.HTTP_200_OK,
+                content={"ok": False, "diagnostics": diagnostics, "errors": soft_errors},
+            )
+
+        try:
+            archive_bytes = build_report_archive(dict(results_payload))
+        except Exception as exc:  # pragma: no cover - defensive guard
+            soft_errors.append("Unable to render report from supplied payload.")
+            diagnostics.append({"detail": str(exc)})
+            return JSONResponse(
+                status_code=status.HTTP_200_OK,
+                content={"ok": False, "diagnostics": diagnostics, "errors": soft_errors},
+            )
+
+        headers = {"Content-Disposition": "attachment; filename=analysis-report.zip"}
+        return Response(content=archive_bytes, media_type="application/zip", headers=headers)
+
+    except Exception as exc:  # pragma: no cover - unexpected failure guard
+        fail_payload = {
+            "ok": False,
+            "diagnostics": diagnostics,
+            "errors": [f"internal error: {str(exc)}"],
+        }
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content=fail_payload,
+        )
 
 
 __all__ = ["router"]

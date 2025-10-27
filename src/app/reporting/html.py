@@ -528,7 +528,11 @@ def build_report_html(results: dict[str, Any]) -> str:
 
     regulation = results.get("regulation") or {}
     analysis = results.get("analysis") or {}
-    diagnostics = results.get("diagnostics") or {}
+    diagnostics = (
+        results.get("quality")
+        or results.get("diagnostics")
+        or {}
+    )
 
     generated_at = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     status_ok = bool(regulation.get("ok"))
