@@ -21,6 +21,8 @@ def make_results_payload(
     mapping_keys: List[str] | None = None,
     mapped_preview_columns: List[str] | None = None,
     mapped_preview_values: List[List[float | int | str]] | None = None,
+    table_columns: List[str] | None = None,
+    table_values: List[List[float | int | str]] | None = None,
     chart: Dict[str, Any] | None = None,
     status_code: int = 200,
     http_status: int = 200,
@@ -109,6 +111,22 @@ def make_results_payload(
         if not preview_values:
             preview_values = []
 
+    if table_columns is None:
+        table_columns = []
+    else:
+        table_columns = [str(column) for column in table_columns]
+
+    if table_values is None:
+        table_values = []
+    else:
+        normalised_table: List[List[float | int | str]] = []
+        for row in table_values:
+            if isinstance(row, list):
+                normalised_table.append(list(row))
+            elif isinstance(row, tuple):
+                normalised_table.append(list(row))
+        table_values = normalised_table
+
     if chart is None:
         chart = {}
     else:
@@ -126,7 +144,7 @@ def make_results_payload(
     snapshot_json = json.dumps(payload_snapshot, ensure_ascii=False)
     payload_script = f"window.__RDE_RESULT__ = {snapshot_json};"
 
-    return {
+    payload = {
         "regulation": regulation,
         "summary": summary,
         "rule_evidence": rule_evidence,
@@ -143,6 +161,11 @@ def make_results_payload(
         "status_code": status_code,
         "payload_script": payload_script,
     }
+
+    payload["columns"] = table_columns
+    payload["values"] = table_values
+
+    return payload
 
 
 def respond_success(payload: Dict[str, Any]) -> JSONResponse:
