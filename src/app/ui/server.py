@@ -270,8 +270,49 @@ def _embed_payload_script(payload: dict[str, Any]) -> None:
         json_blob = json.dumps(safe_payload, ensure_ascii=False)
     except Exception:
         json_blob = "{}"
-    payload_script = f"<script>window.__RDE_RESULT__ = {json_blob};</script>"
+
+    escaped_blob = json_blob.replace("</", "<\\/")
+    payload_script = (
+        "<script type=\"application/json\" data-report-payload>"
+        f"{escaped_blob}"
+        "</script>"
+    )
     payload["payload_script"] = payload_script
+
+
+def _format_rule_evidence_summary(
+    evidence_entries: list[dict[str, Any]],
+    existing_value: Any,
+) -> str:
+    summary_text: str | None = None
+
+    if isinstance(existing_value, str) and existing_value.strip():
+        summary_text = existing_value.strip()
+    elif isinstance(existing_value, Mapping):
+        summary_text = ", ".join(
+            str(value) for value in existing_value.values() if value is not None
+        )
+        summary_text = summary_text.strip() or None
+
+    if not summary_text:
+        count = len(evidence_entries)
+        if count == 0:
+            summary_text = "not available"
+        elif count == 1:
+            summary_text = "1 record available"
+        else:
+            summary_text = f"{count} records available"
+
+    lower_text = summary_text.lower()
+    if lower_text.startswith("rule evidence"):
+        remainder = summary_text[len("Rule evidence"):].lstrip(" :")
+        summary_text = remainder or "available"
+
+    final_text = summary_text.strip()
+    if not final_text:
+        final_text = "not available"
+
+    return f"Rule evidence: {final_text}"
 
 
 def build_results_payload(
@@ -306,8 +347,11 @@ def build_results_payload(
 
     quality_payload = _ensure_dict(quality) or {}
     evidence_payload = _normalise_rule_evidence(rule_evidence)
+    summary_rule_evidence_source: Any = None
     if not evidence_payload and "evidence" in analysis_payload:
         evidence_payload = _normalise_rule_evidence(analysis_payload.get("evidence"))
+    if isinstance(summary, Mapping):
+        summary_rule_evidence_source = summary.get("rule_evidence")
 
     mapping_applied_flag = (
         bool(mapping_applied)
@@ -328,10 +372,23 @@ def build_results_payload(
     metadata_payload = _normalise_metadata(metadata, regulation_payload, quality_payload)
 
     existing_summary = analysis_payload.get("summary")
+    existing_rule_evidence = None
     if isinstance(existing_summary, Mapping):
+        existing_rule_evidence = existing_summary.get("rule_evidence")
         merged_summary = dict(existing_summary)
         merged_summary.update(summary_payload)
         summary_payload = merged_summary
+
+    if summary_rule_evidence_source is None:
+        summary_rule_evidence_source = summary_payload.get("rule_evidence")
+    if summary_rule_evidence_source is None:
+        summary_rule_evidence_source = existing_rule_evidence
+
+    rule_evidence_text = _format_rule_evidence_summary(
+        evidence_payload,
+        summary_rule_evidence_source,
+    )
+    summary_payload["rule_evidence"] = rule_evidence_text
     analysis_payload["summary"] = summary_payload
 
     diagnostics_text = "Data diagnostics: "
@@ -367,6 +424,7 @@ def build_results_payload(
         "quality": quality_payload,
         "diagnostics_text": diagnostics_text,
         "summary_text": summary_text,
+        "rule_evidence_text": rule_evidence_text,
     }
 
     if http_status is not None:
