@@ -1073,8 +1073,16 @@ async def analyze(request: Request) -> Response:
             analysis_section = results_payload.get("analysis") or {}
             existing_chart = analysis_section.get("chart") or {}
 
+            df_for_chart = (
+                locals().get("fused", None)
+                or locals().get("pems_df", None)
+                or locals().get("p_df", None)
+            )
+
             try:
-                pollutant_chart = build_pollutant_chart(fused, effective_mapping or {})
+                pollutant_chart = build_pollutant_chart(
+                    df_for_chart, effective_mapping or {}
+                )
             except Exception:
                 pollutant_chart = {"pollutants": []}
 
