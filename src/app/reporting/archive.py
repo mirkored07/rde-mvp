@@ -16,7 +16,11 @@ def build_report_archive(results: dict[str, Any]) -> bytes:
     """Create a ZIP archive containing the rendered report and diagnostics."""
 
     html_document = build_report_html(results)
-    diagnostics = results.get("diagnostics") or {}
+    diagnostics = (
+        results.get("quality")
+        or results.get("diagnostics")
+        or {}
+    )
 
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
