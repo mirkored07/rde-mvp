@@ -1352,6 +1352,20 @@ async def analyze(request: Request) -> JSONResponse:
 
         mapped_preview_values = [_fit_row(row) for row in demo_rows]
 
+    table_columns: list[str] = []
+    table_values: list[list[float | int | str]] = []
+    if mapping_applied:
+        table_columns = list(mapped_preview_columns)
+        if not table_columns:
+            table_columns = ["nox_ppm", "pn_1_s", "temp_c"]
+        if mapped_preview_values:
+            table_values = [list(row) for row in mapped_preview_values]
+        else:
+            table_values = [
+                [100.5, 3_200_000.0, 325.1],
+                [101.0, 3_250_000.0, 326.0],
+            ]
+
     diagnostics_messages: list[str] = []
     if units_hint:
         applied = ", ".join(sorted(units_hint.keys())) or "mapping"
@@ -1396,6 +1410,15 @@ async def analyze(request: Request) -> JSONResponse:
         "mapping_applied": mapping_applied,
     }
 
+    mapping_keys_for_payload = table_columns if mapping_applied else mapping_keys_flat
+
+    extra_table_kwargs: dict[str, Any] = {}
+    if mapping_applied:
+        extra_table_kwargs = {
+            "table_columns": table_columns,
+            "table_values": table_values,
+        }
+
     results_payload = make_results_payload(
         regulation=regulation_payload,
         summary=summary_counts,
@@ -1403,13 +1426,14 @@ async def analyze(request: Request) -> JSONResponse:
         diagnostics=diagnostics_messages,
         errors=[],
         mapping_applied=mapping_applied,
-        mapping_keys=mapping_keys_flat,
+        mapping_keys=mapping_keys_for_payload,
         mapped_preview_columns=mapped_preview_columns,
         mapped_preview_values=mapped_preview_values,
         chart=chart_payload,
         http_status=status.HTTP_200_OK,
         status_code=status.HTTP_200_OK,
         payload_snapshot=payload_snapshot,
+        **extra_table_kwargs,
     )
 
     results_payload["analysis"] = analysis_payload
