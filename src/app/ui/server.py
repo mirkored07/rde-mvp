@@ -11,7 +11,7 @@ from collections.abc import Mapping
 from pathlib import Path
 import tempfile
 import zipfile
-from typing import Any
+from typing import Any, Dict, List, Optional
 
 import pandas as pd
 from fastapi import APIRouter, HTTPException, Request, status
@@ -144,7 +144,10 @@ def _extract_results_sections(
 
 
 def _embed_payload_script(payload: dict[str, Any]) -> None:
-    json_blob = json.dumps(payload, ensure_ascii=False)
+    try:
+        json_blob = json.dumps(payload, ensure_ascii=False)
+    except Exception:
+        json_blob = "{}"
     payload["payload_script"] = (
         f"<script>window.__RDE_RESULT__ = {json_blob};</script>"
     )
@@ -255,6 +258,25 @@ def _build_payload_from_source(
         _embed_payload_script(payload)
 
     return payload
+
+
+def _send_payload_response(
+    payload: dict[str, Any],
+    *,
+    http_status: int = status.HTTP_200_OK,
+) -> JSONResponse:
+    extra_fields = {key: payload[key] for key in ("evidence", "quality") if key in payload}
+    return send_results_response(
+        regulation=_ensure_dict(payload.get("regulation")) or {},
+        analysis=_ensure_dict(payload.get("analysis")) or {},
+        chart=_ensure_dict(payload.get("chart")) or {},
+        mapping_applied=payload.get("mapping_applied"),
+        mapping_keys=payload.get("mapping_keys") or [],
+        diagnostics=payload.get("diagnostics") or [],
+        errors=payload.get("errors") or [],
+        http_status=http_status,
+        extra_fields=extra_fields or None,
+    )
 
 
 def _apply_mapping(df: pd.DataFrame, mapping: dict[str, Any], domain: str) -> pd.DataFrame:
@@ -1314,7 +1336,14 @@ async def analyze(request: Request) -> Response:
 
         diagnostics_strings = [str(message) for message in diagnostics_messages]
 
-        results_payload = build_results_payload(
+        extra_fields: Dict[str, Any] = {}
+        if results_bundle:
+            if "evidence" in results_bundle:
+                extra_fields["evidence"] = results_bundle["evidence"]
+            if "quality" in results_bundle:
+                extra_fields["quality"] = results_bundle["quality"]
+
+        return send_results_response(
             regulation=regulation_info,
             analysis=analysis_payload,
             chart=chart_payload,
@@ -1322,42 +1351,12 @@ async def analyze(request: Request) -> Response:
             mapping_keys=mapping_keys_value,
             diagnostics=diagnostics_strings,
             errors=soft_errors,
-        )
-
-        if results_bundle:
-            if "evidence" in results_bundle:
-                results_payload["evidence"] = results_bundle["evidence"]
-            if "quality" in results_bundle:
-                results_payload["quality"] = results_bundle["quality"]
-            _embed_payload_script(results_payload)
-
-        if request.headers.get("hx-request") == "true":
-            context = _build_results_context(
-                results_payload,
-                soft_errors,
-                include_export_controls=True,
-            )
-            context.update(
-                {
-                    "request": request,
-                    "badge_pass": BADGE_PASS,
-                    "badge_fail": BADGE_FAIL,
-                }
-            )
-            return templates.TemplateResponse(
-                request,
-                "results.html",
-                context,
-                status_code=status.HTTP_200_OK,
-            )
-
-        return JSONResponse(
-            status_code=status.HTTP_200_OK,
-            content={"results_payload": results_payload},
+            http_status=status.HTTP_200_OK,
+            extra_fields=extra_fields or None,
         )
 
     except Exception as exc:  # pragma: no cover - unexpected failure guard
-        fail_payload = build_results_payload(
+        return send_results_response(
             regulation=None,
             analysis=None,
             chart=None,
@@ -1365,10 +1364,7 @@ async def analyze(request: Request) -> Response:
             mapping_keys=[],
             diagnostics=[str(message) for message in diagnostics_messages],
             errors=[f"internal error: {str(exc)}"],
-        )
-        return JSONResponse(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content={"results_payload": fail_payload},
+            http_status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
 
 @router.get("/mapping_profiles", include_in_schema=False)
@@ -1447,10 +1443,7 @@ async def export_pdf(request: Request) -> Response:
                 diagnostics=diagnostics,
                 errors=soft_errors,
             )
-            return JSONResponse(
-                status_code=status.HTTP_200_OK,
-                content={"results_payload": results_payload},
-            )
+            return _send_payload_response(results_payload)
 
         if not isinstance(payload, Mapping):
             soft_errors.append("Payload must be a JSON object.")
@@ -1459,10 +1452,7 @@ async def export_pdf(request: Request) -> Response:
                 diagnostics=diagnostics,
                 errors=soft_errors,
             )
-            return JSONResponse(
-                status_code=status.HTTP_200_OK,
-                content={"results_payload": results_payload},
-            )
+            return _send_payload_response(results_payload)
 
         raw_results = payload.get("results") if isinstance(payload, Mapping) else None
         if not isinstance(raw_results, Mapping):
@@ -1472,10 +1462,7 @@ async def export_pdf(request: Request) -> Response:
                 diagnostics=diagnostics,
                 errors=soft_errors,
             )
-            return JSONResponse(
-                status_code=status.HTTP_200_OK,
-                content={"results_payload": results_payload},
-            )
+            return _send_payload_response(results_payload)
 
         results_copy = dict(raw_results)
 
@@ -1489,10 +1476,7 @@ async def export_pdf(request: Request) -> Response:
                 diagnostics=diagnostics,
                 errors=soft_errors,
             )
-            return JSONResponse(
-                status_code=status.HTTP_200_OK,
-                content={"results_payload": results_payload},
-            )
+            return _send_payload_response(results_payload)
 
         try:
             pdf_bytes = html_to_pdf_bytes(html_document)
@@ -1504,10 +1488,7 @@ async def export_pdf(request: Request) -> Response:
                 diagnostics=diagnostics,
                 errors=soft_errors,
             )
-            return JSONResponse(
-                status_code=status.HTTP_200_OK,
-                content={"results_payload": results_payload},
-            )
+            return _send_payload_response(results_payload)
         except Exception as exc:  # pragma: no cover - defensive guard
             soft_errors.append("Unable to generate PDF output.")
             diagnostics.append(f"pdf conversion detail: {exc}")
@@ -1516,16 +1497,13 @@ async def export_pdf(request: Request) -> Response:
                 diagnostics=diagnostics,
                 errors=soft_errors,
             )
-            return JSONResponse(
-                status_code=status.HTTP_200_OK,
-                content={"results_payload": results_payload},
-            )
+            return _send_payload_response(results_payload)
 
         headers = {"Content-Disposition": "attachment; filename=analysis-report.pdf"}
         return Response(content=pdf_bytes, media_type="application/pdf", headers=headers)
 
     except Exception as exc:  # pragma: no cover - unexpected failure guard
-        fail_payload = build_results_payload(
+        return send_results_response(
             regulation=None,
             analysis=None,
             chart=None,
@@ -1533,10 +1511,7 @@ async def export_pdf(request: Request) -> Response:
             mapping_keys=[],
             diagnostics=diagnostics,
             errors=[f"internal error: {str(exc)}"],
-        )
-        return JSONResponse(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content={"results_payload": fail_payload},
+            http_status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
 
 
@@ -1555,10 +1530,7 @@ async def export_zip(request: Request) -> Response:
                 diagnostics=diagnostics,
                 errors=soft_errors,
             )
-            return JSONResponse(
-                status_code=status.HTTP_200_OK,
-                content={"results_payload": results_payload},
-            )
+            return _send_payload_response(results_payload)
 
         if not isinstance(payload, Mapping):
             soft_errors.append("Payload must be a JSON object.")
@@ -1567,10 +1539,7 @@ async def export_zip(request: Request) -> Response:
                 diagnostics=diagnostics,
                 errors=soft_errors,
             )
-            return JSONResponse(
-                status_code=status.HTTP_200_OK,
-                content={"results_payload": results_payload},
-            )
+            return _send_payload_response(results_payload)
 
         raw_results = payload.get("results") if isinstance(payload, Mapping) else None
         if not isinstance(raw_results, Mapping):
@@ -1580,10 +1549,7 @@ async def export_zip(request: Request) -> Response:
                 diagnostics=diagnostics,
                 errors=soft_errors,
             )
-            return JSONResponse(
-                status_code=status.HTTP_200_OK,
-                content={"results_payload": results_payload},
-            )
+            return _send_payload_response(results_payload)
 
         results_copy = dict(raw_results)
 
@@ -1598,16 +1564,13 @@ async def export_zip(request: Request) -> Response:
                 diagnostics=diagnostics,
                 errors=soft_errors,
             )
-            return JSONResponse(
-                status_code=status.HTTP_200_OK,
-                content={"results_payload": results_payload},
-            )
+            return _send_payload_response(results_payload)
 
         headers = {"Content-Disposition": "attachment; filename=analysis-report.zip"}
         return Response(content=archive_bytes, media_type="application/zip", headers=headers)
 
     except Exception as exc:  # pragma: no cover - unexpected failure guard
-        fail_payload = build_results_payload(
+        return send_results_response(
             regulation=None,
             analysis=None,
             chart=None,
@@ -1615,10 +1578,7 @@ async def export_zip(request: Request) -> Response:
             mapping_keys=[],
             diagnostics=diagnostics,
             errors=[f"internal error: {str(exc)}"],
-        )
-        return JSONResponse(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content={"results_payload": fail_payload},
+            http_status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
 
 
