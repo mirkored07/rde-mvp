@@ -81,6 +81,25 @@ def _ensure_dict(value: Any | None) -> dict[str, Any] | None:
     return None
 
 
+def _ensure_string_list(value: Any | None) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, Mapping):
+        return [str(item) for item in value.values()]
+    if isinstance(value, (list, tuple, set)):
+        return [str(item) for item in value if item is not None]
+    return [str(value)]
+
+
+def _coerce_int(value: Any) -> int:
+    try:
+        return int(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return 0
+
+
 def _normalise_mapping_keys(value: Any | None) -> list[str]:
     if value is None:
         return []
@@ -114,6 +133,108 @@ def _normalise_mapping_keys(value: Any | None) -> list[str]:
     return normalised
 
 
+def _extract_subject_from_quality(quality: Mapping[str, Any] | None) -> str:
+    if not isinstance(quality, Mapping):
+        return ""
+
+    checks = quality.get("checks")
+    if isinstance(checks, (list, tuple, set)):
+        for entry in checks:
+            if isinstance(entry, Mapping):
+                subject = entry.get("subject")
+                if isinstance(subject, str) and subject.strip():
+                    return subject.strip()
+
+    summary = quality.get("summary")
+    if isinstance(summary, Mapping):
+        subject = summary.get("subject")
+        if isinstance(subject, str) and subject.strip():
+            return subject.strip()
+
+    return ""
+
+
+def _normalise_metadata(
+    metadata: Mapping[str, Any] | None,
+    regulation: Mapping[str, Any],
+    quality: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    source = metadata if isinstance(metadata, Mapping) else {}
+
+    pack_id = source.get("pack_id") or regulation.get("pack_id") or regulation.get("id")
+    pack_title = source.get("pack_title") or regulation.get("pack_title") or regulation.get("title")
+    legal_source = source.get("legal_source") or regulation.get("legal_source")
+
+    subject = source.get("subject") or regulation.get("subject")
+    if not isinstance(subject, str) or not subject.strip():
+        subject = _extract_subject_from_quality(quality)
+
+    return {
+        "pack_id": str(pack_id or ""),
+        "pack_title": str(pack_title or ""),
+        "legal_source": str(legal_source or ""),
+        "subject": str(subject or ""),
+    }
+
+
+def _normalise_rule_evidence(value: Any | None) -> list[dict[str, Any]]:
+    if value is None:
+        return []
+    if isinstance(value, Mapping):
+        return [dict(value)]
+    if isinstance(value, (list, tuple, set)):
+        evidence: list[dict[str, Any]] = []
+        for entry in value:
+            if isinstance(entry, Mapping):
+                evidence.append(dict(entry))
+        return evidence
+    return []
+
+
+def _normalise_summary(
+    summary: Mapping[str, Any] | None,
+    regulation: Mapping[str, Any],
+    diagnostics: list[str],
+    quality: Mapping[str, Any] | None,
+    errors: list[str],
+) -> dict[str, int]:
+    if not isinstance(summary, Mapping):
+        summary = {}
+
+    counts = _ensure_dict(regulation.get("counts")) or {}
+
+    total_passed = _coerce_int(summary.get("pass"))
+    total_warn = _coerce_int(summary.get("warn"))
+    total_fail = _coerce_int(summary.get("fail"))
+    repaired = _coerce_int(summary.get("repaired_spans"))
+
+    if total_passed == 0 and total_fail == 0:
+        mandatory_passed = _coerce_int(counts.get("mandatory_passed"))
+        optional_passed = _coerce_int(counts.get("optional_passed"))
+        mandatory_total = _coerce_int(counts.get("mandatory_total"))
+        optional_total = _coerce_int(counts.get("optional_total"))
+        total_passed = mandatory_passed + optional_passed
+        total_fail = max(mandatory_total + optional_total - total_passed, 0)
+
+    if total_warn < len(diagnostics):
+        total_warn = len(diagnostics)
+
+    if repaired == 0 and isinstance(quality, Mapping):
+        spans = quality.get("repaired_spans")
+        if isinstance(spans, (list, tuple, set)):
+            repaired = len(list(spans))
+
+    if total_fail == 0 and errors:
+        total_fail = len(errors)
+
+    return {
+        "pass": max(total_passed, 0),
+        "warn": max(total_warn, 0),
+        "fail": max(total_fail, 0),
+        "repaired_spans": max(repaired, 0),
+    }
+
+
 def _extract_results_sections(
     payload: Mapping[str, Any] | None,
 ) -> tuple[
@@ -144,13 +265,13 @@ def _extract_results_sections(
 
 
 def _embed_payload_script(payload: dict[str, Any]) -> None:
+    safe_payload = {key: value for key, value in payload.items() if key != "payload_script"}
     try:
-        json_blob = json.dumps(payload, ensure_ascii=False)
+        json_blob = json.dumps(safe_payload, ensure_ascii=False)
     except Exception:
         json_blob = "{}"
-    payload["payload_script"] = (
-        f"<script>window.__RDE_RESULT__ = {json_blob};</script>"
-    )
+    payload_script = f"<script>window.__RDE_RESULT__ = {json_blob};</script>"
+    payload["payload_script"] = payload_script
 
 
 def build_results_payload(
@@ -161,65 +282,101 @@ def build_results_payload(
     mapping_keys: Optional[List[str]] = None,
     diagnostics: Optional[List[str]] = None,
     errors: Optional[List[str]] = None,
+    *,
+    rule_evidence: Optional[Any] = None,
+    summary: Optional[Mapping[str, Any]] = None,
+    metadata: Optional[Mapping[str, Any]] = None,
+    quality: Optional[Mapping[str, Any]] = None,
+    http_status: Optional[int] = None,
+    **extra_fields: Any,
 ) -> Dict[str, Any]:
-    """
-    Build canonical 'results_payload' dict required by tests.
-    MUST ALWAYS contain:
-      - regulation
-      - analysis
-      - chart
-      - mapping_applied
-      - mapping_keys
-      - diagnostics (list[str])
-      - errors (list[str])
-      - diagnostics_text (string that MUST contain substring 'Data diagnostics')
-      - summary_text (a human-readable summary)
-      - payload_script (non-empty <script>...</script>)
-    """
-    reg = regulation or {}
-    ana = analysis or {}
-    ch  = chart or {}
-    applied = bool(mapping_applied) if mapping_applied is not None else False
-    keys = mapping_keys or []
-    diag_list = diagnostics or []
-    err_list  = errors or []
+    """Build a canonical ``results_payload`` dictionary for UI responses."""
 
-    # diagnostics_text MUST include substring 'Data diagnostics' so tests pass.
+    regulation_payload = _ensure_dict(regulation) or {}
+    analysis_payload = _ensure_dict(analysis) or {}
+
+    chart_payload = _ensure_dict(chart) or _ensure_dict(analysis_payload.get("chart")) or {}
+    analysis_payload["chart"] = chart_payload
+
+    meta_section = _ensure_dict(analysis_payload.get("meta")) or {}
+    analysis_payload["meta"] = meta_section
+
+    diagnostics_list = _ensure_string_list(diagnostics)
+    errors_list = _ensure_string_list(errors)
+
+    quality_payload = _ensure_dict(quality) or {}
+    evidence_payload = _normalise_rule_evidence(rule_evidence)
+    if not evidence_payload and "evidence" in analysis_payload:
+        evidence_payload = _normalise_rule_evidence(analysis_payload.get("evidence"))
+
+    mapping_applied_flag = (
+        bool(mapping_applied)
+        if mapping_applied is not None
+        else bool(meta_section.get("mapping_applied"))
+    )
+    mapping_keys_value = _normalise_mapping_keys(
+        mapping_keys if mapping_keys is not None else meta_section.get("mapping_keys")
+    )
+
+    summary_payload = _normalise_summary(
+        summary,
+        regulation_payload,
+        diagnostics_list,
+        quality_payload,
+        errors_list,
+    )
+    metadata_payload = _normalise_metadata(metadata, regulation_payload, quality_payload)
+
+    existing_summary = analysis_payload.get("summary")
+    if isinstance(existing_summary, Mapping):
+        merged_summary = dict(existing_summary)
+        merged_summary.update(summary_payload)
+        summary_payload = merged_summary
+    analysis_payload["summary"] = summary_payload
+
     diagnostics_text = "Data diagnostics: "
-    if diag_list:
-        diagnostics_text += "; ".join(diag_list)
+    if diagnostics_list:
+        diagnostics_text += "; ".join(diagnostics_list)
     else:
         diagnostics_text += "no major issues detected"
 
-    # summary_text references regulation verdict
-    verdict_label = reg.get("label") or reg.get("verdict") or ""
-    pack_title = reg.get("pack_title") or reg.get("pack_name") or ""
+    verdict_label = regulation_payload.get("label") or regulation_payload.get("verdict") or ""
+    pack_title = (
+        metadata_payload.get("pack_title")
+        or regulation_payload.get("pack_title")
+        or regulation_payload.get("pack_name")
+        or ""
+    )
     if verdict_label or pack_title:
         summary_text = f"Regulation verdict: {verdict_label} under {pack_title}".strip()
     else:
         summary_text = "Regulation verdict: unavailable"
 
-    core = {
-        "regulation": reg,
-        "analysis": ana,
-        "chart": ch,
-        "mapping_applied": applied,
-        "mapping_keys": keys,
-        "diagnostics": diag_list,
-        "errors": err_list,
+    payload: dict[str, Any] = {
+        "regulation": regulation_payload,
+        "analysis": analysis_payload,
+        "chart": chart_payload,
+        "mapping_applied": mapping_applied_flag,
+        "mapping_keys": mapping_keys_value,
+        "diagnostics": diagnostics_list,
+        "errors": errors_list,
+        "summary": summary_payload,
+        "metadata": metadata_payload,
+        "rule_evidence": evidence_payload,
+        "evidence": evidence_payload,
+        "quality": quality_payload,
         "diagnostics_text": diagnostics_text,
         "summary_text": summary_text,
     }
 
-    # ALWAYS include payload_script to satisfy tests looking for "results payload script"
-    try:
-        serialized = json.dumps(core, ensure_ascii=False)
-    except Exception:
-        serialized = "{}"
-    payload_script = f"<script>window.__RDE_RESULT__ = {serialized};</script>"
-    core["payload_script"] = payload_script
+    if http_status is not None:
+        payload["http_status"] = http_status
 
-    return core
+    if extra_fields:
+        payload.update({str(key): value for key, value in extra_fields.items()})
+
+    _embed_payload_script(payload)
+    return payload
 
 
 def send_results_response(
@@ -231,11 +388,19 @@ def send_results_response(
     mapping_keys: Optional[List[str]] = None,
     diagnostics: Optional[List[str]] = None,
     errors: Optional[List[str]] = None,
+    rule_evidence: Optional[Any] = None,
+    summary: Optional[Mapping[str, Any]] = None,
+    metadata: Optional[Mapping[str, Any]] = None,
+    quality: Optional[Mapping[str, Any]] = None,
     http_status: int = 200,
 ) -> JSONResponse:
     """
     Universal response wrapper for all analysis/export endpoints.
-    This returns {"results_payload": <payload>} with status_code=http_status.
+
+    The HTTP status code is normalised to ``200`` so clients consistently
+    receive a payload that includes both ``results_payload`` and
+    ``payload_script``. The original ``http_status`` value is mirrored back in
+    the JSON content for callers that need to inspect it.
 
     IMPORTANT:
     For all user-facing "soft validation failures" (missing required column,
@@ -250,11 +415,20 @@ def send_results_response(
         mapping_keys=mapping_keys,
         diagnostics=diagnostics,
         errors=errors,
+        rule_evidence=rule_evidence,
+        summary=summary,
+        metadata=metadata,
+        quality=quality,
+        http_status=http_status,
     )
 
+    script = rp.get("payload_script")
+    content = {"results_payload": rp, "payload_script": script or ""}
+    content["status_code"] = http_status
+
     return JSONResponse(
-        status_code=http_status,
-        content={"results_payload": rp},
+        status_code=status.HTTP_200_OK,
+        content=content,
     )
 
 
@@ -272,6 +446,27 @@ def _build_payload_from_source(
         mapping_keys_value,
     ) = _extract_results_sections(source)
 
+    rule_evidence_value: Any = None
+    summary_value: Mapping[str, Any] | None = None
+    metadata_value: Mapping[str, Any] | None = None
+    quality_value: Mapping[str, Any] | None = None
+    http_status_value: int | None = None
+
+    if isinstance(source, Mapping):
+        rule_evidence_value = source.get("rule_evidence", source.get("evidence"))
+        summary_candidate = source.get("summary")
+        if isinstance(summary_candidate, Mapping):
+            summary_value = summary_candidate
+        metadata_candidate = source.get("metadata")
+        if isinstance(metadata_candidate, Mapping):
+            metadata_value = metadata_candidate
+        quality_candidate = source.get("quality")
+        if isinstance(quality_candidate, Mapping):
+            quality_value = quality_candidate
+        status_candidate = source.get("http_status")
+        if isinstance(status_candidate, int):
+            http_status_value = status_candidate
+
     payload = build_results_payload(
         regulation=regulation_info,
         analysis=analysis_payload,
@@ -280,39 +475,14 @@ def _build_payload_from_source(
         mapping_keys=mapping_keys_value,
         diagnostics=diagnostics,
         errors=errors,
+        rule_evidence=rule_evidence_value,
+        summary=summary_value,
+        metadata=metadata_value,
+        quality=quality_value,
+        http_status=http_status_value,
     )
 
-    if isinstance(source, Mapping):
-        for key in ("evidence", "quality"):
-            if key in source:
-                payload[key] = source[key]
-        _embed_payload_script(payload)
-
     return payload
-
-
-def _augment_results_response(
-    response: JSONResponse,
-    extra_fields: Mapping[str, Any],
-    *,
-    http_status: int,
-) -> JSONResponse:
-    if not extra_fields:
-        return response
-
-    try:
-        content = json.loads(response.body.decode(response.charset or "utf-8"))
-    except Exception:
-        content = {"results_payload": {}}
-
-    results_payload = content.get("results_payload")
-    if not isinstance(results_payload, dict):
-        results_payload = {}
-        content["results_payload"] = results_payload
-
-    results_payload.update({str(key): value for key, value in extra_fields.items()})
-
-    return JSONResponse(status_code=http_status, content=content)
 
 
 def _send_payload_response(
@@ -320,18 +490,26 @@ def _send_payload_response(
     *,
     http_status: int = status.HTTP_200_OK,
 ) -> JSONResponse:
-    extra_fields = {key: payload[key] for key in ("evidence", "quality") if key in payload}
-    response = send_results_response(
-        regulation=_ensure_dict(payload.get("regulation")) or {},
-        analysis=_ensure_dict(payload.get("analysis")) or {},
-        chart=_ensure_dict(payload.get("chart")) or {},
+    regulation_payload = _ensure_dict(payload.get("regulation")) or {}
+    analysis_payload = _ensure_dict(payload.get("analysis")) or {}
+    chart_payload = _ensure_dict(payload.get("chart")) or _ensure_dict(
+        analysis_payload.get("chart")
+    ) or {}
+
+    return send_results_response(
+        regulation=regulation_payload,
+        analysis=analysis_payload,
+        chart=chart_payload,
         mapping_applied=payload.get("mapping_applied"),
-        mapping_keys=payload.get("mapping_keys") or [],
-        diagnostics=payload.get("diagnostics") or [],
-        errors=payload.get("errors") or [],
+        mapping_keys=_normalise_mapping_keys(payload.get("mapping_keys")),
+        diagnostics=_ensure_string_list(payload.get("diagnostics")),
+        errors=_ensure_string_list(payload.get("errors")),
+        rule_evidence=payload.get("rule_evidence") or payload.get("evidence"),
+        summary=_ensure_dict(payload.get("summary")) or None,
+        metadata=_ensure_dict(payload.get("metadata")) or None,
+        quality=_ensure_dict(payload.get("quality")) or None,
         http_status=http_status,
     )
-    return _augment_results_response(response, extra_fields, http_status=http_status)
 
 
 def _apply_mapping(df: pd.DataFrame, mapping: dict[str, Any], domain: str) -> pd.DataFrame:
@@ -1391,13 +1569,6 @@ async def analyze(request: Request) -> Response:
 
         diagnostics_strings = [str(message) for message in diagnostics_messages]
 
-        extra_fields: Dict[str, Any] = {}
-        if results_bundle:
-            if "evidence" in results_bundle:
-                extra_fields["evidence"] = results_bundle["evidence"]
-            if "quality" in results_bundle:
-                extra_fields["quality"] = results_bundle["quality"]
-
         response = send_results_response(
             regulation=regulation_info,
             analysis=analysis_payload,
@@ -1406,9 +1577,11 @@ async def analyze(request: Request) -> Response:
             mapping_keys=mapping_keys_value,
             diagnostics=diagnostics_strings,
             errors=soft_errors,
+            rule_evidence=results_bundle.get("evidence") if results_bundle else None,
+            quality=_ensure_dict(results_bundle.get("quality")) if results_bundle else None,
             http_status=status.HTTP_200_OK,
         )
-        return _augment_results_response(response, extra_fields, http_status=status.HTTP_200_OK)
+        return response
 
     except Exception as exc:  # pragma: no cover - unexpected failure guard
         return send_results_response(
