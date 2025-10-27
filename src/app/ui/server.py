@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import base64
-import functools
 import io
 import json
 import math
@@ -12,7 +11,7 @@ from collections.abc import Mapping
 from pathlib import Path
 import tempfile
 import zipfile
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 import pandas as pd
 from fastapi import APIRouter, HTTPException, Request, status
@@ -41,6 +40,7 @@ from src.app.utils.mappings import (
     serialise_mapping_state,
     slugify_profile_name,
 )
+from src.app.ui.responses import make_results_payload, respond_success
 
 router = APIRouter(include_in_schema=False)
 
@@ -265,22 +265,6 @@ def _extract_results_sections(
     return regulation, analysis, chart, mapping_applied, mapping_keys
 
 
-def _embed_payload_script(payload: dict[str, Any]) -> None:
-    safe_payload = {key: value for key, value in payload.items() if key != "payload_script"}
-    try:
-        json_blob = json.dumps(safe_payload, ensure_ascii=False)
-    except Exception:
-        json_blob = "{}"
-
-    escaped_blob = json_blob.replace("</", "<\\/")
-    payload_script = (
-        "<script type=\"application/json\" data-report-payload>"
-        f"{escaped_blob}"
-        "</script>"
-    )
-    payload["payload_script"] = payload_script
-
-
 def _format_rule_evidence_summary(
     evidence_entries: list[dict[str, Any]],
     existing_value: Any,
@@ -314,302 +298,6 @@ def _format_rule_evidence_summary(
         final_text = "not available"
 
     return f"Rule evidence: {final_text}"
-
-
-def build_results_payload(
-    regulation: Optional[dict] = None,
-    analysis: Optional[dict] = None,
-    chart: Optional[dict] = None,
-    mapping_applied: Optional[bool] = None,
-    mapping_keys: Optional[List[str]] = None,
-    diagnostics: Optional[List[str]] = None,
-    errors: Optional[List[str]] = None,
-    *,
-    rule_evidence: Optional[Any] = None,
-    summary: Optional[Mapping[str, Any]] = None,
-    metadata: Optional[Mapping[str, Any]] = None,
-    quality: Optional[Mapping[str, Any]] = None,
-    http_status: Optional[int] = None,
-    **extra_fields: Any,
-) -> Dict[str, Any]:
-    """Build a canonical ``results_payload`` dictionary for UI responses."""
-
-    regulation_payload = _ensure_dict(regulation) or {}
-    regulation_defaults = {
-        "pack_id": "",
-        "pack_title": "",
-        "legal_source": "",
-        "subject": "",
-        "label": "",
-        "ok": False,
-    }
-    for key, default_value in regulation_defaults.items():
-        if key not in regulation_payload or regulation_payload.get(key) is None:
-            regulation_payload[key] = default_value
-
-    analysis_payload = _ensure_dict(analysis) or {}
-
-    chart_payload = _ensure_dict(chart) or _ensure_dict(analysis_payload.get("chart")) or {}
-    analysis_payload["chart"] = chart_payload
-
-    meta_section = _ensure_dict(analysis_payload.get("meta")) or {}
-    analysis_payload["meta"] = meta_section
-
-    diagnostics_list = _ensure_string_list(diagnostics)
-    errors_list = _ensure_string_list(errors)
-
-    quality_payload = _ensure_dict(quality) or {}
-    evidence_payload = _normalise_rule_evidence(rule_evidence)
-    if isinstance(rule_evidence, str) and rule_evidence.strip():
-        summary_rule_evidence_source = rule_evidence
-    summary_rule_evidence_source: Any = None
-    if not evidence_payload and "evidence" in analysis_payload:
-        evidence_payload = _normalise_rule_evidence(analysis_payload.get("evidence"))
-    if isinstance(summary, Mapping):
-        summary_rule_evidence_source = summary.get("rule_evidence")
-
-    mapping_applied_flag = (
-        bool(mapping_applied)
-        if mapping_applied is not None
-        else bool(meta_section.get("mapping_applied"))
-    )
-    mapping_keys_value = _normalise_mapping_keys(
-        mapping_keys if mapping_keys is not None else meta_section.get("mapping_keys")
-    )
-
-    summary_payload = _normalise_summary(
-        summary,
-        regulation_payload,
-        diagnostics_list,
-        quality_payload,
-        errors_list,
-    )
-    metadata_payload = _normalise_metadata(metadata, regulation_payload, quality_payload)
-
-    for meta_key in ("pack_id", "pack_title", "legal_source", "subject"):
-        if not regulation_payload.get(meta_key):
-            regulation_payload[meta_key] = metadata_payload.get(meta_key, "")
-
-    counts_payload = _ensure_dict(regulation_payload.get("counts")) or {}
-    counts_defaults = {
-        "mandatory_passed": 0,
-        "mandatory_total": 0,
-        "optional_passed": 0,
-        "optional_total": 0,
-    }
-    for key, default_value in counts_defaults.items():
-        if key not in counts_payload or counts_payload.get(key) is None:
-            counts_payload[key] = default_value
-        else:
-            try:
-                counts_payload[key] = int(counts_payload.get(key))
-            except (TypeError, ValueError):
-                counts_payload[key] = default_value
-    regulation_payload["counts"] = counts_payload
-
-    label_value = regulation_payload.get("label") or regulation_payload.get("verdict")
-    if not isinstance(label_value, str) or not label_value.strip():
-        regulation_payload["label"] = "PASS" if regulation_payload.get("ok") else "FAIL"
-    else:
-        regulation_payload["label"] = label_value.strip()
-    regulation_payload["ok"] = bool(regulation_payload.get("ok"))
-
-    existing_summary = analysis_payload.get("summary")
-    existing_rule_evidence = None
-    if isinstance(existing_summary, Mapping):
-        existing_rule_evidence = existing_summary.get("rule_evidence")
-        merged_summary = dict(existing_summary)
-        merged_summary.update(summary_payload)
-        summary_payload = merged_summary
-
-    if summary_rule_evidence_source is None:
-        summary_rule_evidence_source = summary_payload.get("rule_evidence")
-    if summary_rule_evidence_source is None:
-        summary_rule_evidence_source = existing_rule_evidence
-
-    rule_evidence_text = _format_rule_evidence_summary(
-        evidence_payload,
-        summary_rule_evidence_source,
-    )
-    summary_payload["rule_evidence"] = rule_evidence_text
-    analysis_payload["summary"] = summary_payload
-
-    diagnostics_text = "Data diagnostics: "
-    if diagnostics_list:
-        diagnostics_text += "; ".join(diagnostics_list)
-    else:
-        diagnostics_text += "no major issues detected"
-
-    verdict_label = regulation_payload.get("label") or regulation_payload.get("verdict") or ""
-    pack_title = (
-        metadata_payload.get("pack_title")
-        or regulation_payload.get("pack_title")
-        or regulation_payload.get("pack_name")
-        or ""
-    )
-    if verdict_label or pack_title:
-        summary_text = f"Regulation verdict: {verdict_label} under {pack_title}".strip()
-    else:
-        summary_text = "Regulation verdict: unavailable"
-
-    payload: dict[str, Any] = {
-        "regulation": regulation_payload,
-        "analysis": analysis_payload,
-        "chart": chart_payload,
-        "mapping_applied": mapping_applied_flag,
-        "mapping_keys": mapping_keys_value,
-        "diagnostics": diagnostics_list,
-        "errors": errors_list,
-        "summary": summary_payload,
-        "metadata": metadata_payload,
-        "rule_evidence": rule_evidence_text,
-        "rule_evidence_entries": evidence_payload,
-        "evidence": evidence_payload,
-        "quality": quality_payload,
-        "diagnostics_text": diagnostics_text,
-        "summary_text": summary_text,
-        "rule_evidence_text": rule_evidence_text,
-    }
-
-    if http_status is not None:
-        payload["http_status"] = http_status
-
-    if extra_fields:
-        payload.update({str(key): value for key, value in extra_fields.items()})
-
-    _embed_payload_script(payload)
-    return payload
-
-
-def send_results_response(
-    *,
-    regulation: Optional[dict] = None,
-    analysis: Optional[dict] = None,
-    chart: Optional[dict] = None,
-    mapping_applied: Optional[bool] = None,
-    mapping_keys: Optional[List[str]] = None,
-    diagnostics: Optional[List[str]] = None,
-    errors: Optional[List[str]] = None,
-    rule_evidence: Optional[Any] = None,
-    summary: Optional[Mapping[str, Any]] = None,
-    metadata: Optional[Mapping[str, Any]] = None,
-    quality: Optional[Mapping[str, Any]] = None,
-    http_status: int = 200,
-    **extra_fields: Any,
-) -> JSONResponse:
-    """
-    Universal response wrapper for all analysis/export endpoints.
-
-    The HTTP status code is normalised to ``200`` so clients consistently
-    receive a payload that includes both ``results_payload`` and
-    ``payload_script``. The original ``http_status`` value is mirrored back in
-    the JSON content for callers that need to inspect it.
-
-    IMPORTANT:
-    For all user-facing "soft validation failures" (missing required column,
-    missing upload payload, export dependency missing, etc.) we STILL use http_status=200
-    instead of 400. The tests assert 200 == 200 for those flows.
-    """
-    rp = build_results_payload(
-        regulation=regulation,
-        analysis=analysis,
-        chart=chart,
-        mapping_applied=mapping_applied,
-        mapping_keys=mapping_keys,
-        diagnostics=diagnostics,
-        errors=errors,
-        rule_evidence=rule_evidence,
-        summary=summary,
-        metadata=metadata,
-        quality=quality,
-        http_status=http_status,
-        **extra_fields,
-    )
-
-    script = rp.get("payload_script")
-    content = {"results_payload": rp, "payload_script": script or ""}
-    content["status_code"] = http_status
-
-    return JSONResponse(
-        status_code=status.HTTP_200_OK,
-        content=content,
-    )
-
-
-def _build_payload_from_source(
-    source: Mapping[str, Any] | None,
-    *,
-    diagnostics: list[str],
-    errors: list[str],
-) -> dict[str, Any]:
-    (
-        regulation_info,
-        analysis_payload,
-        chart_payload,
-        mapping_applied_value,
-        mapping_keys_value,
-    ) = _extract_results_sections(source)
-
-    rule_evidence_value: Any = None
-    summary_value: Mapping[str, Any] | None = None
-    metadata_value: Mapping[str, Any] | None = None
-    quality_value: Mapping[str, Any] | None = None
-    http_status_value: int | None = None
-
-    if isinstance(source, Mapping):
-        rule_evidence_value = source.get("rule_evidence_entries")
-        if rule_evidence_value is None:
-            rule_evidence_value = source.get("evidence")
-        if rule_evidence_value is None:
-            rule_evidence_value = source.get("rule_evidence")
-        summary_candidate = source.get("summary")
-        if isinstance(summary_candidate, Mapping):
-            summary_value = summary_candidate
-        metadata_candidate = source.get("metadata")
-        if isinstance(metadata_candidate, Mapping):
-            metadata_value = metadata_candidate
-        quality_candidate = source.get("quality")
-        if isinstance(quality_candidate, Mapping):
-            quality_value = quality_candidate
-        status_candidate = source.get("http_status")
-        if isinstance(status_candidate, int):
-            http_status_value = status_candidate
-
-    payload = build_results_payload(
-        regulation=regulation_info,
-        analysis=analysis_payload,
-        chart=chart_payload,
-        mapping_applied=mapping_applied_value,
-        mapping_keys=mapping_keys_value,
-        diagnostics=diagnostics,
-        errors=errors,
-        rule_evidence=rule_evidence_value,
-        summary=summary_value,
-        metadata=metadata_value,
-        quality=quality_value,
-        http_status=http_status_value,
-    )
-
-    return payload
-
-
-def _send_payload_response(
-    payload: dict[str, Any],
-    *,
-    http_status: int = status.HTTP_200_OK,
-) -> JSONResponse:
-    payload = dict(payload)
-    payload["http_status"] = http_status
-    script = payload.get("payload_script")
-    if not isinstance(script, str) or "<script" not in script:
-        _embed_payload_script(payload)
-        script = payload.get("payload_script", "")
-    content = {
-        "results_payload": payload,
-        "payload_script": script or "",
-        "status_code": http_status,
-    }
-    return JSONResponse(status_code=status.HTTP_200_OK, content=content)
 
 
 def _apply_mapping(df: pd.DataFrame, mapping: dict[str, Any], domain: str) -> pd.DataFrame:
@@ -1521,179 +1209,189 @@ async def _extract_form_data(
 
 
 @router.post("/analyze")
-async def analyze(request: Request) -> Response:
-    diagnostics_messages: list[str] = []
-    soft_errors: list[str] = []
-    diagnostics_result: Diagnostics | dict[str, Any] | None = None
-    units_hint_applied: dict[str, str] | None = None
-    results_bundle: dict[str, Any] | None = None
-
-    files: dict[str, tuple[str | None, bytes]] = {}
-    fields: dict[str, str] = {}
+async def analyze(request: Request) -> JSONResponse:
+    try:
+        files, fields = await _extract_form_data(request)
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
     try:
-        try:
-            files, fields = await _extract_form_data(request)
-        except ValueError as exc:
-            soft_errors.append(str(exc))
-
-        mapping_state: dict[str, DatasetMapping] = {}
-        resolved_mapping: dict[str, Any] = {}
-        effective_mapping: dict[str, Any] = {}
-
-        if not soft_errors:
-            mapping_inline_raw = fields.get("mapping") or None
-            mapping_json_raw = fields.get("mapping_json") or None
-            mapping_name_raw = fields.get("mapping_name") or None
-            try:
-                mapping_state, resolved_mapping = _resolve_mapping(
-                    mapping_inline_raw or mapping_json_raw,
-                    mapping_name_raw,
-                    fields.get("mapping_payload"),
-                )
-                effective_mapping = {
-                    key: value for key, value in resolved_mapping.items() if value
-                }
-            except MappingValidationError as exc:
-                soft_errors.append(str(exc))
-
-        if not soft_errors:
-            required = {"pems_file", "gps_file", "ecu_file"}
-            missing = required - set(files)
-            if missing:
-                soft_errors.append(
-                    "Please provide PEMS, GPS, and ECU files to run the analysis."
-                )
-
-        if not soft_errors:
-            try:
-                pems_name, pems_bytes = files["pems_file"]
-                gps_name, gps_bytes = files["gps_file"]
-                ecu_name, ecu_bytes = files["ecu_file"]
-
-                pems_df = _ingest_pems(
-                    pems_name, pems_bytes, mapping=mapping_state.get("pems")
-                )
-                pems_df = _apply_mapping(pems_df, resolved_mapping, "pems")
-                gps_df = _ingest_gps(
-                    gps_name, gps_bytes, mapping=mapping_state.get("gps")
-                )
-                ecu_df = _ingest_ecu(
-                    ecu_name, ecu_bytes, mapping=mapping_state.get("ecu")
-                )
-                ecu_df = _apply_mapping(ecu_df, resolved_mapping, "ecu")
-
-                units_hint = {}
-                units_source = resolved_mapping.get("units", {})
-                if isinstance(units_source, Mapping):
-                    units_hint = {
-                        str(col): str(unit)
-                        for col, unit in units_source.items()
-                        if isinstance(col, str) and isinstance(unit, str)
-                    }
-                    if units_hint:
-                        units_hint_applied = dict(units_hint)
-
-                fused = _fuse_streams(pems_df, gps_df, ecu_df)
-                if units_hint:
-                    fused.attrs = dict(getattr(fused, "attrs", {}))
-                    fused.attrs["units"] = units_hint
-                fused, diagnostics_result = run_diagnostics(
-                    fused,
-                    {
-                        "pems": pems_df,
-                        "gps": gps_df,
-                        "ecu": ecu_df,
-                    },
-                    gap_threshold_s=2.0,
-                    repair_small_gaps=True,
-                    repair_threshold_s=3.0,
-                )
-
-                engine = AnalysisEngine(load_analysis_rules())
-                analysis_result = engine.analyze(fused)
-                pack = load_regulation_pack()
-                evaluation = evaluate_pack(analysis_result, pack)
-
-                results_bundle = _prepare_results(
-                    analysis_result,
-                    evaluation,
-                    diagnostics_result,
-                    effective_mapping=effective_mapping,
-                )
-
-                analysis_section = _ensure_dict(results_bundle.get("analysis")) or {}
-                existing_chart = _ensure_dict(analysis_section.get("chart")) or {}
-
-                try:
-                    pollutant_chart = build_pollutant_chart(
-                        fused, effective_mapping or {}
-                    )
-                except Exception:
-                    pollutant_chart = {"pollutants": []}
-
-                chart_out = dict(existing_chart)
-                chart_out.update(pollutant_chart)
-                analysis_section["chart"] = chart_out
-                results_bundle["analysis"] = analysis_section
-            except ValueError as exc:
-                soft_errors.append(str(exc))
-
-        (
-            regulation_info,
-            analysis_payload,
-            chart_payload,
-            mapping_applied_value,
-            mapping_keys_value,
-        ) = _extract_results_sections(results_bundle)
-
-        if units_hint_applied:
-            applied_columns = ", ".join(sorted(units_hint_applied.keys()))
-            if applied_columns:
-                diagnostics_messages.append(
-                    f"Applied unit hints for columns: {applied_columns}"
-                )
-            else:
-                diagnostics_messages.append("Applied unit hints from mapping")
-
-        if mapping_applied_value:
-            if mapping_keys_value:
-                diagnostics_messages.append(
-                    "Applied column mapping for: " + ", ".join(mapping_keys_value)
-                )
-            else:
-                diagnostics_messages.append("Applied column mapping from profile")
-
-        if results_bundle and results_bundle.get("quality"):
-            diagnostics_messages.append("Quality diagnostics computed")
-
-        diagnostics_strings = [str(message) for message in diagnostics_messages]
-
-        response = send_results_response(
-            regulation=regulation_info,
-            analysis=analysis_payload,
-            chart=chart_payload,
-            mapping_applied=mapping_applied_value,
-            mapping_keys=mapping_keys_value,
-            diagnostics=diagnostics_strings,
-            errors=soft_errors,
-            rule_evidence=results_bundle.get("evidence") if results_bundle else None,
-            quality=_ensure_dict(results_bundle.get("quality")) if results_bundle else None,
-            http_status=status.HTTP_200_OK,
+        mapping_state, resolved_mapping = _resolve_mapping(
+            fields.get("mapping") or fields.get("mapping_json"),
+            fields.get("mapping_name") or fields.get("mapping_profile"),
+            fields.get("mapping_payload"),
         )
-        return response
+    except MappingValidationError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
-    except Exception as exc:  # pragma: no cover - unexpected failure guard
-        return send_results_response(
-            regulation=None,
-            analysis=None,
-            chart=None,
-            mapping_applied=False,
-            mapping_keys=[],
-            diagnostics=[str(message) for message in diagnostics_messages],
-            errors=[f"internal error: {str(exc)}"],
-            http_status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+    required = {"pems_file", "gps_file", "ecu_file"}
+    missing = [name for name in required if name not in files]
+    if missing:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail="Please provide PEMS, GPS, and ECU files to run the analysis.",
         )
+
+    try:
+        pems_name, pems_bytes = files["pems_file"]
+        gps_name, gps_bytes = files["gps_file"]
+        ecu_name, ecu_bytes = files["ecu_file"]
+
+        pems_df = _ingest_pems(pems_name, pems_bytes, mapping_state.get("pems"))
+        pems_df = _apply_mapping(pems_df, resolved_mapping, "pems")
+        gps_df = _ingest_gps(gps_name, gps_bytes, mapping_state.get("gps"))
+        gps_df = _apply_mapping(gps_df, resolved_mapping, "gps")
+        ecu_df = _ingest_ecu(ecu_name, ecu_bytes, mapping_state.get("ecu"))
+        ecu_df = _apply_mapping(ecu_df, resolved_mapping, "ecu")
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except Exception as exc:  # pragma: no cover - defensive guard
+        raise HTTPException(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to process uploaded datasets.",
+        ) from exc
+
+    units_hint: dict[str, str] = {}
+    units_source = resolved_mapping.get("units", {})
+    if isinstance(units_source, Mapping):
+        units_hint = {
+            str(column): str(unit)
+            for column, unit in units_source.items()
+            if isinstance(column, str) and isinstance(unit, str)
+        }
+
+    try:
+        fused = _fuse_streams(pems_df, gps_df, ecu_df)
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    if units_hint:
+        fused.attrs = dict(getattr(fused, "attrs", {}))
+        fused.attrs["units"] = units_hint
+
+    try:
+        fused, diagnostics_result = run_diagnostics(
+            fused,
+            {"pems": pems_df, "gps": gps_df, "ecu": ecu_df},
+            gap_threshold_s=2.0,
+            repair_small_gaps=True,
+            repair_threshold_s=3.0,
+        )
+    except Exception as exc:  # pragma: no cover - diagnostics failure
+        raise HTTPException(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to run diagnostics.",
+        ) from exc
+
+    engine = AnalysisEngine(load_analysis_rules())
+    analysis_result = engine.analyze(fused)
+    pack = load_regulation_pack()
+    evaluation = evaluate_pack(analysis_result, pack)
+
+    effective_mapping = {
+        key: value
+        for key, value in resolved_mapping.items()
+        if key != "units" and value
+    }
+
+    results_bundle = _prepare_results(
+        analysis_result,
+        evaluation,
+        diagnostics_result,
+        effective_mapping=effective_mapping,
+    )
+
+    analysis_payload = dict(_ensure_dict(results_bundle.get("analysis")) or {})
+    chart_payload = dict(_ensure_dict(analysis_payload.get("chart")) or {})
+
+    try:
+        pollutant_chart = build_pollutant_chart(fused, effective_mapping or {})
+    except Exception:  # pragma: no cover - charting fallback
+        pollutant_chart = {"pollutants": []}
+    chart_payload.update(pollutant_chart)
+
+    analysis_payload["chart"] = chart_payload
+
+    quality_payload = _ensure_dict(results_bundle.get("quality")) or {}
+    regulation_payload = dict(_ensure_dict(results_bundle.get("regulation")) or {})
+    evidence_entries = list(results_bundle.get("evidence", []))
+
+    mapping_keys_dict: dict[str, list[str]] = {}
+    mapping_keys_flat: list[str] = []
+    for dataset, columns in effective_mapping.items():
+        if not isinstance(columns, Mapping):
+            continue
+        column_names = sorted(str(name) for name in columns.keys())
+        if column_names:
+            mapping_keys_dict[dataset] = column_names
+            mapping_keys_flat.extend(f"{dataset}:{name}" for name in column_names)
+
+    mapping_applied = bool(mapping_keys_flat)
+
+    diagnostics_messages: list[str] = []
+    if units_hint:
+        applied = ", ".join(sorted(units_hint.keys())) or "mapping"
+        diagnostics_messages.append(f"Applied unit hints for: {applied}")
+    if mapping_applied:
+        diagnostics_messages.append(
+            "Applied column mapping for: " + ", ".join(mapping_keys_flat)
+        )
+    if quality_payload:
+        diagnostics_messages.append("Quality diagnostics computed")
+    diagnostics_messages.append("Download PDF via export controls")
+
+    repaired_spans = []
+    if isinstance(quality_payload, Mapping):
+        spans = quality_payload.get("repaired_spans")
+        if isinstance(spans, list):
+            repaired_spans = spans
+
+    summary_counts = {
+        "pass": int(evaluation.mandatory_passed + evaluation.optional_passed),
+        "warn": len(diagnostics_messages),
+        "fail": 0 if evaluation.overall_passed else 1,
+        "repaired_spans": repaired_spans,
+    }
+
+    analysis_payload["summary"] = summary_counts
+    meta_section = dict(_ensure_dict(analysis_payload.get("meta")) or {})
+    meta_section["mapping_applied"] = mapping_applied
+    if mapping_keys_dict:
+        meta_section["mapping_keys"] = mapping_keys_dict
+    analysis_payload["meta"] = meta_section
+
+    rule_evidence_text = "Rule evidence: Regulation verdict: {label} under {pack}".format(
+        label=regulation_payload.get("label", "FAIL"),
+        pack=regulation_payload.get("pack_title") or regulation_payload.get("pack_id") or "EU7 (Demo)",
+    )
+
+    payload_snapshot = {
+        "pack_id": regulation_payload.get("pack_id"),
+        "label": regulation_payload.get("label"),
+        "ok": regulation_payload.get("ok"),
+        "mapping_applied": mapping_applied,
+    }
+
+    results_payload = make_results_payload(
+        regulation=regulation_payload,
+        summary=summary_counts,
+        rule_evidence=rule_evidence_text,
+        diagnostics=diagnostics_messages,
+        errors=[],
+        mapping_applied=mapping_applied,
+        mapping_keys=mapping_keys_flat,
+        chart=chart_payload,
+        http_status=status.HTTP_200_OK,
+        status_code=status.HTTP_200_OK,
+        payload_snapshot=payload_snapshot,
+    )
+
+    results_payload["analysis"] = analysis_payload
+    results_payload["quality"] = quality_payload
+    results_payload["evidence"] = evidence_entries
+    results_payload["attachments"] = []
+
+    return respond_success(results_payload)
 
 @router.get("/mapping_profiles", include_in_schema=False)
 async def list_mapping_profiles_endpoint() -> JSONResponse:
@@ -1757,189 +1455,185 @@ async def save_mapping_profile(request: Request) -> JSONResponse:
 
 
 @router.post("/export_pdf", include_in_schema=False)
-async def export_pdf(request: Request) -> Response:
-    diagnostics: list[str] = []
-    soft_errors: list[str] = []
+async def export_pdf(request: Request) -> JSONResponse:
+    try:
+        payload = await request.json()
+    except Exception as exc:  # pragma: no cover - FastAPI handles parsing
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Invalid JSON payload.") from exc
+
+    if not isinstance(payload, Mapping):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Payload must be a JSON object.")
+
+    raw_results = payload.get("results")
+    if not isinstance(raw_results, Mapping):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Results payload is required.")
+
+    results_copy = dict(raw_results)
 
     try:
-        try:
-            payload = await request.json()
-        except Exception:
-            soft_errors.append("Invalid JSON payload.")
-            results_payload = _build_payload_from_source(
-                None,
-                diagnostics=diagnostics,
-                errors=soft_errors,
-            )
-            return _send_payload_response(results_payload)
+        html_document = build_report_html(results_copy)
+    except Exception as exc:  # pragma: no cover - rendering failure
+        raise HTTPException(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unable to render report from supplied payload.",
+        ) from exc
 
-        if not isinstance(payload, Mapping):
-            soft_errors.append("Payload must be a JSON object.")
-            results_payload = _build_payload_from_source(
-                None,
-                diagnostics=diagnostics,
-                errors=soft_errors,
-            )
-            return _send_payload_response(results_payload)
+    try:
+        pdf_bytes = html_to_pdf_bytes(html_document)
+    except RuntimeError as exc:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+    except Exception as exc:  # pragma: no cover - conversion failure
+        raise HTTPException(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unable to generate PDF output.",
+        ) from exc
 
-        raw_results = payload.get("results") if isinstance(payload, Mapping) else None
-        if not isinstance(raw_results, Mapping):
-            soft_errors.append("Results payload is required.")
-            results_payload = _build_payload_from_source(
-                None,
-                diagnostics=diagnostics,
-                errors=soft_errors,
-            )
-            return _send_payload_response(results_payload)
+    attachment = {
+        "filename": "analysis-report.pdf",
+        "media_type": "application/pdf",
+        "content_base64": base64.b64encode(pdf_bytes).decode("ascii"),
+    }
 
-        results_copy = dict(raw_results)
+    regulation_payload = _ensure_dict(raw_results.get("regulation")) or {}
+    summary_payload = _ensure_dict(raw_results.get("summary")) or {}
+    analysis_section = _ensure_dict(raw_results.get("analysis")) or {}
 
-        try:
-            html_document = build_report_html(results_copy)
-        except Exception as exc:  # pragma: no cover - defensive guard
-            soft_errors.append("Unable to render report from supplied payload.")
-            diagnostics.append(f"report rendering detail: {exc}")
-            results_payload = _build_payload_from_source(
-                results_copy,
-                diagnostics=diagnostics,
-                errors=soft_errors,
-            )
-            return _send_payload_response(results_payload)
+    chart_payload = _ensure_dict(raw_results.get("chart"))
+    if chart_payload is None:
+        chart_payload = _ensure_dict(analysis_section.get("chart")) or {}
+    else:
+        chart_payload = dict(chart_payload)
 
-        try:
-            pdf_bytes = html_to_pdf_bytes(html_document)
-        except RuntimeError as exc:
-            soft_errors.append(str(exc))
-            diagnostics.append("export not available")
-            results_payload = _build_payload_from_source(
-                results_copy,
-                diagnostics=diagnostics,
-                errors=soft_errors,
-            )
-            return _send_payload_response(results_payload)
-        except Exception as exc:  # pragma: no cover - defensive guard
-            soft_errors.append("Unable to generate PDF output.")
-            diagnostics.append(f"pdf conversion detail: {exc}")
-            results_payload = _build_payload_from_source(
-                results_copy,
-                diagnostics=diagnostics,
-                errors=soft_errors,
-            )
-            return _send_payload_response(results_payload)
+    diagnostics_list = _ensure_string_list(raw_results.get("diagnostics"))
+    diagnostics_list.append("Download PDF ready")
+    errors_list = _ensure_string_list(raw_results.get("errors"))
 
-        diagnostics.append("export generated: pdf")
-        encoded_pdf = base64.b64encode(pdf_bytes).decode("ascii")
-        results_payload = _build_payload_from_source(
-            results_copy,
-            diagnostics=diagnostics,
-            errors=soft_errors,
-        )
-        attachments = list(results_payload.get("attachments", []))
-        attachments.append(
-            {
-                "filename": "analysis-report.pdf",
-                "media_type": "application/pdf",
-                "content_base64": encoded_pdf,
-            }
-        )
-        results_payload["attachments"] = attachments
-        _embed_payload_script(results_payload)
-        return _send_payload_response(results_payload)
+    mapping_applied = bool(raw_results.get("mapping_applied"))
+    mapping_keys_value = _ensure_string_list(raw_results.get("mapping_keys"))
 
-    except Exception as exc:  # pragma: no cover - unexpected failure guard
-        return send_results_response(
-            regulation=None,
-            analysis=None,
-            chart=None,
-            mapping_applied=False,
-            mapping_keys=[],
-            diagnostics=diagnostics,
-            errors=[f"internal error: {str(exc)}"],
-            http_status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        )
+    rule_evidence_value = raw_results.get("rule_evidence")
+    rule_evidence_text = (
+        str(rule_evidence_value)
+        if isinstance(rule_evidence_value, str)
+        else None
+    )
+
+    payload_snapshot = {
+        "pack_id": regulation_payload.get("pack_id"),
+        "label": regulation_payload.get("label"),
+        "ok": regulation_payload.get("ok"),
+        "mapping_applied": mapping_applied,
+    }
+
+    results_payload = make_results_payload(
+        regulation=regulation_payload,
+        summary=summary_payload,
+        rule_evidence=rule_evidence_text,
+        diagnostics=diagnostics_list,
+        errors=errors_list,
+        mapping_applied=mapping_applied,
+        mapping_keys=mapping_keys_value,
+        chart=chart_payload,
+        http_status=status.HTTP_200_OK,
+        status_code=status.HTTP_200_OK,
+        payload_snapshot=payload_snapshot,
+    )
+
+    attachments = list(raw_results.get("attachments", []))
+    attachments.append(attachment)
+
+    results_payload["analysis"] = _ensure_dict(raw_results.get("analysis")) or {}
+    results_payload["quality"] = _ensure_dict(raw_results.get("quality")) or {}
+    results_payload["evidence"] = list(raw_results.get("evidence", []))
+    results_payload["attachments"] = attachments
+
+    return respond_success(results_payload)
 
 
 @router.post("/export_zip", include_in_schema=False)
-async def export_zip(request: Request) -> Response:
-    diagnostics: list[str] = []
-    soft_errors: list[str] = []
+async def export_zip(request: Request) -> JSONResponse:
+    try:
+        payload = await request.json()
+    except Exception as exc:  # pragma: no cover - FastAPI handles parsing
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Invalid JSON payload.") from exc
+
+    if not isinstance(payload, Mapping):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Payload must be a JSON object.")
+
+    raw_results = payload.get("results")
+    if not isinstance(raw_results, Mapping):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Results payload is required.")
+
+    results_copy = dict(raw_results)
 
     try:
-        try:
-            payload = await request.json()
-        except Exception:
-            soft_errors.append("Invalid JSON payload.")
-            results_payload = _build_payload_from_source(
-                None,
-                diagnostics=diagnostics,
-                errors=soft_errors,
-            )
-            return _send_payload_response(results_payload)
+        archive_bytes = build_report_archive(results_copy)
+    except Exception as exc:  # pragma: no cover - rendering failure
+        raise HTTPException(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unable to render report from supplied payload.",
+        ) from exc
 
-        if not isinstance(payload, Mapping):
-            soft_errors.append("Payload must be a JSON object.")
-            results_payload = _build_payload_from_source(
-                None,
-                diagnostics=diagnostics,
-                errors=soft_errors,
-            )
-            return _send_payload_response(results_payload)
+    attachment = {
+        "filename": "analysis-report.zip",
+        "media_type": "application/zip",
+        "content_base64": base64.b64encode(archive_bytes).decode("ascii"),
+    }
 
-        raw_results = payload.get("results") if isinstance(payload, Mapping) else None
-        if not isinstance(raw_results, Mapping):
-            soft_errors.append("Results payload is required.")
-            results_payload = _build_payload_from_source(
-                None,
-                diagnostics=diagnostics,
-                errors=soft_errors,
-            )
-            return _send_payload_response(results_payload)
+    regulation_payload = _ensure_dict(raw_results.get("regulation")) or {}
+    summary_payload = _ensure_dict(raw_results.get("summary")) or {}
+    analysis_section = _ensure_dict(raw_results.get("analysis")) or {}
 
-        results_copy = dict(raw_results)
+    chart_payload = _ensure_dict(raw_results.get("chart"))
+    if chart_payload is None:
+        chart_payload = _ensure_dict(analysis_section.get("chart")) or {}
+    else:
+        chart_payload = dict(chart_payload)
 
-        try:
-            archive_bytes = build_report_archive(results_copy)
-        except Exception as exc:  # pragma: no cover - defensive guard
-            soft_errors.append("Unable to render report from supplied payload.")
-            diagnostics.append(f"report rendering detail: {exc}")
-            diagnostics.append("export not available")
-            results_payload = _build_payload_from_source(
-                results_copy,
-                diagnostics=diagnostics,
-                errors=soft_errors,
-            )
-            return _send_payload_response(results_payload)
+    diagnostics_list = _ensure_string_list(raw_results.get("diagnostics"))
+    diagnostics_list.append("Download ZIP ready")
+    errors_list = _ensure_string_list(raw_results.get("errors"))
 
-        diagnostics.append("export generated: zip")
-        encoded_zip = base64.b64encode(archive_bytes).decode("ascii")
-        results_payload = _build_payload_from_source(
-            results_copy,
-            diagnostics=diagnostics,
-            errors=soft_errors,
-        )
-        attachments = list(results_payload.get("attachments", []))
-        attachments.append(
-            {
-                "filename": "analysis-report.zip",
-                "media_type": "application/zip",
-                "content_base64": encoded_zip,
-            }
-        )
-        results_payload["attachments"] = attachments
-        _embed_payload_script(results_payload)
-        return _send_payload_response(results_payload)
+    mapping_applied = bool(raw_results.get("mapping_applied"))
+    mapping_keys_value = _ensure_string_list(raw_results.get("mapping_keys"))
 
-    except Exception as exc:  # pragma: no cover - unexpected failure guard
-        return send_results_response(
-            regulation=None,
-            analysis=None,
-            chart=None,
-            mapping_applied=False,
-            mapping_keys=[],
-            diagnostics=diagnostics,
-            errors=[f"internal error: {str(exc)}"],
-            http_status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        )
+    rule_evidence_value = raw_results.get("rule_evidence")
+    rule_evidence_text = (
+        str(rule_evidence_value)
+        if isinstance(rule_evidence_value, str)
+        else None
+    )
+
+    payload_snapshot = {
+        "pack_id": regulation_payload.get("pack_id"),
+        "label": regulation_payload.get("label"),
+        "ok": regulation_payload.get("ok"),
+        "mapping_applied": mapping_applied,
+    }
+
+    results_payload = make_results_payload(
+        regulation=regulation_payload,
+        summary=summary_payload,
+        rule_evidence=rule_evidence_text,
+        diagnostics=diagnostics_list,
+        errors=errors_list,
+        mapping_applied=mapping_applied,
+        mapping_keys=mapping_keys_value,
+        chart=chart_payload,
+        http_status=status.HTTP_200_OK,
+        status_code=status.HTTP_200_OK,
+        payload_snapshot=payload_snapshot,
+    )
+
+    attachments = list(raw_results.get("attachments", []))
+    attachments.append(attachment)
+
+    results_payload["analysis"] = analysis_section
+    results_payload["quality"] = _ensure_dict(raw_results.get("quality")) or {}
+    results_payload["evidence"] = list(raw_results.get("evidence", []))
+    results_payload["attachments"] = attachments
+
+    return respond_success(results_payload)
 
 
 __all__ = ["router"]

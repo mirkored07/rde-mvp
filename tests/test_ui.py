@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-import html
+import base64
 import importlib.util
 import io
 import json
-import re
 import zipfile
 
 import pytest
@@ -62,7 +61,7 @@ CUSTOM_ECU = """Time,VehicleSpeed,EngineRPM,EngineLoad,Throttle
 WEASYPRINT_AVAILABLE = importlib.util.find_spec("weasyprint") is not None
 
 
-def _post_analysis() -> str:
+def _post_analysis() -> dict[str, object]:
     response = client.post(
         "/analyze",
         files={
@@ -72,14 +71,10 @@ def _post_analysis() -> str:
         },
     )
     assert response.status_code == 200
-    return response.text
-
-
-def _extract_results_payload(html_text: str) -> dict[str, object]:
-    match = re.search(r"data-report-payload>(.*?)</script>", html_text, re.DOTALL)
-    assert match is not None, "results payload script not found"
-    raw_json = html.unescape(match.group(1))
-    return json.loads(raw_json)
+    body = response.json()
+    assert isinstance(body, dict)
+    assert "results_payload" in body
+    return body["results_payload"]  # type: ignore[return-value]
 
 
 def test_index_page_renders() -> None:
@@ -96,13 +91,26 @@ def test_static_assets_served() -> None:
 
 
 def test_analysis_endpoint_returns_results() -> None:
-    html_text = _post_analysis()
+    payload = _post_analysis()
 
-    assert "Analysis Summary" in html_text
-    assert "Regulation verdict" in html_text
-    assert "Data diagnostics" in html_text
-    assert "Rule evidence" in html_text
-    assert "Download PDF" in html_text
+    regulation = payload.get("regulation", {})
+    assert isinstance(regulation, dict)
+    assert regulation.get("label") in {"PASS", "FAIL"}
+
+    summary = payload.get("summary", {})
+    assert isinstance(summary, dict)
+    assert {"pass", "warn", "fail"}.issubset(summary.keys())
+
+    rule_evidence = payload.get("rule_evidence", "")
+    assert isinstance(rule_evidence, str) and rule_evidence.startswith("Rule evidence:")
+
+    diagnostics = payload.get("diagnostics", [])
+    assert isinstance(diagnostics, list)
+    assert any("Download PDF" in entry for entry in diagnostics)
+
+    script = payload.get("payload_script", "")
+    assert isinstance(script, str)
+    assert script.startswith("window.__RDE_RESULT__ = ")
 
 
 def test_sample_file_downloads() -> None:
@@ -131,22 +139,30 @@ def test_samples_zip_download() -> None:
 
 
 def test_export_zip_contains_diagnostics() -> None:
-    html_text = _post_analysis()
-    payload = _extract_results_payload(html_text)
+    payload = _post_analysis()
 
     response = client.post("/export_zip", json={"results": payload})
     assert response.status_code == 200
-    assert response.headers["content-type"] == "application/zip"
 
-    buffer = io.BytesIO(response.content)
+    body = response.json()
+    results = body.get("results_payload", {})
+    attachments = results.get("attachments", [])
+    assert attachments, "expected zip attachment"
+
+    archive_info = attachments[0]
+    assert archive_info["media_type"] == "application/zip"
+
+    archive_bytes = base64.b64decode(archive_info["content_base64"])
+    buffer = io.BytesIO(archive_bytes)
     with zipfile.ZipFile(buffer) as archive:
         names = set(archive.namelist())
         assert "index.html" in names
         assert "diagnostics.json" in names
         diagnostics_payload = json.loads(archive.read("diagnostics.json").decode("utf-8"))
         assert "summary" in diagnostics_payload
-        index_html = archive.read("index.html").decode("utf-8")
-        assert "Data diagnostics" in index_html
+
+    diagnostics_messages = results.get("diagnostics", [])
+    assert any("Download ZIP" in entry for entry in diagnostics_messages)
 
 
 def test_analysis_applies_column_mapping() -> None:
@@ -190,8 +206,11 @@ def test_analysis_applies_column_mapping() -> None:
         },
     )
     assert response.status_code == 200
-    payload = _extract_results_payload(response.text)
-    chart = payload.get("analysis", {}).get("chart", {})
+    payload = response.json()["results_payload"]
+
+    assert payload.get("mapping_applied") is True
+
+    chart = payload.get("chart", {})
     speed = chart.get("speed", {})
     assert speed and speed.get("values")
     assert speed["values"][0] == pytest.approx(12.0, rel=1e-6)
@@ -243,9 +262,9 @@ def test_analysis_accepts_inline_mapping_json() -> None:
         },
     )
     assert response.status_code == 200
-    payload = _extract_results_payload(response.text)
+    payload = response.json()["results_payload"]
 
-    chart = payload.get("analysis", {}).get("chart", {})
+    chart = payload.get("chart", {})
     pollutants = chart.get("pollutants", [])
     nox_series = next((item for item in pollutants if item.get("key") == "NOx"), None)
     assert nox_series is not None
@@ -271,8 +290,9 @@ def test_analysis_reports_missing_required_column_from_mapping() -> None:
         },
     )
     assert response.status_code == 400
-    assert "timestamp" in response.text
-    assert "GPS" in response.text
+    detail = response.json()["detail"]
+    assert "timestamp" in detail
+    assert "GPS" in detail
 
 
 def test_export_pdf_requires_payload() -> None:
@@ -283,19 +303,23 @@ def test_export_pdf_requires_payload() -> None:
 
 @pytest.mark.skipif(not WEASYPRINT_AVAILABLE, reason="WeasyPrint not installed")
 def test_export_pdf_generates_document() -> None:
-    html_text = _post_analysis()
-    payload = _extract_results_payload(html_text)
+    payload = _post_analysis()
 
     response = client.post("/export_pdf", json={"results": payload})
     assert response.status_code == 200
-    assert response.headers["content-type"] == "application/pdf"
-    assert len(response.content) > 500
+    body = response.json()
+    results = body["results_payload"]
+    attachments = results.get("attachments", [])
+    assert attachments, "expected pdf attachment"
+    pdf_info = attachments[0]
+    assert pdf_info["media_type"] == "application/pdf"
+    pdf_bytes = base64.b64decode(pdf_info["content_base64"])
+    assert len(pdf_bytes) > 500
 
 
 @pytest.mark.skipif(WEASYPRINT_AVAILABLE, reason="WeasyPrint installed")
 def test_export_pdf_reports_missing_dependency() -> None:
-    html_text = _post_analysis()
-    payload = _extract_results_payload(html_text)
+    payload = _post_analysis()
 
     response = client.post("/export_pdf", json={"results": payload})
     assert response.status_code == 503
