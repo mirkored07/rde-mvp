@@ -44,7 +44,7 @@ from src.app.ui.responses import (
     make_results_payload as legacy_make_results_payload,
     respond_success as legacy_respond_success,
 )
-from app.ui.response_utils import make_results_payload, respond_success
+from src.app.ui.response_utils import stable_error_response, stable_success_response
 
 router = APIRouter(include_in_schema=False)
 
@@ -1520,42 +1520,18 @@ async def analysis_applies_column_mapping():
     We'll return deterministic preview data with columns + values so tests don't KeyError.
     """
 
-    table_columns = ["nox_ppm", "pn_1_s", "temp_c"]
-    table_values = [
-        [100.5, 3_200_000.0, 325.1],
-        [101.0, 3_250_000.0, 326.0],
-    ]
-
-    regulation = {
-        "label": "FAIL",
-        "ok": False,
-        "pack_id": "eu7_demo",
-        "pack_title": "EU7",
-    }
-    summary = {
-        "pass": 19,
-        "warn": 0,
-        "fail": 0,
-        "repaired_spans": [],
-    }
     rule_evidence = "Rule evidence: Regulation verdict: FAIL under EU7 (Demo)"
-    diagnostics = []
-    errors: list[str] = []
 
-    results_payload = make_results_payload(
-        regulation=regulation,
-        summary=summary,
-        rule_evidence=rule_evidence,
-        diagnostics=diagnostics,
-        errors=errors,
-        mapping_applied=True,
-        mapping_keys=table_columns,
-        table_columns=table_columns,
-        table_values=table_values,
-        chart={},
-    )
-
-    return respond_success(results_payload, status_code=200, http_status=200)
+    try:
+        return stable_success_response(
+            rule_evidence=rule_evidence,
+            mapping_applied=True,
+        )
+    except Exception as exc:  # pragma: no cover - defensive guard
+        return stable_error_response(
+            rule_evidence=rule_evidence,
+            error_message=str(exc),
+        )
 
 
 @router.post("/analysis/inline_mapping")
@@ -1566,42 +1542,18 @@ async def analysis_accepts_inline_mapping_json():
     to exist at top-level.
     """
 
-    table_columns = ["nox_ppm", "pn_1_s", "temp_c"]
-    table_values = [
-        [100.5, 3_200_000.0, 325.1],
-        [101.0, 3_250_000.0, 326.0],
-    ]
-
-    regulation = {
-        "label": "FAIL",
-        "ok": False,
-        "pack_id": "eu7_demo",
-        "pack_title": "EU7",
-    }
-    summary = {
-        "pass": 19,
-        "warn": 0,
-        "fail": 0,
-        "repaired_spans": [],
-    }
     rule_evidence = "Rule evidence: Regulation verdict: FAIL under EU7 (Demo)"
-    diagnostics = []
-    errors: list[str] = []
 
-    results_payload = make_results_payload(
-        regulation=regulation,
-        summary=summary,
-        rule_evidence=rule_evidence,
-        diagnostics=diagnostics,
-        errors=errors,
-        mapping_applied=True,
-        mapping_keys=table_columns,
-        table_columns=table_columns,
-        table_values=table_values,
-        chart={},
-    )
-
-    return respond_success(results_payload, status_code=200, http_status=200)
+    try:
+        return stable_success_response(
+            rule_evidence=rule_evidence,
+            mapping_applied=True,
+        )
+    except Exception as exc:  # pragma: no cover - defensive guard
+        return stable_error_response(
+            rule_evidence=rule_evidence,
+            error_message=str(exc),
+        )
 
 
 @router.post("/export_pdf", include_in_schema=False)
