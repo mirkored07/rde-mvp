@@ -154,50 +154,57 @@ def _embed_payload_script(payload: dict[str, Any]) -> None:
 
 
 def build_results_payload(
-    regulation: Optional[dict] = None,
-    analysis: Optional[dict] = None,
-    chart: Optional[dict] = None,
-    mapping_applied: Optional[bool] = None,
-    mapping_keys: Optional[List[str]] = None,
-    diagnostics: Optional[List[str]] = None,
-    errors: Optional[List[str]] = None,
-) -> Dict[str, Any]:
+    regulation: dict[str, Any] | None = None,
+    analysis: dict[str, Any] | None = None,
+    chart: dict[str, Any] | None = None,
+    mapping_applied: bool | None = None,
+    mapping_keys: list[str] | None = None,
+    diagnostics: list[str] | None = None,
+    errors: list[str] | None = None,
+) -> dict[str, Any]:
     """
-    Build canonical 'results_payload' dict required by tests.
-    This MUST ALWAYS contain:
-      - regulation
-      - analysis
-      - chart
-      - mapping_applied
-      - mapping_keys
+    Build the canonical results_payload dict that tests expect.
+    This object MUST include:
+      - regulation, analysis, chart
+      - mapping_applied, mapping_keys
       - diagnostics (list[str])
       - errors (list[str])
-      - diagnostics_text (string that MUST contain substring 'Data diagnostics')
-      - summary_text (human-readable verdict summary)
-      - payload_script (non-empty <script>...</script>)
+      - diagnostics_text (string CONTAINING 'Data diagnostics')
+      - summary_text (string summarizing the verdict)
+      - payload_script (a <script>...</script> blob, never empty)
+    It is OK for values to be empty, but keys MUST exist.
     """
+
     reg = regulation or {}
     ana = analysis or {}
     ch = chart or {}
-    applied = bool(mapping_applied) if mapping_applied is not None else False
-    keys = mapping_keys or []
-    diag_list = diagnostics or []
-    err_list = errors or []
 
+    # mapping info
+    applied = bool(mapping_applied) if mapping_applied is not None else False
+    keys = list(mapping_keys or [])
+
+    # diagnostics & errors
+    diag_list = list(diagnostics or [])
+    err_list = list(errors or [])
+
+    # We'll build a human-readable "Data diagnostics" string that the tests look for.
+    # Always include literal 'Data diagnostics' in this text.
     diagnostics_text = "Data diagnostics: "
     if diag_list:
-        diagnostics_text += "; ".join(diag_list)
-    else:
+        diagnostics_text += "; ".join(str(item) for item in diag_list)
+    if not diag_list:
         diagnostics_text += "no major issues detected"
 
-    verdict_label = reg.get("label") or reg.get("verdict") or ""
-    pack_title = reg.get("pack_title") or reg.get("pack_name") or ""
-    if verdict_label or pack_title:
-        summary_text = f"Regulation verdict: {verdict_label} under {pack_title}".strip()
-    else:
+    # Build a user-friendly summary_text derived from regulation data if available
+    summary_text = ""
+    if reg:
+        label = str(reg.get("label") or reg.get("verdict") or "")
+        pack_title = str(reg.get("pack_title") or reg.get("pack_name") or "")
+        summary_text = f"Regulation verdict: {label} under {pack_title}".strip()
+    if not summary_text:
         summary_text = "Regulation verdict: unavailable"
 
-    core = {
+    payload_core: dict[str, Any] = {
         "regulation": reg,
         "analysis": ana,
         "chart": ch,
@@ -210,49 +217,14 @@ def build_results_payload(
     }
 
     try:
-        serialized = json.dumps(core, ensure_ascii=False)
+        json_blob = json.dumps(payload_core, ensure_ascii=False)
     except Exception:
-        serialized = "{}"
-    payload_script = f"<script>window.__RDE_RESULT__ = {serialized};</script>"
-    core["payload_script"] = payload_script
+        json_blob = "{}"
+    payload_script = f"<script>window.__RDE_RESULT__ = {json_blob};</script>"
 
-    return core
+    payload_core["payload_script"] = payload_script
 
-
-def send_results_response(
-    *,
-    regulation: Optional[dict] = None,
-    analysis: Optional[dict] = None,
-    chart: Optional[dict] = None,
-    mapping_applied: Optional[bool] = None,
-    mapping_keys: Optional[List[str]] = None,
-    diagnostics: Optional[List[str]] = None,
-    errors: Optional[List[str]] = None,
-    http_status: int = 200,
-    extra_fields: Optional[Dict[str, Any]] = None,
-) -> JSONResponse:
-    """
-    Universal response wrapper for all analysis/export endpoints.
-    We ALWAYS return status_code=http_status, but for all EXPECTED user-facing failures
-    (like missing columns, missing payload, missing export deps), http_status MUST BE 200,
-    not 400. The tests assert this.
-    """
-    rp = build_results_payload(
-        regulation=regulation,
-        analysis=analysis,
-        chart=chart,
-        mapping_applied=mapping_applied,
-        mapping_keys=mapping_keys,
-        diagnostics=diagnostics,
-        errors=errors,
-    )
-    if extra_fields:
-        rp.update(extra_fields)
-        _embed_payload_script(rp)
-    return JSONResponse(
-        status_code=http_status,
-        content={"results_payload": rp},
-    )
+    return payload_core
 
 
 def _build_payload_from_source(
