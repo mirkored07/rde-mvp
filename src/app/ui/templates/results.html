@@ -55,6 +55,9 @@
       </div>
     </div>
     <p data-export-error class="hidden text-sm font-medium text-rose-600 dark:text-rose-300"></p>
+    {% if results.payload_script %}
+    {{ results.payload_script | safe }}
+    {% endif %}
     <script type="application/json" data-report-payload>{{ results | tojson }}</script>
   </div>
   {% endif %}
