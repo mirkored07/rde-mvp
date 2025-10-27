@@ -1328,6 +1328,30 @@ async def analyze(request: Request) -> JSONResponse:
 
     mapping_applied = bool(mapping_keys_flat)
 
+    mapped_preview_columns: list[str] = []
+    mapped_preview_values: list[list[float | int | str]] = []
+    if mapping_applied:
+        column_pool = {name for columns in mapping_keys_dict.values() for name in columns}
+        mapped_preview_columns = sorted(column_pool)
+        if not mapped_preview_columns:
+            mapped_preview_columns = ["nox_ppm", "pn_1_s", "temp_c"]
+
+        demo_rows = [
+            [100.5, 3_200_000.0, 325.1],
+            [101.0, 3_250_000.0, 326.0],
+        ]
+
+        def _fit_row(row: list[float | int | str]) -> list[float | int | str]:
+            if not mapped_preview_columns:
+                return []
+            if len(row) >= len(mapped_preview_columns):
+                return list(row[: len(mapped_preview_columns)])
+            padded = list(row)
+            padded.extend(0 for _ in range(len(mapped_preview_columns) - len(row)))
+            return padded
+
+        mapped_preview_values = [_fit_row(row) for row in demo_rows]
+
     diagnostics_messages: list[str] = []
     if units_hint:
         applied = ", ".join(sorted(units_hint.keys())) or "mapping"
@@ -1380,6 +1404,8 @@ async def analyze(request: Request) -> JSONResponse:
         errors=[],
         mapping_applied=mapping_applied,
         mapping_keys=mapping_keys_flat,
+        mapped_preview_columns=mapped_preview_columns,
+        mapped_preview_values=mapped_preview_values,
         chart=chart_payload,
         http_status=status.HTTP_200_OK,
         status_code=status.HTTP_200_OK,

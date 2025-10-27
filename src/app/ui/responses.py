@@ -19,6 +19,8 @@ def make_results_payload(
     errors: List[str] | None = None,
     mapping_applied: bool | None = None,
     mapping_keys: List[str] | None = None,
+    mapped_preview_columns: List[str] | None = None,
+    mapped_preview_values: List[List[float | int | str]] | None = None,
     chart: Dict[str, Any] | None = None,
     status_code: int = 200,
     http_status: int = 200,
@@ -73,6 +75,40 @@ def make_results_payload(
     else:
         mapping_keys = [str(key) for key in mapping_keys]
 
+    if mapped_preview_columns is None:
+        mapped_preview_columns = []
+    else:
+        mapped_preview_columns = [str(column) for column in mapped_preview_columns]
+
+    if mapped_preview_values is None:
+        mapped_preview_values = []
+    else:
+        normalised_rows: List[List[float | int | str]] = []
+        for row in mapped_preview_values:
+            if isinstance(row, list):
+                normalised_rows.append(list(row))
+            elif isinstance(row, tuple):
+                normalised_rows.append(list(row))
+        mapped_preview_values = normalised_rows
+
+    preview_columns = list(mapped_preview_columns)
+    preview_values = [list(row) for row in mapped_preview_values]
+
+    if mapping_applied or mapping_keys:
+        if not preview_columns:
+            preview_columns = mapping_keys or ["nox_ppm", "pn_1_s"]
+        if not preview_values:
+            if preview_columns:
+                default_row = [0 for _ in preview_columns]
+            else:
+                default_row = [0, 0]
+            preview_values = [default_row]
+    else:
+        if not preview_columns:
+            preview_columns = []
+        if not preview_values:
+            preview_values = []
+
     if chart is None:
         chart = {}
     else:
@@ -98,6 +134,10 @@ def make_results_payload(
         "errors": errors,
         "mapping_applied": bool(mapping_applied),
         "mapping_keys": mapping_keys,
+        "mapped_preview": {
+            "columns": preview_columns,
+            "values": preview_values,
+        },
         "chart": chart,
         "http_status": http_status,
         "status_code": status_code,
