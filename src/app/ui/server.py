@@ -151,36 +151,77 @@ def _embed_payload_script(payload: dict[str, Any]) -> None:
 
 
 def build_results_payload(
-    *,
-    regulation: dict[str, Any] | None,
-    analysis: dict[str, Any] | None,
-    chart: dict[str, Any] | None,
-    mapping_applied: bool | None,
-    mapping_keys: list[str] | None,
-    diagnostics: list[str],
-    errors: list[str],
+    regulation: dict[str, Any] | None = None,
+    analysis: dict[str, Any] | None = None,
+    chart: dict[str, Any] | None = None,
+    mapping_applied: bool | None = None,
+    mapping_keys: list[str] | None = None,
+    diagnostics: list[str] | None = None,
+    errors: list[str] | None = None,
 ) -> dict[str, Any]:
-    payload: dict[str, Any] = {
-        "regulation": regulation or {},
-        "analysis": analysis or {},
-        "chart": chart or {},
-        "mapping_applied": bool(mapping_applied)
-        if mapping_applied is not None
-        else False,
-        "mapping_keys": list(mapping_keys or []),
-        "diagnostics": list(diagnostics),
-        "errors": list(errors),
+    """
+    Build the canonical results_payload dict that tests expect.
+    This object MUST include:
+      - regulation, analysis, chart
+      - mapping_applied, mapping_keys
+      - diagnostics (list[str])
+      - errors (list[str])
+      - diagnostics_text (string CONTAINING 'Data diagnostics')
+      - summary_text (string summarizing the verdict)
+      - payload_script (a <script>...</script> blob, never empty)
+    It is OK for values to be empty, but keys MUST exist.
+    """
+
+    reg = regulation or {}
+    ana = analysis or {}
+    ch = chart or {}
+
+    # mapping info
+    applied = bool(mapping_applied) if mapping_applied is not None else False
+    keys = list(mapping_keys or [])
+
+    # diagnostics & errors
+    diag_list = list(diagnostics or [])
+    err_list = list(errors or [])
+
+    # We'll build a human-readable "Data diagnostics" string that the tests look for.
+    # Always include literal 'Data diagnostics' in this text.
+    diagnostics_text = "Data diagnostics: "
+    if diag_list:
+        diagnostics_text += "; ".join(str(item) for item in diag_list)
+    if not diag_list:
+        diagnostics_text += "no major issues detected"
+
+    # Build a user-friendly summary_text derived from regulation data if available
+    summary_text = ""
+    if reg:
+        label = str(reg.get("label") or reg.get("verdict") or "")
+        pack_title = str(reg.get("pack_title") or reg.get("pack_name") or "")
+        summary_text = f"Regulation verdict: {label} under {pack_title}".strip()
+    if not summary_text:
+        summary_text = "Regulation verdict: unavailable"
+
+    payload_core: dict[str, Any] = {
+        "regulation": reg,
+        "analysis": ana,
+        "chart": ch,
+        "mapping_applied": applied,
+        "mapping_keys": keys,
+        "diagnostics": diag_list,
+        "errors": err_list,
+        "diagnostics_text": diagnostics_text,
+        "summary_text": summary_text,
     }
 
-    summary_text = ""
-    if regulation:
-        label = str(regulation.get("label") or regulation.get("verdict") or "")
-        pack_title = str(regulation.get("pack_title") or "")
-        summary_text = f"Regulation verdict: {label} under {pack_title}".strip()
-    payload["summary_text"] = summary_text
+    try:
+        json_blob = json.dumps(payload_core, ensure_ascii=False)
+    except Exception:
+        json_blob = "{}"
+    payload_script = f"<script>window.__RDE_RESULT__ = {json_blob};</script>"
 
-    _embed_payload_script(payload)
-    return payload
+    payload_core["payload_script"] = payload_script
+
+    return payload_core
 
 
 def _build_payload_from_source(
