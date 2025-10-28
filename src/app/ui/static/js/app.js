@@ -657,21 +657,6 @@
     return null;
   }
 
-  function resolveMapPayload(payload) {
-    if (!payload || typeof payload !== "object") return null;
-    if (payload.map && typeof payload.map === "object") {
-      return payload.map;
-    }
-    const analysis = payload.analysis;
-    if (analysis && typeof analysis === "object") {
-      const analysisMap = analysis.map;
-      if (analysisMap && typeof analysisMap === "object") {
-        return analysisMap;
-      }
-    }
-    return null;
-  }
-
   function toNumberOrNull(value) {
     if (value === null || value === undefined) return null;
     const num = Number(value);
@@ -804,87 +789,6 @@
     chartEl.dataset.chartReady = "true";
   }
 
-  function renderDriveMap(payload) {
-    const mapEl = document.getElementById("drive-map");
-    if (!mapEl) return;
-
-    if (mapEl._leafletMap) {
-      mapEl._leafletMap.remove();
-      mapEl._leafletMap = undefined;
-    }
-
-    if (!payload || !window.L) {
-      mapEl.dataset.mapReady = "false";
-      return;
-    }
-
-    const mapPayload = resolveMapPayload(payload);
-    const rawPoints = ensureArray(mapPayload?.points);
-    const latLngs = rawPoints
-      .map((point) => {
-        if (!point) return null;
-        const lat = Number(point.lat);
-        const lon = Number(point.lon);
-        if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
-        return [lat, lon];
-      })
-      .filter(Boolean);
-
-    if (!latLngs.length) {
-      mapEl.dataset.mapReady = "false";
-      return;
-    }
-
-    const map = window.L.map(mapEl, { scrollWheelZoom: false });
-    window.L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      maxZoom: 19,
-      attribution: "&copy; OpenStreetMap contributors",
-    }).addTo(map);
-
-    const polyline = window.L.polyline(latLngs, {
-      color: "#2563eb",
-      weight: 4,
-      opacity: 0.85,
-    }).addTo(map);
-
-    if (latLngs.length >= 1) {
-      window.L.circleMarker(latLngs[0], {
-        radius: 5,
-        color: "#10b981",
-        fillColor: "#10b981",
-        fillOpacity: 0.9,
-      }).addTo(map);
-    }
-
-    if (latLngs.length >= 2) {
-      window.L.circleMarker(latLngs[latLngs.length - 1], {
-        radius: 5,
-        color: "#f97316",
-        fillColor: "#f97316",
-        fillOpacity: 0.9,
-      }).addTo(map);
-    }
-
-    const hasBounds = Array.isArray(mapPayload?.bounds) && mapPayload.bounds.length === 2;
-    const center = mapPayload?.center;
-
-    try {
-      if (hasBounds) {
-        const bounds = window.L.latLngBounds(mapPayload.bounds);
-        map.fitBounds(bounds, { padding: [24, 24] });
-      } else if (center && Number.isFinite(Number(center.lat)) && Number.isFinite(Number(center.lon))) {
-        map.setView([Number(center.lat), Number(center.lon)], 13);
-      } else {
-        map.fitBounds(polyline.getBounds(), { padding: [24, 24] });
-      }
-    } catch (error) {
-      map.fitBounds(polyline.getBounds(), { padding: [24, 24] });
-    }
-
-    mapEl._leafletMap = map;
-    mapEl.dataset.mapReady = "true";
-  }
-
   function populateExportForms(payload) {
     let serialised = "";
     if (payload) {
@@ -911,7 +815,9 @@
     const payload = getResultPayload();
     renderEmissionsChart(payload);
     applyChartThemes();
-    renderDriveMap(payload);
+    if (typeof window.initMapFromResult === "function") {
+      window.initMapFromResult(payload);
+    }
     populateExportForms(payload);
   }
 
@@ -942,6 +848,79 @@
     const chart = document.getElementById("emissions-chart");
     if (chart && chart.dataset.chartReady === "true") {
       window.Plotly.Plots.resize(chart);
+    }
+  });
+})();
+
+(function () {
+  function initMapFromResult(result) {
+    if (!result || !result.map || typeof window.L === "undefined") {
+      return;
+    }
+
+    const mapEl = document.getElementById("drive-map");
+    if (!mapEl) return;
+
+    const { center, points, bounds } = result.map || {};
+    const centerLat = Number(center?.lat);
+    const centerLon = Number(center?.lon);
+    if (!Number.isFinite(centerLat) || !Number.isFinite(centerLon)) {
+      return;
+    }
+
+    if (!Array.isArray(points) || points.length === 0) {
+      return;
+    }
+
+    if (mapEl._leafletInstance) {
+      mapEl._leafletInstance.remove();
+      mapEl._leafletInstance = undefined;
+    }
+
+    const map = L.map("drive-map", {
+      center: [centerLat, centerLon],
+      zoom: 13,
+      scrollWheelZoom: false,
+    });
+
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19,
+      attribution: "&copy; OpenStreetMap contributors",
+    }).addTo(map);
+
+    const latlngs = points
+      .map((p) => {
+        if (!p) return null;
+        const lat = Number(p.lat);
+        const lon = Number(p.lon);
+        if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+        return [lat, lon];
+      })
+      .filter(Boolean);
+
+    if (latlngs.length === 0) {
+      return;
+    }
+
+    L.polyline(latlngs, {
+      color: "#38bdf8",
+      weight: 3,
+    }).addTo(map);
+
+    if (Array.isArray(bounds) && bounds.length === 2) {
+      map.fitBounds(bounds);
+    } else if (latlngs.length > 1) {
+      map.fitBounds(latlngs);
+    }
+
+    mapEl._leafletInstance = map;
+  }
+
+  window.initMapFromResult = initMapFromResult;
+
+  document.addEventListener("DOMContentLoaded", () => {
+    if (window.__RDE_RESULT__) {
+      initMapFromResult(window.__RDE_RESULT__);
     }
   });
 })();
