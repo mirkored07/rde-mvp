@@ -2203,6 +2203,17 @@ async def analyze(request: Request) -> JSONResponse:
 
         return Response(content=final_html, media_type="text/html")
 
+    accept_header = (request.headers.get("accept") or "").lower()
+    wants_html = "text/html" in accept_header
+
+    if wants_html:
+        context = _base_template_context(
+            request,
+            results=results_payload,
+            errors=[],
+        )
+        return templates.TemplateResponse("results.html", context)
+
     return legacy_respond_success(results_payload)
 
 @router.get("/mapping_profiles", include_in_schema=False)
