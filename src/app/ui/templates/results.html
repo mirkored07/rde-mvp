@@ -334,17 +334,29 @@
 </section>
 {% endif %}
 
-<!-- Plotly for charts -->
-<script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+<!-- External libs needed for charts and map.
+     We intentionally do NOT include integrity="" here because the
+     dev browser was blocking the resources due to hash mismatch.
+     In production we can restore SRI, but for local dev we allow load. -->
 
-<!-- Leaflet for maps (no integrity / crossorigin to avoid SRI block) -->
+<!-- Leaflet CSS -->
 <link
-  rel="stylesheet"
-  href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+       rel="stylesheet"
+       href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+       crossorigin="anonymous"
  />
+
+<!-- Leaflet JS -->
 <script
-  src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js">
-</script>
+       src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+       crossorigin="anonymous"
+></script>
+
+<!-- Plotly JS -->
+<script
+       src="https://cdn.plot.ly/plotly-2.32.0.min.js"
+       crossorigin="anonymous"
+></script>
 
 <!-- Our result payload (injected by FastAPI server render) -->
 {% if results_payload %}
