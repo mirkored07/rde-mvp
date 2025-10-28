@@ -328,3 +328,26 @@
   </div>
 </section>
 {% endif %}
+
+<!-- Plotly for charts -->
+<script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+
+<!-- Leaflet for maps (no integrity / crossorigin to avoid SRI block) -->
+<link
+  rel="stylesheet"
+  href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+ />
+<script
+  src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js">
+</script>
+
+<!-- Our result payload (injected by FastAPI server render) -->
+{% if results_payload %}
+<script>
+  // Make analysis data available to client-side chart/map code
+  window.__RDE_RESULT__ = {{ results_payload | tojson | safe }};
+</script>
+{% endif %}
+
+<!-- Client-side renderer for charts + map -->
+<script src="/static/js/app.js"></script>
