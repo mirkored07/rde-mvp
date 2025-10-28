@@ -339,24 +339,17 @@
      dev browser was blocking the resources due to hash mismatch.
      In production we can restore SRI, but for local dev we allow load. -->
 
-<!-- Leaflet CSS -->
+<!-- Leaflet CSS (local copy) -->
 <link
-       rel="stylesheet"
-       href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-       crossorigin="anonymous"
+  rel="stylesheet"
+  href="/static/leaflet/leaflet.css"
  />
 
-<!-- Leaflet JS -->
-<script
-       src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
-       crossorigin="anonymous"
-></script>
+<!-- Leaflet JS (local copy) -->
+<script src="/static/leaflet/leaflet.js"></script>
 
 <!-- Plotly JS -->
-<script
-       src="https://cdn.plot.ly/plotly-2.32.0.min.js"
-       crossorigin="anonymous"
-></script>
+<script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
 
 <!-- Our result payload (injected by FastAPI server render) -->
 {% if results_payload %}
