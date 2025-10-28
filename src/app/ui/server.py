@@ -1072,6 +1072,8 @@ def _build_results_context(
         "results": results,
     }
 
+    context["results_payload"] = results
+
     if errors or results is None:
         return context
 

@@ -633,189 +633,228 @@
     }
   }
 
-  function applyChartTheme() {
-    const chart = document.getElementById("analysis-chart");
-    if (!chart || chart.dataset.chartReady !== "true" || !window.Plotly) {
-      return;
+
+  function getResultPayload() {
+    const payload = window.__RDE_RESULT__;
+    if (!payload || typeof payload !== "object") {
+      return null;
     }
+    return payload;
+  }
+
+  function resolveChartPayload(payload) {
+    if (!payload || typeof payload !== "object") return null;
+    if (payload.chart && typeof payload.chart === "object") {
+      return payload.chart;
+    }
+    const analysis = payload.analysis;
+    if (analysis && typeof analysis === "object") {
+      const analysisChart = analysis.chart;
+      if (analysisChart && typeof analysisChart === "object") {
+        return analysisChart;
+      }
+    }
+    return null;
+  }
+
+  function resolveMapPayload(payload) {
+    if (!payload || typeof payload !== "object") return null;
+    if (payload.map && typeof payload.map === "object") {
+      return payload.map;
+    }
+    const analysis = payload.analysis;
+    if (analysis && typeof analysis === "object") {
+      const analysisMap = analysis.map;
+      if (analysisMap && typeof analysisMap === "object") {
+        return analysisMap;
+      }
+    }
+    return null;
+  }
+
+  function toNumberOrNull(value) {
+    if (value === null || value === undefined) return null;
+    const num = Number(value);
+    return Number.isFinite(num) ? num : null;
+  }
+
+  function ensureArray(value) {
+    return Array.isArray(value) ? value : [];
+  }
+
+  function ensureXValues(times, length) {
+    if (Array.isArray(times) && times.length === length && times.length) {
+      return times;
+    }
+    return Array.from({ length }, (_, index) => index + 1);
+  }
+
+  function hasNumericData(values) {
+    return Array.isArray(values) && values.some((value) => value !== null && value !== undefined);
+  }
+
+  function applyChartThemes() {
+    if (!window.Plotly) return;
     const isDark = document.documentElement.classList.contains("dark");
     const color = isDark ? "#e2e8f0" : "#1e293b";
-    window.Plotly.relayout(chart, {
-      "font.color": color,
-      "xaxis.color": color,
-      "yaxis.color": color,
-      "yaxis2.color": color,
-      "paper_bgcolor": "rgba(0,0,0,0)",
-      "plot_bgcolor": "rgba(0,0,0,0)",
+    ["pollutantChart", "speedChart"].forEach((id) => {
+      const chart = document.getElementById(id);
+      if (!chart || chart.dataset.chartReady !== "true") return;
+      window.Plotly.relayout(chart, {
+        "font.color": color,
+        "xaxis.color": color,
+        "yaxis.color": color,
+        "paper_bgcolor": "rgba(0,0,0,0)",
+        "plot_bgcolor": "rgba(0,0,0,0)",
+      });
     });
   }
 
-  function renderChart(container) {
-    const chart = container.querySelector("#analysis-chart");
-    const empty = container.querySelector("[data-chart-empty]");
-    const switcher = container.querySelector("[data-chart-switcher]");
-    const dataEl = container.querySelector("#chart-data");
-    if (!chart || !dataEl) return;
+  function renderPollutantChart(payload) {
+    const chartEl = document.getElementById("pollutantChart");
+    if (!chartEl) return;
 
-    let config;
-    try {
-      config = JSON.parse(dataEl.textContent || "{}");
-    } catch (error) {
-      config = null;
-    }
-
-    const pollutants = Array.isArray(config?.pollutants)
-      ? config.pollutants.filter((item) => Array.isArray(item.values))
-      : [];
-    const hasPollutants = pollutants.some((item) => item.values.some((value) => value !== null && value !== undefined));
-
-    if (!config || !hasPollutants || !window.Plotly) {
-      if (switcher) {
-        switcher.innerHTML = "";
-        switcher.classList.add("hidden");
-      }
-      if (empty) empty.classList.remove("hidden");
-      chart.classList.add("hidden");
-      chart.dataset.chartReady = "false";
+    if (!payload || !window.Plotly) {
       if (window.Plotly) {
-        window.Plotly.purge(chart);
+        window.Plotly.purge(chartEl);
       }
+      chartEl.dataset.chartReady = "false";
       return;
     }
 
-    const times = Array.isArray(config.times) ? config.times : [];
-    const speed = config.speed;
-    const baseLayout = config.layout || {
-      margin: { t: 32, r: 32, b: 40, l: 48 },
-      legend: { orientation: "h", y: -0.25 },
-      xaxis: { title: "Time", showgrid: false },
-      yaxis: { title: "Speed (m/s)", zeroline: false },
-      yaxis2: {
-        title: "Emission rate",
-        overlaying: "y",
-        side: "right",
-        showgrid: false,
-        zeroline: false,
-      },
-      paper_bgcolor: "rgba(0,0,0,0)",
-      plot_bgcolor: "rgba(0,0,0,0)",
-    };
+    const chartPayload = resolveChartPayload(payload);
+    const pollutants = ensureArray(chartPayload?.pollutants);
+    const times = ensureArray(chartPayload?.times);
 
-    const buttons = [];
-    if (switcher) {
-      switcher.innerHTML = "";
-    }
-
-    const renderPollutant = (pollutant) => {
-      if (!pollutant) return;
-      const traces = [];
-      if (speed && Array.isArray(speed.values) && speed.values.some((value) => value !== null && value !== undefined)) {
-        traces.push({
-          name: speed.label || "Vehicle speed",
+    const traces = pollutants
+      .map((pollutant) => {
+        if (!pollutant || typeof pollutant !== "object") return null;
+        const values = ensureArray(pollutant.values).map(toNumberOrNull);
+        if (!hasNumericData(values)) return null;
+        const xValues = ensureXValues(times, values.length);
+        const label = pollutant.label || pollutant.key || "Pollutant";
+        return {
+          name: label,
           mode: "lines",
-          x: times,
-          y: speed.values.map((value) => (value === null || value === undefined ? null : Number(value))),
-          line: { color: speed.color || "#2563eb", width: 2.5 },
-          yaxis: "y",
-        });
-      }
+          x: xValues,
+          y: values,
+          line: { width: 2.5, color: pollutant.color || undefined },
+          hovertemplate: "%{y}<extra>" + label + "</extra>",
+        };
+      })
+      .filter(Boolean);
 
-      traces.push({
-        name: pollutant.label || pollutant.key || "Pollutant",
-        mode: "lines",
-        x: times,
-        y: pollutant.values.map((value) => (value === null || value === undefined ? null : Number(value))),
-        line: { color: pollutant.color || "#dc2626", width: 2 },
-        yaxis: "y2",
-      });
-
-      const layout = JSON.parse(JSON.stringify(baseLayout));
-      if (pollutant.label) {
-        layout.yaxis2.title = pollutant.label;
-      }
-      if (speed?.label) {
-        layout.yaxis.title = speed.label;
-      }
-
-      if (chart.dataset.chartReady === "true") {
-        window.Plotly.react(chart, traces, layout, { displayModeBar: false, responsive: true });
-      } else {
-        window.Plotly.newPlot(chart, traces, layout, { displayModeBar: false, responsive: true });
-        chart.dataset.chartReady = "true";
-      }
-      chart.dataset.currentPollutant = pollutant.key || "";
-      applyChartTheme();
-    };
-
-    if (switcher) {
-      pollutants.forEach((pollutant, index) => {
-        const button = document.createElement("button");
-        button.type = "button";
-        button.className = "chart-toggle";
-        button.textContent = pollutant.label || pollutant.key || `Option ${index + 1}`;
-        button.addEventListener("click", () => {
-          if (chart.dataset.currentPollutant === (pollutant.key || "")) {
-            return;
-          }
-          buttons.forEach((btn) => btn.classList.remove("is-active"));
-          button.classList.add("is-active");
-          chart.dataset.chartReady = "false";
-          window.Plotly.purge(chart);
-          renderPollutant(pollutant);
-        });
-        buttons.push(button);
-        switcher.appendChild(button);
-      });
-      if (buttons.length) {
-        switcher.classList.remove("hidden");
-      } else {
-        switcher.classList.add("hidden");
-      }
+    if (!traces.length) {
+      window.Plotly.purge(chartEl);
+      chartEl.innerHTML = `<div class="flex h-full items-center justify-center text-xs text-slate-400 dark:text-slate-500">No pollutant data available.</div>`;
+      chartEl.dataset.chartReady = "false";
+      return;
     }
 
-    if (empty) empty.classList.add("hidden");
-    chart.classList.remove("hidden");
-    window.Plotly.purge(chart);
-    chart.dataset.chartReady = "false";
-
-    const initial = pollutants.find((pollutant) => pollutant && Array.isArray(pollutant.values));
-    if (initial) {
-      if (buttons.length) {
-        buttons[0].classList.add("is-active");
-      }
-      renderPollutant(initial);
-    }
+    chartEl.innerHTML = "";
+    window.Plotly.newPlot(
+      chartEl,
+      traces,
+      {
+        margin: { t: 32, r: 24, b: 40, l: 48 },
+        legend: { orientation: "h", y: -0.2 },
+        xaxis: { title: "Time" },
+        yaxis: { title: "Emission rate" },
+        paper_bgcolor: "rgba(0,0,0,0)",
+        plot_bgcolor: "rgba(0,0,0,0)",
+      },
+      { displayModeBar: false, responsive: true }
+    );
+    chartEl.dataset.chartReady = "true";
   }
 
-  function renderMap(container) {
-    const mapEl = container.querySelector("#analysis-map");
-    const empty = container.querySelector("[data-map-empty]");
-    const dataEl = container.querySelector("#map-data");
-    if (!mapEl || !dataEl) return;
+  function renderSpeedChart(payload) {
+    const chartEl = document.getElementById("speedChart");
+    if (!chartEl) return;
 
-    let payload;
-    try {
-      payload = JSON.parse(dataEl.textContent || "{}");
-    } catch (error) {
-      payload = null;
-    }
-
-    if (!payload || !payload.points || !payload.points.length || !window.L) {
-      if (empty) empty.classList.remove("hidden");
-      mapEl.classList.add("hidden");
-      mapEl.dataset.mapReady = "false";
-      if (mapEl._leafletMap) {
-        mapEl._leafletMap.remove();
-        mapEl._leafletMap = undefined;
+    if (!payload || !window.Plotly) {
+      if (window.Plotly) {
+        window.Plotly.purge(chartEl);
       }
+      chartEl.dataset.chartReady = "false";
       return;
     }
 
-    if (empty) empty.classList.add("hidden");
-    mapEl.classList.remove("hidden");
+    const chartPayload = resolveChartPayload(payload);
+    const speed = chartPayload && typeof chartPayload === "object" ? chartPayload.speed : null;
+    const speedValues = ensureArray(speed?.values).map(toNumberOrNull);
+
+    if (!hasNumericData(speedValues)) {
+      window.Plotly.purge(chartEl);
+      chartEl.innerHTML = `<div class="flex h-full items-center justify-center text-xs text-slate-400 dark:text-slate-500">No speed data available.</div>`;
+      chartEl.dataset.chartReady = "false";
+      return;
+    }
+
+    const times = ensureArray(chartPayload?.times);
+    const xValues = ensureXValues(times, speedValues.length);
+    const label = (speed && speed.label) || "Vehicle speed";
+
+    chartEl.innerHTML = "";
+    window.Plotly.newPlot(
+      chartEl,
+      [
+        {
+          name: label,
+          mode: "lines",
+          x: xValues,
+          y: speedValues,
+          line: { width: 2.5, color: (speed && speed.color) || "#2563eb" },
+          hovertemplate: "%{y}<extra>" + label + "</extra>",
+        },
+      ],
+      {
+        margin: { t: 32, r: 24, b: 40, l: 48 },
+        xaxis: { title: "Time" },
+        yaxis: { title: label },
+        paper_bgcolor: "rgba(0,0,0,0)",
+        plot_bgcolor: "rgba(0,0,0,0)",
+      },
+      { displayModeBar: false, responsive: true }
+    );
+    chartEl.dataset.chartReady = "true";
+  }
+
+  function renderCharts(payload) {
+    renderPollutantChart(payload);
+    renderSpeedChart(payload);
+    applyChartThemes();
+  }
+
+  function renderDriveMap(payload) {
+    const mapEl = document.getElementById("map");
+    if (!mapEl) return;
 
     if (mapEl._leafletMap) {
       mapEl._leafletMap.remove();
+      mapEl._leafletMap = undefined;
+    }
+
+    if (!payload || !window.L) {
+      mapEl.dataset.mapReady = "false";
+      return;
+    }
+
+    const mapPayload = resolveMapPayload(payload);
+    const rawPoints = ensureArray(mapPayload?.points);
+    const latLngs = rawPoints
+      .map((point) => {
+        if (!point) return null;
+        const lat = Number(point.lat);
+        const lon = Number(point.lon);
+        if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+        return [lat, lon];
+      })
+      .filter(Boolean);
+
+    if (!latLngs.length) {
+      mapEl.dataset.mapReady = "false";
+      return;
     }
 
     const map = window.L.map(mapEl, { scrollWheelZoom: false });
@@ -824,15 +863,14 @@
       attribution: "&copy; OpenStreetMap contributors",
     }).addTo(map);
 
-    const latlngs = payload.points.map((point) => [point.lat, point.lon]);
-    const polyline = window.L.polyline(latlngs, {
+    const polyline = window.L.polyline(latLngs, {
       color: "#2563eb",
       weight: 4,
       opacity: 0.85,
     }).addTo(map);
 
-    if (latlngs.length >= 1) {
-      window.L.circleMarker(latlngs[0], {
+    if (latLngs.length >= 1) {
+      window.L.circleMarker(latLngs[0], {
         radius: 5,
         color: "#10b981",
         fillColor: "#10b981",
@@ -840,8 +878,8 @@
       }).addTo(map);
     }
 
-    if (latlngs.length >= 2) {
-      window.L.circleMarker(latlngs[latlngs.length - 1], {
+    if (latLngs.length >= 2) {
+      window.L.circleMarker(latLngs[latLngs.length - 1], {
         radius: 5,
         color: "#f97316",
         fillColor: "#f97316",
@@ -849,10 +887,14 @@
       }).addTo(map);
     }
 
-    if (payload.bounds && payload.bounds.length === 2) {
-      const bounds = window.L.latLngBounds(payload.bounds);
-      map.fitBounds(bounds, { padding: [24, 24] });
-    } else {
+    try {
+      if (Array.isArray(mapPayload?.bounds) && mapPayload.bounds.length === 2) {
+        const bounds = window.L.latLngBounds(mapPayload.bounds);
+        map.fitBounds(bounds, { padding: [24, 24] });
+      } else {
+        map.fitBounds(polyline.getBounds(), { padding: [24, 24] });
+      }
+    } catch (error) {
       map.fitBounds(polyline.getBounds(), { padding: [24, 24] });
     }
 
@@ -860,158 +902,22 @@
     mapEl.dataset.mapReady = "true";
   }
 
-  function setupTabs(container) {
-    const triggers = Array.from(container.querySelectorAll("[data-tab-target]"));
-    const panels = Array.from(container.querySelectorAll("[data-tab-panel]"));
-    if (!triggers.length) return;
-
-    function activate(target) {
-      triggers.forEach((trigger) => {
-        const isActive = trigger.getAttribute("data-tab-target") === target;
-        trigger.classList.toggle("is-active", isActive);
-        trigger.setAttribute("aria-selected", isActive ? "true" : "false");
-      });
-      panels.forEach((panel) => {
-        const match = panel.getAttribute("data-tab-panel") === target;
-        if (match) {
-          panel.removeAttribute("hidden");
-        } else {
-          panel.setAttribute("hidden", "true");
-        }
-      });
-      if (target === "charts") {
-        applyChartTheme();
-        const chart = container.querySelector("#analysis-chart");
-        if (chart && chart.dataset.chartReady === "true" && window.Plotly) {
-          window.Plotly.Plots.resize(chart);
-        }
-      }
-      if (target === "map") {
-        const mapEl = container.querySelector("#analysis-map");
-        if (mapEl && mapEl.dataset.mapReady === "true" && mapEl._leafletMap) {
-          setTimeout(() => {
-            mapEl._leafletMap.invalidateSize();
-          }, 150);
-        }
-      }
-    }
-
-    triggers.forEach((trigger) => {
-      trigger.addEventListener("click", () => {
-        activate(trigger.getAttribute("data-tab-target"));
-      });
-    });
-
-    const initial = triggers.find((trigger) => trigger.classList.contains("is-active"))
-      || triggers[0];
-    if (initial) {
-      activate(initial.getAttribute("data-tab-target"));
-    }
-  }
-
-  function setupExportButtons(container) {
-    const pdfButton = container.querySelector("[data-download-pdf]");
-    const zipButton = container.querySelector("[data-download-zip]");
-    const payloadEl = container.querySelector("[data-report-payload]");
-    const errorEl = container.querySelector("[data-export-error]");
-
-    const showError = (message) => {
-      if (!errorEl) return;
-      if (message) {
-        errorEl.textContent = message;
-        errorEl.classList.remove("hidden");
-      } else {
-        errorEl.textContent = "";
-        errorEl.classList.add("hidden");
-      }
-    };
-
-    const buttons = [pdfButton, zipButton].filter(Boolean);
-    if (!buttons.length) {
-      if (errorEl) {
-        errorEl.classList.add("hidden");
-      }
-      return;
-    }
-
-    if (!payloadEl) {
-      buttons.forEach((btn) => {
-        btn.disabled = true;
-        btn.setAttribute("aria-disabled", "true");
-      });
-      showError("Report export is unavailable for this result.");
-      return;
-    }
-
-    const parsePayload = () => {
+  function populateExportForms(payload) {
+    let serialised = "";
+    if (payload) {
       try {
-        return JSON.parse(payloadEl.textContent || "{}");
+        serialised = JSON.stringify(payload);
       } catch (error) {
-        showError("Unable to prepare export payload.");
-        return null;
+        serialised = "";
       }
-    };
-
-    const download = async (button, endpoint, filename, failureMessage) => {
-      if (!button) return;
-      showError("");
-      const payload = parsePayload();
-      if (!payload) return;
-
-      button.disabled = true;
-      button.setAttribute("aria-busy", "true");
-
-      try {
-        const response = await fetch(endpoint, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ results: payload }),
-        });
-
-        if (!response.ok) {
-          let message = failureMessage;
-          try {
-            const data = await response.json();
-            if (data && typeof data.detail === "string") {
-              message = data.detail;
-            }
-          } catch (parseError) {
-            const fallback = await response.text();
-            if (fallback) {
-              message = fallback;
-            }
-          }
-          showError(message);
-          return;
-        }
-
-        const blob = await response.blob();
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement("a");
-        link.href = url;
-        link.download = filename;
-        document.body.appendChild(link);
-        link.click();
-        link.remove();
-        URL.revokeObjectURL(url);
-      } catch (error) {
-        showError(failureMessage);
-      } finally {
-        button.disabled = false;
-        button.removeAttribute("aria-busy");
-      }
-    };
-
-    if (pdfButton) {
-      pdfButton.addEventListener("click", () => {
-        download(pdfButton, "/export_pdf", "analysis-report.pdf", "PDF download failed. Please try again.");
-      });
     }
-
-    if (zipButton) {
-      zipButton.addEventListener("click", () => {
-        download(zipButton, "/export_zip", "analysis-report.zip", "ZIP download failed. Please try again.");
-      });
+    const zipField = document.getElementById("exportZipPayload");
+    if (zipField) {
+      zipField.value = serialised;
+    }
+    const pdfField = document.getElementById("exportPdfPayload");
+    if (pdfField) {
+      pdfField.value = serialised;
     }
   }
 
@@ -1019,10 +925,10 @@
     const container = root.querySelector("[data-component='analysis-results']");
     if (!container) return;
     renderSummary(container);
-    renderChart(container);
-    renderMap(container);
-    setupTabs(container);
-    setupExportButtons(container);
+    const payload = getResultPayload();
+    renderCharts(payload);
+    renderDriveMap(payload);
+    populateExportForms(payload);
   }
 
   document.addEventListener("DOMContentLoaded", () => {
@@ -1044,13 +950,16 @@
   });
 
   document.addEventListener("themechange", () => {
-    applyChartTheme();
+    applyChartThemes();
   });
 
   window.addEventListener("resize", () => {
-    const chart = document.getElementById("analysis-chart");
-    if (chart && chart.dataset.chartReady === "true" && window.Plotly) {
-      window.Plotly.Plots.resize(chart);
-    }
+    if (!window.Plotly) return;
+    ["pollutantChart", "speedChart"].forEach((id) => {
+      const chart = document.getElementById(id);
+      if (chart && chart.dataset.chartReady === "true") {
+        window.Plotly.Plots.resize(chart);
+      }
+    });
   });
 })();
