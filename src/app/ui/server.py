@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import html
 import io
 import json
 import math
@@ -53,6 +54,15 @@ templates = Jinja2Templates(directory=str(template_dir))
 
 BADGE_PASS = "px-2 py-1 rounded bg-green-600/10 text-green-700 dark:text-green-300 border border-green-600/20"
 BADGE_FAIL = "px-2 py-1 rounded bg-red-600/10 text-red-700 dark:text-red-300 border border-red-600/20"
+
+SUMMARY_BADGE_PASS = (
+    "inline-flex items-center rounded-md bg-emerald-500/10 text-emerald-400 "
+    "text-[10px] font-medium px-2 py-0.5 border border-emerald-500/20"
+)
+SUMMARY_BADGE_FAIL = (
+    "inline-flex items-center rounded-md bg-rose-500/10 text-rose-400 "
+    "text-[10px] font-medium px-2 py-0.5 border border-rose-500/20"
+)
 
 MAX_UPLOAD_MB = 50
 GPS_EXTENSIONS = {".csv", ".nmea", ".gpx", ".txt"}
@@ -1119,6 +1129,273 @@ def _build_results_context(
 
 
 
+def render_analysis_summary_html(results_payload: dict) -> str:
+    """Render a dark-themed HTML summary card for the analysis payload."""
+
+    if not isinstance(results_payload, Mapping):
+        results_payload = {}
+
+    def _ensure_mapping(value: Any) -> dict[str, Any]:
+        if isinstance(value, Mapping):
+            return dict(value)
+        return {}
+
+    def _ensure_list(value: Any) -> list[Any]:
+        if isinstance(value, list):
+            return value
+        if isinstance(value, tuple):
+            return list(value)
+        return []
+
+    def _safe_text(value: Any, default: str = "") -> str:
+        if value is None:
+            return default
+        if isinstance(value, str):
+            return value
+        text = str(value)
+        return text if text is not None else default
+
+    def _format_display(value: Any) -> str:
+        if value is None:
+            return "—"
+        if isinstance(value, str):
+            text = value.strip()
+            return text or "—"
+        if isinstance(value, (int, float)):
+            if isinstance(value, float):
+                if math.isnan(value) or math.isinf(value):
+                    return "—"
+                formatted = f"{value:,.2f}"
+                if formatted.endswith(".00"):
+                    formatted = formatted[:-3]
+            else:
+                formatted = f"{value:,}"
+            return formatted
+        return str(value)
+
+    reg = _ensure_mapping(results_payload.get("regulation"))
+    analysis = _ensure_mapping(results_payload.get("analysis"))
+    metrics = _ensure_list(analysis.get("metrics"))
+    bins = _ensure_list(analysis.get("bins"))
+    evidence_items = _ensure_list(results_payload.get("evidence"))
+    summary_md = _safe_text(analysis.get("summary_md"))
+    status_label = _safe_text(reg.get("label"), "UNKNOWN")
+    status_ok = bool(reg.get("ok", False))
+    pack_title = _safe_text(reg.get("pack_title")) or "Regulation pack"
+    pack_version = _safe_text(reg.get("version"))
+
+    badge_class = SUMMARY_BADGE_PASS if status_ok else SUMMARY_BADGE_FAIL
+    badge_text = "PASS" if status_ok else "FAIL"
+    badge_html = f'<span class="{badge_class}">{badge_text}</span>'
+
+    version_html = (
+        f'<span class="ml-2 inline-flex items-center rounded-md bg-slate-700/50 px-2 py-0.5 '
+        f'text-[10px] font-medium text-slate-300">v{html.escape(pack_version)}</span>'
+        if pack_version
+        else ""
+    )
+
+    header_html = f"""
+    <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+      <div>
+        <p class="text-xs uppercase tracking-wide text-slate-400">Report summary</p>
+        <h2 class="mt-2 text-2xl font-semibold text-slate-100">Compliance overview</h2>
+        <p class="mt-2 text-sm text-slate-400">Status label: {html.escape(status_label)}</p>
+      </div>
+      <div class="flex flex-col items-start gap-2 sm:items-end">
+        <div class="flex flex-wrap items-center gap-3">
+          {badge_html}
+          <span class="text-sm font-semibold text-slate-100">{html.escape(pack_title)}</span>
+          {version_html}
+        </div>
+      </div>
+    </div>
+    """
+
+    metric_cards: list[str] = []
+    for metric in metrics:
+        if not isinstance(metric, Mapping):
+            continue
+        label = html.escape(_safe_text(metric.get("label"), "Metric"))
+        value = html.escape(_format_display(metric.get("value")))
+        metric_cards.append(
+            f"""
+            <div class="rounded-xl border border-slate-700/60 bg-slate-800/60 p-4">
+              <p class="text-xs uppercase tracking-wide text-slate-400">{label}</p>
+              <p class="mt-2 text-lg font-semibold text-slate-100">{value}</p>
+            </div>
+            """
+        )
+
+    if metric_cards:
+        metrics_html = "".join(metric_cards)
+    else:
+        metrics_html = (
+            "<p class=\"text-sm text-slate-400\">Key performance indicators are not available.</p>"
+        )
+
+    bin_rows: list[str] = []
+    for entry in bins:
+        if not isinstance(entry, Mapping):
+            continue
+        name = html.escape(_safe_text(entry.get("name"), "—")) or "—"
+        time_value = html.escape(_format_display(entry.get("time")))
+        distance_value = html.escape(_format_display(entry.get("distance")))
+        bin_ok = bool(entry.get("valid"))
+        status = "PASS" if bin_ok else "FAIL"
+        status_badge = (
+            f'<span class="{SUMMARY_BADGE_PASS if bin_ok else SUMMARY_BADGE_FAIL}">{status}</span>'
+        )
+        bin_rows.append(
+            f"""
+            <tr>
+              <td class="px-3 py-2 text-xs text-slate-300">{name}</td>
+              <td class="px-3 py-2 text-xs text-slate-300">{time_value}</td>
+              <td class="px-3 py-2 text-xs text-slate-300">{distance_value}</td>
+              <td class="px-3 py-2 text-xs text-slate-300">{status_badge}</td>
+            </tr>
+            """
+        )
+
+    if not bin_rows:
+        bin_rows.append(
+            """
+            <tr>
+              <td class="px-3 py-3 text-xs text-slate-400" colspan="4">Coverage details are not available.</td>
+            </tr>
+            """
+        )
+
+    evidence_rows: list[str] = []
+    for item in evidence_items[:6]:
+        if not isinstance(item, Mapping):
+            continue
+        title = html.escape(_safe_text(item.get("title"), "Untitled requirement"))
+        mandatory = "Yes" if item.get("mandatory") else "No"
+        mandatory_html = html.escape(mandatory)
+        requirement = html.escape(_format_display(item.get("requirement")))
+        observed = html.escape(_format_display(item.get("observed")))
+        passed = bool(item.get("passed"))
+        evidence_badge = (
+            f'<span class="{SUMMARY_BADGE_PASS if passed else SUMMARY_BADGE_FAIL}">' \
+            f"{'PASS' if passed else 'FAIL'}</span>"
+        )
+        evidence_rows.append(
+            f"""
+            <tr>
+              <td class="px-3 py-2 text-xs text-slate-300">{title}</td>
+              <td class="px-3 py-2 text-xs text-slate-300">{mandatory_html}</td>
+              <td class="px-3 py-2 text-xs text-slate-300">{requirement}</td>
+              <td class="px-3 py-2 text-xs text-slate-300">{observed}</td>
+              <td class="px-3 py-2 text-xs text-slate-300">{evidence_badge}</td>
+            </tr>
+            """
+        )
+
+    if not evidence_rows:
+        evidence_rows.append(
+            """
+            <tr>
+              <td class="px-3 py-3 text-xs text-slate-400" colspan="5">Evidence records were not provided.</td>
+            </tr>
+            """
+        )
+
+    summary_lines: list[str] = []
+    if summary_md:
+        for raw_line in summary_md.splitlines():
+            cleaned = raw_line.lstrip()
+            if cleaned.startswith("#"):
+                cleaned = cleaned.lstrip("#").strip()
+            else:
+                cleaned = raw_line.strip()
+            summary_lines.append(cleaned)
+    summary_joined = "\n".join(summary_lines).strip()
+    if summary_joined:
+        summary_body = html.escape(summary_joined)
+        summary_body = summary_body.replace("\n\n", "<br/><br/>").replace("\n", "<br/>")
+    else:
+        summary_body = ""
+
+    if summary_body:
+        summary_html = f"<div class=\"text-sm text-slate-300 leading-relaxed\">{summary_body}</div>"
+    else:
+        summary_html = (
+            "<p class=\"text-sm text-slate-400\">No narrative summary was generated.</p>"
+        )
+
+    summary_card = f"""
+    <div class="rounded-xl border border-slate-700/60 bg-slate-800/40 p-6 space-y-6" id="analysis-summary-card">
+      {header_html}
+      <div>
+        <h3 class="text-slate-200 font-semibold text-sm uppercase tracking-wide">Headline KPIs</h3>
+        <div class="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {metrics_html}
+        </div>
+      </div>
+      <div>
+        <h3 class="text-slate-200 font-semibold text-sm uppercase tracking-wide">Coverage by route type</h3>
+        <div class="mt-3 overflow-hidden rounded-xl border border-slate-700/60 bg-slate-800/40">
+          <table class="min-w-full divide-y divide-slate-700/60">
+            <thead class="bg-slate-800/60">
+              <tr>
+                <th class="px-3 py-2 text-left text-[10px] uppercase tracking-wide text-slate-500">Bin</th>
+                <th class="px-3 py-2 text-left text-[10px] uppercase tracking-wide text-slate-500">Time (s)</th>
+                <th class="px-3 py-2 text-left text-[10px] uppercase tracking-wide text-slate-500">Distance (km)</th>
+                <th class="px-3 py-2 text-left text-[10px] uppercase tracking-wide text-slate-500">Status</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-700/60">
+              {''.join(bin_rows)}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div>
+        <h3 class="text-slate-200 font-semibold text-sm uppercase tracking-wide">Compliance evidence</h3>
+        <div class="mt-3 overflow-hidden rounded-xl border border-slate-700/60 bg-slate-800/40">
+          <table class="min-w-full divide-y divide-slate-700/60">
+            <thead class="bg-slate-800/60">
+              <tr>
+                <th class="px-3 py-2 text-left text-[10px] uppercase tracking-wide text-slate-500">Requirement</th>
+                <th class="px-3 py-2 text-left text-[10px] uppercase tracking-wide text-slate-500">Mandatory?</th>
+                <th class="px-3 py-2 text-left text-[10px] uppercase tracking-wide text-slate-500">Threshold</th>
+                <th class="px-3 py-2 text-left text-[10px] uppercase tracking-wide text-slate-500">Observed</th>
+                <th class="px-3 py-2 text-left text-[10px] uppercase tracking-wide text-slate-500">Pass/Fail</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-700/60">
+              {''.join(evidence_rows)}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div>
+        <h3 class="text-slate-200 font-semibold text-sm uppercase tracking-wide">Overall summary</h3>
+        <div class="mt-3 rounded-xl border border-slate-700/60 bg-slate-800/40 p-4">
+          {summary_html}
+        </div>
+      </div>
+    </div>
+
+    <div class="mt-8">
+      <h3 class="text-slate-200 font-semibold mb-2 text-sm uppercase tracking-wide">Charts &amp; KPIs</h3>
+      <div id="charts-area" class="rounded-xl border border-slate-700/60 bg-slate-800/40 p-4 text-slate-300 text-sm">
+        Charts are rendered below using Plotly (speed, NOx, PN, PM).
+      </div>
+    </div>
+
+    <div class="mt-8">
+      <h3 class="text-slate-200 font-semibold mb-2 text-sm uppercase tracking-wide">Drive Map</h3>
+      <div id="map-area" class="rounded-xl border border-slate-700/60 bg-slate-800/40 p-4 text-slate-300 text-sm">
+        GPS trace preview (Leaflet) is displayed here.
+      </div>
+    </div>
+    """
+
+    return summary_card.strip()
+
+
 def _base_template_context(
     request: Request,
     *,
@@ -1643,6 +1920,10 @@ async def analyze(request: Request) -> JSONResponse:
         except Exception:
             kpis["NOx_mg_per_km"] = float(nox_mg_s)  # last resort: any numeric is fine for the test
     # === END CI NORMALIZATION & KPI FALLBACKS ===
+
+    if request.headers.get("HX-Request"):
+        summary_html = render_analysis_summary_html(results_payload)
+        return Response(content=summary_html, media_type="text/html")
 
     return legacy_respond_success(results_payload)
 
