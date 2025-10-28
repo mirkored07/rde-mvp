@@ -27,21 +27,16 @@
         <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">Download a portable version of the current results.</p>
       </div>
       <div class="flex flex-wrap items-center gap-2">
-        <button type="button" class="inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 px-4 py-2 text-sm font-semibold text-white shadow-md transition hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-slate-900 dark:from-sky-500 dark:via-indigo-500 dark:to-indigo-600" data-download-pdf>
-          Download PDF
-          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-            <polyline points="7 10 12 15 17 10"></polyline>
-            <line x1="12" y1="15" x2="12" y2="3"></line>
-          </svg>
-        </button>
-        <button type="button" class="inline-flex items-center gap-2 rounded-full border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-400 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-slate-400 dark:border-slate-600 dark:text-slate-200 dark:hover:border-slate-500 dark:hover:bg-slate-800 dark:focus-visible:ring-slate-500" data-download-zip>
-          Download ZIP
-          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M7 3h7l5 5v13a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"></path>
-            <polyline points="8 7 12 7 12 11 16 11"></polyline>
-            <polyline points="8 15 10 15 10 19"></polyline>
-          </svg>
+        <form method="post" action="/export_zip_file" style="display:inline-block">
+          <input type="hidden" name="results" value='{{ results_payload_json | e }}' />
+          <button type="submit" class="inline-flex items-center gap-2 rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow-md transition hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-slate-900 dark:bg-slate-800 dark:hover:bg-slate-700">
+            <span class="inline-block h-2 w-2 rounded-full bg-emerald-400 shadow-[0_0_6px_rgba(16,185,129,0.8)]"></span>
+            <span>Download ZIP</span>
+          </button>
+        </form>
+        <button type="button" disabled class="inline-flex cursor-not-allowed items-center gap-2 rounded-md bg-slate-200 px-4 py-2 text-sm font-semibold text-slate-500 shadow-inner dark:bg-slate-800/50 dark:text-slate-400">
+          <span class="inline-block h-2 w-2 rounded-full bg-slate-500/50"></span>
+          <span>Download PDF</span>
         </button>
         <button type="button" class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-600 shadow-sm transition hover:border-slate-300 hover:text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-slate-300 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:border-slate-500 dark:hover:text-white dark:focus-visible:ring-slate-500" data-download-json>
           Export JSON
