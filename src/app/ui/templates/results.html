@@ -266,6 +266,43 @@
     </div>
     <script id="summary-data" type="application/json">{{ analysis.summary_md | tojson }}</script>
   </div>
+
+  <div class="mt-10 grid gap-6 lg:grid-cols-2">
+    <section class="rounded-3xl border border-slate-200/70 bg-slate-900/5 p-6 shadow-card dark:border-slate-700/70 dark:bg-slate-900/40">
+      <h3 class="text-sm font-semibold uppercase tracking-[0.3em] text-slate-500 dark:text-slate-300">Charts &amp; KPIs</h3>
+      <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">Interactive time series for vehicle speed and pollutant emissions.</p>
+      <div id="emissions-chart" class="mt-4 h-[320px] w-full rounded-2xl border border-slate-200/70 bg-white/70 shadow-inner dark:border-slate-700/70 dark:bg-slate-900/60"></div>
+    </section>
+
+    <section class="rounded-3xl border border-slate-200/70 bg-slate-900/5 p-6 shadow-card dark:border-slate-700/70 dark:bg-slate-900/40">
+      <h3 class="text-sm font-semibold uppercase tracking-[0.3em] text-slate-500 dark:text-slate-300">Drive map</h3>
+      <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">Leaflet trace of the fused GPS route.</p>
+      <div id="drive-map" class="mt-4 h-[320px] w-full overflow-hidden rounded-2xl border border-slate-200/70 bg-white/70 shadow-inner dark:border-slate-700/70 dark:bg-slate-900/60"></div>
+    </section>
+  </div>
+
+  {% if include_export_controls %}
+  <div class="mt-10 rounded-3xl border border-slate-200/70 bg-white/95 p-6 shadow-card dark:border-slate-800/70 dark:bg-slate-900/80">
+    <h3 class="text-sm font-semibold uppercase tracking-[0.3em] text-slate-500 dark:text-slate-400">Export report</h3>
+    <p class="mt-2 text-xs text-slate-500 dark:text-slate-400">Download offline copies of this analysis.</p>
+    <div class="mt-4 flex flex-wrap gap-3">
+      <form method="post" action="/export_zip" id="exportZipForm" class="inline-block">
+        <input type="hidden" name="results" id="exportZipPayload" />
+        <button type="submit" class="inline-flex items-center rounded-md bg-emerald-600 px-3 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-400 focus:ring-offset-2">
+          <span class="inline-block h-2 w-2 rounded-full bg-emerald-300 mr-2"></span>
+          Download ZIP
+        </button>
+      </form>
+      <form method="post" action="/export_pdf" id="exportPdfForm" class="inline-block">
+        <input type="hidden" name="results" id="exportPdfPayload" />
+        <button type="submit" class="inline-flex items-center rounded-md bg-slate-700 px-3 py-2 text-xs font-semibold text-slate-200 shadow-sm transition hover:bg-slate-600 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-40" disabled title="PDF export coming soon">
+          <span class="inline-block h-2 w-2 rounded-full bg-slate-400 mr-2"></span>
+          Download PDF
+        </button>
+      </form>
+    </div>
+  </div>
+  {% endif %}
 </section>
 {% endif %}
 
@@ -274,115 +311,26 @@
      dev browser was blocking the resources due to hash mismatch.
      In production we can restore SRI, but for local dev we allow load. -->
 
-        <!-- ====== VISUAL OUTPUT SECTION (Charts & Map containers) ====== -->
-        <section class="space-y-6 mt-8">
-          <!-- Charts & KPIs -->
-          <div class="rounded-xl border border-slate-700/60 bg-slate-800/40 p-4 shadow-xl text-slate-200">
-            <h2 class="text-sm font-semibold text-slate-300 tracking-wide mb-3">
-              Charts & KPIs
-            </h2>
+<!-- Local Leaflet CSS -->
+<link rel="stylesheet" href="/static/leaflet/leaflet.css" />
 
-            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <div>
-                <h3 class="text-xs font-medium text-slate-400 mb-2">Pollutants</h3>
-                <div id="pollutantChart"
-                     class="h-[240px] w-full rounded-lg border border-slate-700/50 bg-slate-900/40">
-                  <!-- Plotly will render here -->
-                </div>
-              </div>
+<!-- Local Leaflet JS -->
+<script src="/static/leaflet/leaflet.js"></script>
 
-              <div>
-                <h3 class="text-xs font-medium text-slate-400 mb-2">Speed</h3>
-                <div id="speedChart"
-                     class="h-[240px] w-full rounded-lg border border-slate-700/50 bg-slate-900/40">
-                  <!-- Plotly will render here -->
-                </div>
-              </div>
-            </div>
-          </div>
+<!-- Plotly JS -->
+<script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
 
-          <!-- Drive map -->
-          <div class="rounded-xl border border-slate-700/60 bg-slate-800/40 p-4 shadow-xl text-slate-200">
-            <h2 class="text-sm font-semibold text-slate-300 tracking-wide mb-3">
-              Drive map
-            </h2>
+<!-- Inject analysis results BEFORE running app.js -->
+{% if results_payload %}
+<script>
+  window.__RDE_RESULT__ = {{ results_payload | tojson | safe }};
+</script>
+{% else %}
+<script>
+  window.__RDE_RESULT__ = null;
+</script>
+{% endif %}
 
-            <div id="map"
-                 class="h-[320px] w-full rounded-lg border border-slate-700/50 bg-slate-900/40">
-              <!-- Leaflet will render here -->
-            </div>
-          </div>
-
-          <!-- Export controls -->
-          {% if include_export_controls %}
-          <div class="rounded-xl border border-slate-700/60 bg-slate-800/40 p-4 shadow-xl text-slate-200">
-            <h2 class="text-sm font-semibold text-slate-300 tracking-wide mb-3">
-              Export report
-            </h2>
-            <p class="text-xs text-slate-400 mb-4">
-              Download offline copy of this analysis
-            </p>
-
-            <div class="flex flex-wrap gap-3">
-              <form method="post"
-                    action="/export_zip"
-                    id="exportZipForm"
-                    class="inline-block">
-                <input type="hidden" name="results" id="exportZipPayload" />
-                <button type="submit"
-                        class="inline-flex items-center rounded-md bg-emerald-600 px-3 py-2 text-xs font-semibold text-white shadow-sm hover:bg-emerald-500 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-emerald-400">
-                  <span class="inline-block h-2 w-2 rounded-full bg-emerald-300 mr-2"></span>
-                  Download ZIP
-                </button>
-              </form>
-
-              <form method="post"
-                    action="/export_pdf"
-                    id="exportPdfForm"
-                    class="inline-block">
-                <input type="hidden" name="results" id="exportPdfPayload" />
-                <button type="submit"
-                        class="inline-flex items-center rounded-md bg-slate-700 px-3 py-2 text-xs font-semibold text-slate-200 shadow-sm hover:bg-slate-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-slate-400 disabled:opacity-40 disabled:cursor-not-allowed"
-                        disabled
-                        title="PDF export coming soon">
-                  <span class="inline-block h-2 w-2 rounded-full bg-slate-400 mr-2"></span>
-                  Download PDF
-                </button>
-              </form>
-            </div>
-          </div>
-          {% endif %}
-        </section>
-
-        <!-- ====== ASSET LOADING (Leaflet, Plotly, app.js) ====== -->
-
-        <!-- Local Leaflet CSS -->
-        <link
-          rel="stylesheet"
-          href="/static/leaflet/leaflet.css"
-        />
-
-        <!-- Local Leaflet JS -->
-        <script
-          src="/static/leaflet/leaflet.js">
-        </script>
-
-        <!-- Local Plotly JS (you already have Plotly bundled by CDN in app.js fallback,
-             but to be safe we load it explicitly; if you don't have a local copy yet,
-             keep using CDN here and DO NOT include integrity/crossorigin) -->
-        <script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
-
-        <!-- Inject analysis results BEFORE running app.js -->
-        {% if results_payload %}
-        <script>
-          window.__RDE_RESULT__ = {{ results_payload | tojson | safe }};
-        </script>
-        {% else %}
-        <script>
-          window.__RDE_RESULT__ = null;
-        </script>
-        {% endif %}
-
-        <!-- Our client-side renderer (already in repo: /static/js/app.js) -->
-        <script src="/static/js/app.js"></script>
+<!-- Our client-side renderer -->
+<script src="/static/js/app.js"></script>
 

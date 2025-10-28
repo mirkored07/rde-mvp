@@ -695,23 +695,22 @@
 
   function applyChartThemes() {
     if (!window.Plotly) return;
+    const chart = document.getElementById("emissions-chart");
+    if (!chart || chart.dataset.chartReady !== "true") return;
     const isDark = document.documentElement.classList.contains("dark");
-    const color = isDark ? "#e2e8f0" : "#1e293b";
-    ["pollutantChart", "speedChart"].forEach((id) => {
-      const chart = document.getElementById(id);
-      if (!chart || chart.dataset.chartReady !== "true") return;
-      window.Plotly.relayout(chart, {
-        "font.color": color,
-        "xaxis.color": color,
-        "yaxis.color": color,
-        "paper_bgcolor": "rgba(0,0,0,0)",
-        "plot_bgcolor": "rgba(0,0,0,0)",
-      });
+    const axisColor = isDark ? "#e2e8f0" : "#1e293b";
+    window.Plotly.relayout(chart, {
+      "font.color": axisColor,
+      "xaxis.color": axisColor,
+      "yaxis.color": axisColor,
+      "yaxis2.color": axisColor,
+      "paper_bgcolor": "rgba(0,0,0,0)",
+      "plot_bgcolor": "rgba(0,0,0,0)",
     });
   }
 
-  function renderPollutantChart(payload) {
-    const chartEl = document.getElementById("pollutantChart");
+  function renderEmissionsChart(payload) {
+    const chartEl = document.getElementById("emissions-chart");
     if (!chartEl) return;
 
     if (!payload || !window.Plotly) {
@@ -723,111 +722,90 @@
     }
 
     const chartPayload = resolveChartPayload(payload);
-    const pollutants = ensureArray(chartPayload?.pollutants);
-    const times = ensureArray(chartPayload?.times);
+    if (!chartPayload || typeof chartPayload !== "object") {
+      window.Plotly.purge(chartEl);
+      chartEl.dataset.chartReady = "false";
+      return;
+    }
 
-    const traces = pollutants
-      .map((pollutant) => {
-        if (!pollutant || typeof pollutant !== "object") return null;
-        const values = ensureArray(pollutant.values).map(toNumberOrNull);
-        if (!hasNumericData(values)) return null;
-        const xValues = ensureXValues(times, values.length);
-        const label = pollutant.label || pollutant.key || "Pollutant";
-        return {
-          name: label,
-          mode: "lines",
-          x: xValues,
-          y: values,
-          line: { width: 2.5, color: pollutant.color || undefined },
-          hovertemplate: "%{y}<extra>" + label + "</extra>",
-        };
-      })
+    const times = ensureArray(chartPayload.times);
+    const speed = chartPayload.speed && typeof chartPayload.speed === "object" ? chartPayload.speed : null;
+    const speedValues = ensureArray(speed?.values).map(toNumberOrNull);
+    const pollutants = ensureArray(chartPayload.pollutants)
+      .map((pollutant) => (pollutant && typeof pollutant === "object" ? pollutant : null))
       .filter(Boolean);
+
+    const traces = [];
+
+    if (hasNumericData(speedValues)) {
+      const xValues = ensureXValues(times, speedValues.length);
+      const label = (speed && speed.label) || "Vehicle speed";
+      traces.push({
+        name: label,
+        type: "scatter",
+        mode: "lines",
+        x: xValues,
+        y: speedValues,
+        line: { width: 2.5, color: (speed && speed.color) || "#2563eb" },
+        hovertemplate: "%{y}<extra>" + label + "</extra>",
+        yaxis: "y",
+      });
+    }
+
+    pollutants.forEach((pollutant) => {
+      const values = ensureArray(pollutant.values).map(toNumberOrNull);
+      if (!hasNumericData(values)) return;
+      const xSource = Array.isArray(pollutant.t) ? pollutant.t : times;
+      const xValues = ensureXValues(xSource, values.length);
+      const label = pollutant.label || pollutant.key || "Pollutant";
+      traces.push({
+        name: label,
+        type: "scatter",
+        mode: "lines",
+        x: xValues,
+        y: values,
+        line: { width: 2, color: pollutant.color || undefined },
+        hovertemplate: "%{y}<extra>" + label + "</extra>",
+        yaxis: "y2",
+      });
+    });
 
     if (!traces.length) {
       window.Plotly.purge(chartEl);
-      chartEl.innerHTML = `<div class="flex h-full items-center justify-center text-xs text-slate-400 dark:text-slate-500">No pollutant data available.</div>`;
+      chartEl.innerHTML = `<div class="flex h-full items-center justify-center text-xs text-slate-400 dark:text-slate-500">No chart data available.</div>`;
       chartEl.dataset.chartReady = "false";
       return;
     }
+
+    const baseLayout =
+      chartPayload.layout && typeof chartPayload.layout === "object"
+        ? JSON.parse(JSON.stringify(chartPayload.layout))
+        : {};
+
+    const isDark = document.documentElement.classList.contains("dark");
+    const axisColor = isDark ? "#e2e8f0" : "#1e293b";
+
+    const layout = { ...baseLayout };
+    layout.margin = { ...(baseLayout.margin || {}), t: 32, r: 32, b: 48, l: 56 };
+    layout.legend = { orientation: "h", y: -0.2, ...(baseLayout.legend || {}) };
+    layout.xaxis = { title: "Time", ...(baseLayout.xaxis || {}) };
+    layout.yaxis = { title: "Vehicle speed", ...(baseLayout.yaxis || {}) };
+    layout.yaxis2 = { title: "Emission rate", ...(baseLayout.yaxis2 || {}) };
+    layout.paper_bgcolor = "rgba(0,0,0,0)";
+    layout.plot_bgcolor = "rgba(0,0,0,0)";
+
+    layout.font = { ...(baseLayout.font || {}), color: axisColor };
+    layout.xaxis.color = axisColor;
+    layout.yaxis.color = axisColor;
+    layout.yaxis2.color = axisColor;
 
     chartEl.innerHTML = "";
-    window.Plotly.newPlot(
-      chartEl,
-      traces,
-      {
-        margin: { t: 32, r: 24, b: 40, l: 48 },
-        legend: { orientation: "h", y: -0.2 },
-        xaxis: { title: "Time" },
-        yaxis: { title: "Emission rate" },
-        paper_bgcolor: "rgba(0,0,0,0)",
-        plot_bgcolor: "rgba(0,0,0,0)",
-      },
-      { displayModeBar: false, responsive: true }
-    );
+    window.Plotly.newPlot(chartEl, traces, layout, { displayModeBar: false, responsive: true });
     chartEl.dataset.chartReady = "true";
-  }
-
-  function renderSpeedChart(payload) {
-    const chartEl = document.getElementById("speedChart");
-    if (!chartEl) return;
-
-    if (!payload || !window.Plotly) {
-      if (window.Plotly) {
-        window.Plotly.purge(chartEl);
-      }
-      chartEl.dataset.chartReady = "false";
-      return;
-    }
-
-    const chartPayload = resolveChartPayload(payload);
-    const speed = chartPayload && typeof chartPayload === "object" ? chartPayload.speed : null;
-    const speedValues = ensureArray(speed?.values).map(toNumberOrNull);
-
-    if (!hasNumericData(speedValues)) {
-      window.Plotly.purge(chartEl);
-      chartEl.innerHTML = `<div class="flex h-full items-center justify-center text-xs text-slate-400 dark:text-slate-500">No speed data available.</div>`;
-      chartEl.dataset.chartReady = "false";
-      return;
-    }
-
-    const times = ensureArray(chartPayload?.times);
-    const xValues = ensureXValues(times, speedValues.length);
-    const label = (speed && speed.label) || "Vehicle speed";
-
-    chartEl.innerHTML = "";
-    window.Plotly.newPlot(
-      chartEl,
-      [
-        {
-          name: label,
-          mode: "lines",
-          x: xValues,
-          y: speedValues,
-          line: { width: 2.5, color: (speed && speed.color) || "#2563eb" },
-          hovertemplate: "%{y}<extra>" + label + "</extra>",
-        },
-      ],
-      {
-        margin: { t: 32, r: 24, b: 40, l: 48 },
-        xaxis: { title: "Time" },
-        yaxis: { title: label },
-        paper_bgcolor: "rgba(0,0,0,0)",
-        plot_bgcolor: "rgba(0,0,0,0)",
-      },
-      { displayModeBar: false, responsive: true }
-    );
-    chartEl.dataset.chartReady = "true";
-  }
-
-  function renderCharts(payload) {
-    renderPollutantChart(payload);
-    renderSpeedChart(payload);
-    applyChartThemes();
   }
 
   function renderDriveMap(payload) {
-    const mapEl = document.getElementById("map");
+    const mapEl = document.getElementById("drive-map");
     if (!mapEl) return;
 
     if (mapEl._leafletMap) {
@@ -887,10 +865,15 @@
       }).addTo(map);
     }
 
+    const hasBounds = Array.isArray(mapPayload?.bounds) && mapPayload.bounds.length === 2;
+    const center = mapPayload?.center;
+
     try {
-      if (Array.isArray(mapPayload?.bounds) && mapPayload.bounds.length === 2) {
+      if (hasBounds) {
         const bounds = window.L.latLngBounds(mapPayload.bounds);
         map.fitBounds(bounds, { padding: [24, 24] });
+      } else if (center && Number.isFinite(Number(center.lat)) && Number.isFinite(Number(center.lon))) {
+        map.setView([Number(center.lat), Number(center.lon)], 13);
       } else {
         map.fitBounds(polyline.getBounds(), { padding: [24, 24] });
       }
@@ -926,7 +909,8 @@
     if (!container) return;
     renderSummary(container);
     const payload = getResultPayload();
-    renderCharts(payload);
+    renderEmissionsChart(payload);
+    applyChartThemes();
     renderDriveMap(payload);
     populateExportForms(payload);
   }
@@ -955,11 +939,9 @@
 
   window.addEventListener("resize", () => {
     if (!window.Plotly) return;
-    ["pollutantChart", "speedChart"].forEach((id) => {
-      const chart = document.getElementById(id);
-      if (chart && chart.dataset.chartReady === "true") {
-        window.Plotly.Plots.resize(chart);
-      }
-    });
+    const chart = document.getElementById("emissions-chart");
+    if (chart && chart.dataset.chartReady === "true") {
+      window.Plotly.Plots.resize(chart);
+    }
   });
 })();
