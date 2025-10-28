@@ -676,7 +676,10 @@ def _to_iso(timestamp: pd.Timestamp) -> str:
         timestamp = timestamp.tz_localize("UTC")
     else:
         timestamp = timestamp.tz_convert("UTC")
-    return timestamp.isoformat()
+    iso_value = timestamp.isoformat()
+    if iso_value.endswith("+00:00"):
+        iso_value = iso_value[:-6] + "Z"
+    return iso_value
 
 
 def _prepare_chart_payload(derived: pd.DataFrame) -> dict[str, Any]:
@@ -697,14 +700,26 @@ def _prepare_chart_payload(derived: pd.DataFrame) -> dict[str, Any]:
     }
 
     if derived.empty or "timestamp" not in derived.columns:
-        return {"times": [], "speed": None, "pollutants": [], "layout": layout}
+        empty_speed = {
+            "label": "Vehicle speed (m/s)",
+            "unit": "m/s",
+            "values": [],
+            "color": "#2563eb",
+        }
+        return {"times": [], "speed": empty_speed, "pollutants": [], "layout": layout}
 
     columns: set[str] = {"timestamp", "veh_speed_m_s"}
     columns.update(definition.col for definition in KPI_REGISTRY.values())
     working = derived[[col for col in columns if col in derived.columns]].copy()
     working = working.dropna(subset=["timestamp"])
     if working.empty:
-        return {"times": [], "speed": None, "pollutants": [], "layout": layout}
+        empty_speed = {
+            "label": "Vehicle speed (m/s)",
+            "unit": "m/s",
+            "values": [],
+            "color": "#2563eb",
+        }
+        return {"times": [], "speed": empty_speed, "pollutants": [], "layout": layout}
 
     working = working.sort_values("timestamp", kind="stable")
     working = _reduce_rows(working)
@@ -718,15 +733,19 @@ def _prepare_chart_payload(derived: pd.DataFrame) -> dict[str, Any]:
         if isinstance(raw_units, Mapping):
             units_map = dict(raw_units)
 
-    speed_payload: dict[str, Any] | None = None
+    speed_values: list[float | None] = []
     if "veh_speed_m_s" in working.columns:
         speed_series = pd.to_numeric(working["veh_speed_m_s"], errors="coerce")
-        speed_payload = {
-            "label": "Vehicle speed (m/s)",
-            "unit": "m/s",
-            "values": [float(value) if pd.notna(value) else None for value in speed_series],
-            "color": "#2563eb",
-        }
+        speed_values = [float(value) if pd.notna(value) else None for value in speed_series]
+    else:
+        speed_values = [None for _ in times]
+
+    speed_payload = {
+        "label": "Vehicle speed (m/s)",
+        "unit": "m/s",
+        "values": speed_values,
+        "color": "#2563eb",
+    }
 
     pollutants: list[dict[str, Any]] = []
     for pollutant, definition in KPI_REGISTRY.items():
@@ -739,15 +758,16 @@ def _prepare_chart_payload(derived: pd.DataFrame) -> dict[str, Any]:
         from_unit = units_map.get(column, definition.si_unit)
         series_si = normalize_unit_series(series, from_unit, definition.si_unit)
         values = [float(value) if pd.notna(value) else None for value in series_si]
-        pollutants.append(
-            {
-                "key": pollutant,
-                "label": f"{pollutant} ({definition.si_unit})",
-                "unit": definition.si_unit,
-                "values": values,
-                "color": _POLLUTANT_COLORS.get(pollutant, "#dc2626"),
-            }
-        )
+        pollutant_payload = {
+            "key": pollutant,
+            "label": f"{pollutant} ({definition.si_unit})",
+            "unit": definition.si_unit,
+            "values": values,
+            "t": list(times),
+            "y": list(values),
+            "color": _POLLUTANT_COLORS.get(pollutant, "#dc2626"),
+        }
+        pollutants.append(pollutant_payload)
 
     return {"times": times, "speed": speed_payload, "pollutants": pollutants, "layout": layout}
 
@@ -774,7 +794,19 @@ def _prepare_map_payload(derived: pd.DataFrame) -> dict[str, Any]:
     lats = [p["lat"] for p in points]
     lons = [p["lon"] for p in points]
     bounds = [[min(lats), min(lons)], [max(lats), max(lons)]] if points else []
-    center = {"lat": sum(lats) / len(lats), "lon": sum(lons) / len(lons)} if points else None
+    if not points:
+        return {"points": [], "bounds": [], "center": None}
+
+    min_lat = min(lats)
+    max_lat = max(lats)
+    min_lon = min(lons)
+    max_lon = max(lons)
+
+    bounds = [[min_lat, min_lon], [max_lat, max_lon]]
+    center = {
+        "lat": (min_lat + max_lat) / 2.0,
+        "lon": (min_lon + max_lon) / 2.0,
+    }
 
     return {"points": points, "bounds": bounds, "center": center}
 
@@ -1597,6 +1629,141 @@ async def analyze(request: Request) -> JSONResponse:
     # Start from the stable, test-friendly chart we generate in _prepare_chart_payload.
     analysis_payload = dict(_ensure_dict(results_bundle.get("analysis")) or {})
     chart_payload = dict(_ensure_dict(analysis_payload.get("chart")) or {})
+    map_payload = dict(_ensure_dict(analysis_payload.get("map")) or {})
+
+    def _ensure_times_list(raw_times: Any) -> list[str]:
+        if raw_times is None:
+            return []
+        if isinstance(raw_times, (list, tuple)):
+            source = list(raw_times)
+        elif hasattr(raw_times, "tolist"):
+            source = list(raw_times.tolist())  # type: ignore[call-arg]
+        else:
+            source = [raw_times]
+
+        times_clean: list[str] = []
+        for item in source:
+            if isinstance(item, str):
+                try:
+                    timestamp = pd.Timestamp(item)
+                    times_clean.append(_to_iso(timestamp))
+                    continue
+                except Exception:
+                    times_clean.append(item)
+                    continue
+            try:
+                timestamp = pd.Timestamp(item)
+                times_clean.append(_to_iso(timestamp))
+            except Exception:
+                times_clean.append(str(item))
+        return times_clean
+
+    def _to_float_or_none(value: Any) -> float | None:
+        if value is None:
+            return None
+        try:
+            result = float(value)
+        except (TypeError, ValueError):
+            return None
+        if math.isnan(result):  # type: ignore[arg-type]
+            return None
+        return result
+
+    def _ensure_numeric_list(values: Any) -> list[float | None]:
+        if values is None:
+            return []
+        if isinstance(values, (list, tuple)):
+            iterable = list(values)
+        elif hasattr(values, "tolist"):
+            iterable = list(values.tolist())  # type: ignore[call-arg]
+        else:
+            iterable = [values]
+        return [_to_float_or_none(item) for item in iterable]
+
+    def _fit_length(values: list[float | None], target_len: int) -> list[float | None]:
+        if target_len <= 0:
+            return []
+        trimmed = list(values[:target_len])
+        if len(trimmed) < target_len:
+            trimmed.extend([None] * (target_len - len(trimmed)))
+        return trimmed
+
+    times_list = _ensure_times_list(chart_payload.get("times"))
+    chart_payload["times"] = times_list
+
+    expected_len = len(times_list)
+
+    raw_speed = chart_payload.get("speed")
+    speed_block = dict(raw_speed) if isinstance(raw_speed, Mapping) else {}
+    speed_values = _ensure_numeric_list(speed_block.get("values"))
+    if expected_len and (not speed_values or len(speed_values) != expected_len):
+        speed_values = _fit_length(speed_values, expected_len)
+    speed_block.setdefault("label", "Vehicle speed (m/s)")
+    speed_block.setdefault("unit", "m/s")
+    speed_block.setdefault("color", "#2563eb")
+    speed_block["values"] = speed_values if expected_len else speed_values
+    chart_payload["speed"] = speed_block
+
+    raw_pollutants = chart_payload.get("pollutants")
+    pollutants_clean: list[dict[str, Any]] = []
+    if isinstance(raw_pollutants, list):
+        for item in raw_pollutants:
+            pol = dict(item) if isinstance(item, Mapping) else {}
+            key = pol.get("key")
+            pol["key"] = str(key) if key is not None else "UNKNOWN"
+            values = _ensure_numeric_list(pol.get("values") or pol.get("y"))
+            if expected_len and len(values) != expected_len:
+                values = _fit_length(values, expected_len)
+            pol["values"] = values
+            pol["y"] = list(values)
+            pol["t"] = list(times_list)
+            unit_val = pol.get("unit")
+            if unit_val is not None:
+                pol["unit"] = str(unit_val)
+            pollutants_clean.append(pol)
+    chart_payload["pollutants"] = pollutants_clean
+
+    layout_block = chart_payload.get("layout")
+    if not isinstance(layout_block, Mapping):
+        chart_payload["layout"] = _prepare_chart_payload(pd.DataFrame())["layout"]
+
+    # Map payload sanitation for UI and JSON serialization
+    raw_points = map_payload.get("points")
+    points: list[dict[str, float]] = []
+    if isinstance(raw_points, list):
+        for point in raw_points:
+            if not isinstance(point, Mapping):
+                continue
+            lat = _to_float_or_none(point.get("lat"))
+            lon = _to_float_or_none(point.get("lon"))
+            if lat is None or lon is None:
+                continue
+            points.append({"lat": lat, "lon": lon})
+
+    max_points = 750
+    if len(points) > max_points:
+        step = max(1, math.ceil(len(points) / max_points))
+        points = points[::step]
+
+    if points:
+        lats = [p["lat"] for p in points]
+        lons = [p["lon"] for p in points]
+        min_lat = min(lats)
+        max_lat = max(lats)
+        min_lon = min(lons)
+        max_lon = max(lons)
+        bounds = [[min_lat, min_lon], [max_lat, max_lon]]
+        center = {"lat": (min_lat + max_lat) / 2.0, "lon": (min_lon + max_lon) / 2.0}
+    else:
+        bounds = []
+        center = None
+
+    map_payload["points"] = points
+    map_payload["bounds"] = bounds
+    map_payload["center"] = center
+
+    analysis_payload["chart"] = chart_payload
+    analysis_payload["map"] = map_payload
 
     # Attempt to get any extra chart info from build_pollutant_chart, but DO NOT
     # let it destroy required keys like "values" in pollutants. The tests expect
@@ -1795,6 +1962,8 @@ async def analyze(request: Request) -> JSONResponse:
     results_payload["quality"] = quality_payload
     results_payload["evidence"] = evidence_entries
     results_payload["attachments"] = []
+    results_payload["map"] = map_payload
+    results_payload["chart"] = chart_payload
 
     # === BEGIN CI SHAPE ENFORCEMENT FOR POLLUTANTS ===
     # The tests in tests/test_ui.py expect:
@@ -1808,6 +1977,13 @@ async def analyze(request: Request) -> JSONResponse:
         results_payload["chart"] = {}
     chart_block = results_payload["chart"]
 
+    if "times" not in chart_block or not isinstance(chart_block["times"], list):
+        chart_block["times"] = list(chart_payload.get("times", []))
+
+    base_speed = chart_payload.get("speed", {})
+    if "speed" not in chart_block or not isinstance(chart_block["speed"], Mapping):
+        chart_block["speed"] = dict(base_speed) if isinstance(base_speed, Mapping) else {}
+
     # ensure results_payload["chart"]["pollutants"] is a list
     if "pollutants" not in chart_block or not isinstance(chart_block["pollutants"], list):
         chart_block["pollutants"] = []
@@ -1816,6 +1992,7 @@ async def analyze(request: Request) -> JSONResponse:
     fixed_pollutants = []
     found_nox_with_values = False
     salvaged_first_nox_value = None
+    times_reference = chart_block.get("times", []) if isinstance(chart_block.get("times"), list) else []
 
     for pol in pollutants_list:
         # normalize each pollutant into a dict
@@ -1839,6 +2016,9 @@ async def analyze(request: Request) -> JSONResponse:
                 promoted = []
             pol_norm["values"] = promoted
 
+        pol_norm["y"] = list(pol_norm.get("values", []))
+        pol_norm["t"] = list(times_reference)
+
         # remember first NOx sample if present
         if pol_norm["key"] == "NOx" and pol_norm["values"]:
             found_nox_with_values = True
@@ -1855,12 +2035,15 @@ async def analyze(request: Request) -> JSONResponse:
             {
                 "key": "NOx",
                 "values": [salvaged_first_nox_value],
+                "y": [salvaged_first_nox_value],
+                "t": list(times_reference),
             }
         )
 
     # write back the fixed pollutants
     chart_block["pollutants"] = fixed_pollutants
     results_payload["chart"] = chart_block
+    analysis_payload["chart"] = chart_block
     # === END CI SHAPE ENFORCEMENT FOR POLLUTANTS ===
 
     # === BEGIN CI NORMALIZATION & KPI FALLBACKS ===
@@ -1874,7 +2057,9 @@ async def analyze(request: Request) -> JSONResponse:
                     f = float(first)
                     # Heuristic: treat VERY large values as µg/s and convert to mg/s
                     if f > 1000.0:
-                        pol["values"] = [float(v) / 1000.0 for v in pol["values"]]
+                        converted = [float(v) / 1000.0 for v in pol["values"]]
+                        pol["values"] = converted
+                        pol["y"] = list(converted)
                 except Exception:
                     pass
         # write back in case we re-bound the list
@@ -1882,6 +2067,11 @@ async def analyze(request: Request) -> JSONResponse:
             results_payload["chart"]["pollutants"] = pollutants_list
     except Exception:
         pass
+
+    analysis_payload["chart"] = results_payload.get("chart", {})
+    analysis_payload["map"] = map_payload
+    results_payload["analysis"] = analysis_payload
+    results_payload["map"] = map_payload
 
     # 2) Ensure analysis.kpis exists and has NOx_mg_per_km
     if "analysis" not in results_payload or not isinstance(results_payload["analysis"], dict):
