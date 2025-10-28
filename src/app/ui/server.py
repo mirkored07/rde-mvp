@@ -2348,4 +2348,60 @@ async def export_zip(request: Request) -> Response:
     return legacy_respond_success(results_payload)
 
 
+@router.post(
+    "/export_zip_file",
+    summary="Return the export ZIP as a downloadable file",
+)
+async def export_zip_file(request: Request) -> Response:
+    try:
+        payload = await request.json()
+    except Exception as exc:  # pragma: no cover - FastAPI handles parsing
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Invalid JSON payload.") from exc
+
+    if not isinstance(payload, Mapping):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Payload must be a JSON object.")
+
+    raw_results = payload.get("results")
+    if not isinstance(raw_results, Mapping):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Results payload is required.")
+
+    results_payload = _generate_zip_export_results(raw_results)
+
+    attachments = results_payload.get("attachments")
+    if not isinstance(attachments, list) or not attachments:
+        raise HTTPException(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="ZIP export unavailable.",
+        )
+
+    attachment = attachments[0]
+    if not isinstance(attachment, Mapping):
+        raise HTTPException(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="ZIP export unavailable.",
+        )
+
+    content_base64 = attachment.get("content_base64")
+    if not isinstance(content_base64, str) or not content_base64:
+        raise HTTPException(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="ZIP export unavailable.",
+        )
+
+    try:
+        zip_bytes = base64.b64decode(content_base64)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="ZIP export unavailable.",
+        ) from exc
+
+    return StreamingResponse(
+        io.BytesIO(zip_bytes),
+        media_type="application/zip",
+        headers={"Content-Disposition": "attachment; filename=analysis_export.zip"},
+        status_code=status.HTTP_200_OK,
+    )
+
+
 __all__ = ["router"]
