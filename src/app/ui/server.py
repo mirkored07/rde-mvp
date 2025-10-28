@@ -1535,7 +1535,7 @@ async def _extract_form_data(
 
 
 @router.post("/analyze")
-async def analyze(request: Request) -> JSONResponse:
+async def analyze(request: Request) -> Response:
     try:
         files, fields = await _extract_form_data(request)
     except ValueError as exc:
@@ -2203,18 +2203,18 @@ async def analyze(request: Request) -> JSONResponse:
 
         return Response(content=final_html, media_type="text/html")
 
-    accept_header = (request.headers.get("accept") or "").lower()
-    wants_html = "text/html" in accept_header
+    context = _base_template_context(
+        request,
+        results=results_payload,
+        errors=[],
+    )
+    context["results_payload"] = results_payload
 
-    if wants_html:
-        context = _base_template_context(
-            request,
-            results=results_payload,
-            errors=[],
-        )
-        return templates.TemplateResponse("results.html", context)
-
-    return legacy_respond_success(results_payload)
+    return templates.TemplateResponse(
+        "results.html",
+        context,
+        status_code=status.HTTP_200_OK,
+    )
 
 @router.get("/mapping_profiles", include_in_schema=False)
 async def list_mapping_profiles_endpoint() -> JSONResponse:
