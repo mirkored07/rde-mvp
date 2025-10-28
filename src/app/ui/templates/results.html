@@ -309,19 +309,29 @@
           <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div data-chart-switcher class="chart-toggle-group hidden"></div>
           </div>
-          <div id="analysis-chart" class="hidden h-80 w-full rounded-2xl border border-slate-200 bg-white/70 shadow-inner dark:border-slate-700 dark:bg-slate-900/60" data-chart></div>
-          <div data-chart-empty class="flex h-80 items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-slate-100/60 text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-400">
+          <div class="mt-4 grid gap-4 md:grid-cols-2">
+            <div
+              id="pollutantChart"
+              class="border border-slate-200 bg-white/90 shadow-sm dark:border-slate-700 dark:bg-slate-900/70"
+              style="height:250px; border-radius:0.5rem; overflow:hidden;"
+            ></div>
+            <div
+              id="speedChart"
+              class="border border-slate-200 bg-white/90 shadow-sm dark:border-slate-700 dark:bg-slate-900/70"
+              style="height:250px; border-radius:0.5rem; overflow:hidden;"
+            ></div>
+          </div>
+          <div data-chart-empty class="mt-4 flex h-40 items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-slate-100/60 text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-400">
             Charts will appear once emissions or speed signals are available.
           </div>
         </div>
         <div id="analysis-tab-map" class="tab-panel" data-tab-panel="map" hidden>
           <div
-            id="analysis-map"
-            class="hidden h-80 w-full overflow-hidden rounded-2xl border border-slate-200 dark:border-slate-700"
-            data-map
-            style="width:100%;min-height:300px;border:1px solid rgba(255,255,255,0.1);border-radius:0.75rem;"
+            id="map"
+            class="w-full border border-slate-200 dark:border-slate-700"
+            style="height:250px; border-radius:0.5rem; overflow:hidden;"
           ></div>
-          <div data-map-empty class="flex h-80 items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-slate-100/60 text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-400">
+          <div data-map-empty class="mt-4 flex h-40 items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-slate-100/60 text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-400">
             Upload GPS data containing latitude and longitude to visualize the drive path.
           </div>
         </div>
@@ -340,21 +350,17 @@
      In production we can restore SRI, but for local dev we allow load. -->
 
 <!-- Leaflet CSS (local copy) -->
-<link
-  rel="stylesheet"
-  href="/static/leaflet/leaflet.css"
- />
+<link rel="stylesheet" href="/static/leaflet/leaflet.css" />
 
 <!-- Leaflet JS (local copy) -->
 <script src="/static/leaflet/leaflet.js"></script>
 
-<!-- Plotly JS -->
+<!-- Plotly (CDN is OK for now) -->
 <script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
 
-<!-- Our result payload (injected by FastAPI server render) -->
 {% if results_payload %}
 <script>
-  // Make analysis data available to client-side chart/map code
+  // Make the FastAPI results payload available in JS before app.js runs
   window.__RDE_RESULT__ = {{ results_payload | tojson | safe }};
 </script>
 {% endif %}
