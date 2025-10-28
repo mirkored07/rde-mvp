@@ -2203,6 +2203,13 @@ async def analyze(request: Request) -> Response:
 
         return Response(content=final_html, media_type="text/html")
 
+    accept_header = (request.headers.get("accept") or "").lower()
+    wants_json = "application/json" in accept_header
+    wants_html = "text/html" in accept_header
+
+    if wants_json or not wants_html:
+        return legacy_respond_success(results_payload)
+
     context = _base_template_context(
         request,
         results=results_payload,
