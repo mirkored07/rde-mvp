@@ -1043,6 +1043,11 @@ def _build_results_context(
     if errors or results is None:
         return context
 
+    try:
+        context["results_payload_json"] = json.dumps(results)
+    except (TypeError, ValueError):
+        context["results_payload_json"] = "{}"
+
     regulation = results.get("regulation") or {}
     counts = regulation.get("counts") or {}
 
@@ -1976,13 +1981,11 @@ async def analyze(request: Request) -> JSONResponse:
             '    \n'
             '    <div class="flex flex-wrap gap-2">\n'
             '      <form\n'
-            '        hx-post="/export_zip"\n'
-            '        hx-trigger="click"\n'
-            '        hx-target="#export-result-msg"\n'
-            '        hx-swap="innerHTML"\n'
-            '        class="inline-block"\n'
+            '        method="post"\n'
+            '        action="/export_zip_file"\n'
+            '        style="display:inline-block"\n'
             '      >\n'
-            f"        <input type=\"hidden\" name=\"results_json\" value='{payload_json_safe}' />\n"
+            f"        <input type=\"hidden\" name=\"results\" value='{payload_json_safe}' />\n"
             '        <button\n'
             '          type="submit"\n'
             '          class="inline-flex items-center gap-2 rounded-md bg-slate-700/70 px-3 py-2 text-xs font-medium text-slate-100 ring-1 ring-slate-500/40 hover:bg-slate-600/70 hover:ring-slate-400/50"\n'
@@ -2353,17 +2356,66 @@ async def export_zip(request: Request) -> Response:
     summary="Return the export ZIP as a downloadable file",
 )
 async def export_zip_file(request: Request) -> Response:
+    raw_results: Mapping[str, Any] | None = None
+
+    payload: Any
     try:
         payload = await request.json()
-    except Exception as exc:  # pragma: no cover - FastAPI handles parsing
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Invalid JSON payload.") from exc
+    except Exception:
+        payload = None
 
-    if not isinstance(payload, Mapping):
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Payload must be a JSON object.")
+    if isinstance(payload, Mapping):
+        candidate = payload.get("results")
+        if isinstance(candidate, Mapping):
+            raw_results = candidate
+        elif isinstance(candidate, str):
+            try:
+                parsed = json.loads(candidate)
+            except json.JSONDecodeError as exc:
+                raise HTTPException(
+                    status.HTTP_400_BAD_REQUEST,
+                    detail="Invalid results payload.",
+                ) from exc
+            if not isinstance(parsed, Mapping):
+                raise HTTPException(
+                    status.HTTP_400_BAD_REQUEST,
+                    detail="Results payload must be a JSON object.",
+                )
+            raw_results = parsed
+        elif candidate is not None:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                detail="Results payload must be a JSON object.",
+            )
 
-    raw_results = payload.get("results")
-    if not isinstance(raw_results, Mapping):
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Results payload is required.")
+    if raw_results is None:
+        try:
+            form_data = await request.form()
+        except Exception:
+            form_data = None
+
+        if form_data:
+            raw_text = form_data.get("results")
+            if isinstance(raw_text, str) and raw_text.strip():
+                try:
+                    parsed = json.loads(raw_text)
+                except json.JSONDecodeError as exc:
+                    raise HTTPException(
+                        status.HTTP_400_BAD_REQUEST,
+                        detail="Invalid results payload.",
+                    ) from exc
+                if not isinstance(parsed, Mapping):
+                    raise HTTPException(
+                        status.HTTP_400_BAD_REQUEST,
+                        detail="Results payload must be a JSON object.",
+                    )
+                raw_results = parsed
+
+    if raw_results is None:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail="Results payload is required.",
+        )
 
     results_payload = _generate_zip_export_results(raw_results)
 
