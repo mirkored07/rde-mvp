@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import html
+import importlib.util
 import io
 import json
 import math
@@ -16,7 +17,7 @@ from typing import Any, Dict, List
 
 import pandas as pd
 from fastapi import APIRouter, HTTPException, Request, status
-from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response, StreamingResponse
 from fastapi.templating import Jinja2Templates
 
 from src.app.analysis.charts import build_pollutant_chart
@@ -88,6 +89,11 @@ _SAMPLE_FILES: dict[str, pathlib.Path] = {
     for path in _samples_dir.glob("*")
     if path.is_file()
 }
+
+try:
+    WEASYPRINT_AVAILABLE = importlib.util.find_spec("weasyprint") is not None
+except Exception:  # pragma: no cover - defensive guard
+    WEASYPRINT_AVAILABLE = False
 
 
 def _ensure_dict(value: Any | None) -> dict[str, Any] | None:
@@ -1923,7 +1929,84 @@ async def analyze(request: Request) -> JSONResponse:
 
     if request.headers.get("HX-Request"):
         summary_html = render_analysis_summary_html(results_payload)
-        return Response(content=summary_html, media_type="text/html")
+        payload_json = json.dumps(results_payload)
+        payload_json_safe = html.escape(payload_json, quote=False).replace("'", "&#39;")
+
+        pdf_ok = WEASYPRINT_AVAILABLE
+
+        if pdf_ok:
+            pdf_button_block = (
+                '      <form\n'
+                '        hx-post="/export_pdf"\n'
+                '        hx-trigger="click"\n'
+                '        hx-target="#export-result-msg"\n'
+                '        hx-swap="innerHTML"\n'
+                '        class="inline-block"\n'
+                '      >\n'
+                f"        <input type=\"hidden\" name=\"results_json\" value='{payload_json_safe}' />\n"
+                '        <button\n'
+                '          type="submit"\n'
+                '          class="inline-flex items-center gap-2 rounded-md bg-indigo-600/80 px-3 py-2 text-xs font-medium text-slate-100 ring-1 ring-indigo-400/40 hover:bg-indigo-500/80 hover:ring-indigo-300/60"\n'
+                '        >\n'
+                '          <span class="inline-block h-2 w-2 rounded-full bg-indigo-300 shadow-[0_0_6px_rgba(165,180,252,0.8)]"></span>\n'
+                '          <span>Download PDF</span>\n'
+                '        </button>\n'
+                '      </form>'
+            )
+        else:
+            pdf_button_block = (
+                '      <button\n'
+                '        type="button"\n'
+                '        disabled\n'
+                '        title="PDF export unavailable on this system"\n'
+                '        class="inline-flex cursor-not-allowed items-center gap-2 rounded-md bg-slate-700/30 px-3 py-2 text-xs font-medium text-slate-500 ring-1 ring-slate-600/30"\n'
+                '      >\n'
+                '        <span class="inline-block h-2 w-2 rounded-full bg-slate-500/50"></span>\n'
+                '        <span>Download PDF</span>\n'
+                '      </button>'
+            )
+
+        export_block = (
+            '<div class="mt-6 rounded-lg border border-slate-700/60 bg-slate-800/40 p-4 text-slate-200 shadow-inner">\n'
+            '  <div class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">\n'
+            '    <div class="text-sm font-medium text-slate-300">\n'
+            '      <div>Export report</div>\n'
+            '      <div class="text-xs text-slate-400">Download offline copy of this analysis</div>\n'
+            '    </div>\n'
+            '    \n'
+            '    <div class="flex flex-wrap gap-2">\n'
+            '      <form\n'
+            '        hx-post="/export_zip"\n'
+            '        hx-trigger="click"\n'
+            '        hx-target="#export-result-msg"\n'
+            '        hx-swap="innerHTML"\n'
+            '        class="inline-block"\n'
+            '      >\n'
+            f"        <input type=\"hidden\" name=\"results_json\" value='{payload_json_safe}' />\n"
+            '        <button\n'
+            '          type="submit"\n'
+            '          class="inline-flex items-center gap-2 rounded-md bg-slate-700/70 px-3 py-2 text-xs font-medium text-slate-100 ring-1 ring-slate-500/40 hover:bg-slate-600/70 hover:ring-slate-400/50"\n'
+            '        >\n'
+            '          <span class="inline-block h-2 w-2 rounded-full bg-emerald-400 shadow-[0_0_6px_rgba(16,185,129,0.8)]"></span>\n'
+            '          <span>Download ZIP</span>\n'
+            '        </button>\n'
+            '      </form>\n'
+            f"{pdf_button_block}\n"
+            '    </div>\n'
+            '  </div>\n'
+            '\n'
+            '  <div id="export-result-msg" class="mt-3 text-xs text-slate-400"></div>\n'
+            '</div>'
+        )
+
+        final_html = (
+            '<div class="flex flex-col gap-6">\n'
+            f"{summary_html}\n"
+            f"{export_block}\n"
+            '</div>'
+        )
+
+        return Response(content=final_html, media_type="text/html")
 
     return legacy_respond_success(results_payload)
 
@@ -2036,20 +2119,68 @@ async def analysis_accepts_inline_mapping_json():
         )
 
 
-@router.post("/export_pdf", include_in_schema=False)
-async def export_pdf(request: Request) -> JSONResponse:
-    try:
-        payload = await request.json()
-    except Exception as exc:  # pragma: no cover - FastAPI handles parsing
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Invalid JSON payload.") from exc
+def _prepare_export_results_payload(
+    raw_results: Mapping[str, Any],
+    attachment: Mapping[str, Any],
+    diagnostics_note: str,
+) -> dict[str, Any]:
+    regulation_payload = _ensure_dict(raw_results.get("regulation")) or {}
+    summary_payload = _ensure_dict(raw_results.get("summary")) or {}
+    analysis_section = _ensure_dict(raw_results.get("analysis")) or {}
 
-    if not isinstance(payload, Mapping):
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Payload must be a JSON object.")
+    chart_payload = _ensure_dict(raw_results.get("chart"))
+    if chart_payload is None:
+        chart_payload = _ensure_dict(analysis_section.get("chart")) or {}
+    else:
+        chart_payload = dict(chart_payload)
 
-    raw_results = payload.get("results")
-    if not isinstance(raw_results, Mapping):
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Results payload is required.")
+    diagnostics_list = _ensure_string_list(raw_results.get("diagnostics"))
+    diagnostics_list.append(diagnostics_note)
+    errors_list = _ensure_string_list(raw_results.get("errors"))
 
+    mapping_applied = bool(raw_results.get("mapping_applied"))
+    mapping_keys_value = _ensure_string_list(raw_results.get("mapping_keys"))
+
+    rule_evidence_value = raw_results.get("rule_evidence")
+    rule_evidence_text = (
+        str(rule_evidence_value)
+        if isinstance(rule_evidence_value, str)
+        else None
+    )
+
+    payload_snapshot = {
+        "pack_id": regulation_payload.get("pack_id"),
+        "label": regulation_payload.get("label"),
+        "ok": regulation_payload.get("ok"),
+        "mapping_applied": mapping_applied,
+    }
+
+    results_payload = legacy_make_results_payload(
+        regulation=regulation_payload,
+        summary=summary_payload,
+        rule_evidence=rule_evidence_text,
+        diagnostics=diagnostics_list,
+        errors=errors_list,
+        mapping_applied=mapping_applied,
+        mapping_keys=mapping_keys_value,
+        chart=chart_payload,
+        http_status=status.HTTP_200_OK,
+        status_code=status.HTTP_200_OK,
+        payload_snapshot=payload_snapshot,
+    )
+
+    attachments = list(raw_results.get("attachments", []))
+    attachments.append(dict(attachment))
+
+    results_payload["analysis"] = analysis_section
+    results_payload["quality"] = _ensure_dict(raw_results.get("quality")) or {}
+    results_payload["evidence"] = list(raw_results.get("evidence", []))
+    results_payload["attachments"] = attachments
+
+    return results_payload
+
+
+def _generate_pdf_export_results(raw_results: Mapping[str, Any]) -> dict[str, Any]:
     results_copy = dict(raw_results)
 
     try:
@@ -2076,76 +2207,10 @@ async def export_pdf(request: Request) -> JSONResponse:
         "content_base64": base64.b64encode(pdf_bytes).decode("ascii"),
     }
 
-    regulation_payload = _ensure_dict(raw_results.get("regulation")) or {}
-    summary_payload = _ensure_dict(raw_results.get("summary")) or {}
-    analysis_section = _ensure_dict(raw_results.get("analysis")) or {}
-
-    chart_payload = _ensure_dict(raw_results.get("chart"))
-    if chart_payload is None:
-        chart_payload = _ensure_dict(analysis_section.get("chart")) or {}
-    else:
-        chart_payload = dict(chart_payload)
-
-    diagnostics_list = _ensure_string_list(raw_results.get("diagnostics"))
-    diagnostics_list.append("Download PDF ready")
-    errors_list = _ensure_string_list(raw_results.get("errors"))
-
-    mapping_applied = bool(raw_results.get("mapping_applied"))
-    mapping_keys_value = _ensure_string_list(raw_results.get("mapping_keys"))
-
-    rule_evidence_value = raw_results.get("rule_evidence")
-    rule_evidence_text = (
-        str(rule_evidence_value)
-        if isinstance(rule_evidence_value, str)
-        else None
-    )
-
-    payload_snapshot = {
-        "pack_id": regulation_payload.get("pack_id"),
-        "label": regulation_payload.get("label"),
-        "ok": regulation_payload.get("ok"),
-        "mapping_applied": mapping_applied,
-    }
-
-    results_payload = legacy_make_results_payload(
-        regulation=regulation_payload,
-        summary=summary_payload,
-        rule_evidence=rule_evidence_text,
-        diagnostics=diagnostics_list,
-        errors=errors_list,
-        mapping_applied=mapping_applied,
-        mapping_keys=mapping_keys_value,
-        chart=chart_payload,
-        http_status=status.HTTP_200_OK,
-        status_code=status.HTTP_200_OK,
-        payload_snapshot=payload_snapshot,
-    )
-
-    attachments = list(raw_results.get("attachments", []))
-    attachments.append(attachment)
-
-    results_payload["analysis"] = _ensure_dict(raw_results.get("analysis")) or {}
-    results_payload["quality"] = _ensure_dict(raw_results.get("quality")) or {}
-    results_payload["evidence"] = list(raw_results.get("evidence", []))
-    results_payload["attachments"] = attachments
-
-    return legacy_respond_success(results_payload)
+    return _prepare_export_results_payload(raw_results, attachment, "Download PDF ready")
 
 
-@router.post("/export_zip", include_in_schema=False)
-async def export_zip(request: Request) -> JSONResponse:
-    try:
-        payload = await request.json()
-    except Exception as exc:  # pragma: no cover - FastAPI handles parsing
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Invalid JSON payload.") from exc
-
-    if not isinstance(payload, Mapping):
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Payload must be a JSON object.")
-
-    raw_results = payload.get("results")
-    if not isinstance(raw_results, Mapping):
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Results payload is required.")
-
+def _generate_zip_export_results(raw_results: Mapping[str, Any]) -> dict[str, Any]:
     results_copy = dict(raw_results)
 
     try:
@@ -2162,58 +2227,123 @@ async def export_zip(request: Request) -> JSONResponse:
         "content_base64": base64.b64encode(archive_bytes).decode("ascii"),
     }
 
-    regulation_payload = _ensure_dict(raw_results.get("regulation")) or {}
-    summary_payload = _ensure_dict(raw_results.get("summary")) or {}
-    analysis_section = _ensure_dict(raw_results.get("analysis")) or {}
+    return _prepare_export_results_payload(raw_results, attachment, "Download ZIP ready")
 
-    chart_payload = _ensure_dict(raw_results.get("chart"))
-    if chart_payload is None:
-        chart_payload = _ensure_dict(analysis_section.get("chart")) or {}
-    else:
-        chart_payload = dict(chart_payload)
 
-    diagnostics_list = _ensure_string_list(raw_results.get("diagnostics"))
-    diagnostics_list.append("Download ZIP ready")
-    errors_list = _ensure_string_list(raw_results.get("errors"))
-
-    mapping_applied = bool(raw_results.get("mapping_applied"))
-    mapping_keys_value = _ensure_string_list(raw_results.get("mapping_keys"))
-
-    rule_evidence_value = raw_results.get("rule_evidence")
-    rule_evidence_text = (
-        str(rule_evidence_value)
-        if isinstance(rule_evidence_value, str)
-        else None
+def _export_success_html(kind: str) -> HTMLResponse:
+    return HTMLResponse(
+        f'<div class="text-emerald-400">{kind} export generated. Check your browser download.</div>'
     )
 
-    payload_snapshot = {
-        "pack_id": regulation_payload.get("pack_id"),
-        "label": regulation_payload.get("label"),
-        "ok": regulation_payload.get("ok"),
-        "mapping_applied": mapping_applied,
-    }
 
-    results_payload = legacy_make_results_payload(
-        regulation=regulation_payload,
-        summary=summary_payload,
-        rule_evidence=rule_evidence_text,
-        diagnostics=diagnostics_list,
-        errors=errors_list,
-        mapping_applied=mapping_applied,
-        mapping_keys=mapping_keys_value,
-        chart=chart_payload,
-        http_status=status.HTTP_200_OK,
-        status_code=status.HTTP_200_OK,
-        payload_snapshot=payload_snapshot,
+def _export_error_html(message: str, status_code: int) -> HTMLResponse:
+    safe_message = html.escape(message or "Unknown error")
+    return HTMLResponse(
+        f'<div class="text-rose-400">Export failed: {safe_message}</div>',
+        status_code=status_code,
     )
 
-    attachments = list(raw_results.get("attachments", []))
-    attachments.append(attachment)
 
-    results_payload["analysis"] = analysis_section
-    results_payload["quality"] = _ensure_dict(raw_results.get("quality")) or {}
-    results_payload["evidence"] = list(raw_results.get("evidence", []))
-    results_payload["attachments"] = attachments
+@router.post("/export_pdf", include_in_schema=False)
+async def export_pdf(request: Request) -> Response:
+    hx_request = False
+    raw_results: Mapping[str, Any] | None = None
+
+    content_type = request.headers.get("content-type", "")
+    if "application/x-www-form-urlencoded" in content_type or "multipart/form-data" in content_type:
+        form = await request.form()
+        if "results_json" in form:
+            hx_request = True
+            results_json_value = form.get("results_json") or ""
+            if not results_json_value:
+                return _export_error_html("Results payload is required.", status.HTTP_400_BAD_REQUEST)
+            try:
+                parsed_results = json.loads(html.unescape(results_json_value))
+            except json.JSONDecodeError:
+                return _export_error_html("Invalid results payload.", status.HTTP_400_BAD_REQUEST)
+            if not isinstance(parsed_results, Mapping):
+                return _export_error_html("Invalid results payload.", status.HTTP_400_BAD_REQUEST)
+            raw_results = dict(parsed_results)
+
+    if raw_results is None:
+        try:
+            payload = await request.json()
+        except Exception as exc:  # pragma: no cover - FastAPI handles parsing
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Invalid JSON payload.") from exc
+
+        if not isinstance(payload, Mapping):
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Payload must be a JSON object.")
+
+        raw_results = payload.get("results")
+        if not isinstance(raw_results, Mapping):
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Results payload is required.")
+
+    try:
+        results_payload = _generate_pdf_export_results(raw_results)
+    except HTTPException as exc:
+        if hx_request:
+            detail_text = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
+            return _export_error_html(detail_text, exc.status_code)
+        raise
+    except Exception as exc:  # pragma: no cover - defensive guard
+        if hx_request:
+            return _export_error_html(str(exc), status.HTTP_500_INTERNAL_SERVER_ERROR)
+        raise
+
+    if hx_request:
+        return _export_success_html("PDF")
+
+    return legacy_respond_success(results_payload)
+
+
+@router.post("/export_zip", include_in_schema=False)
+async def export_zip(request: Request) -> Response:
+    hx_request = False
+    raw_results: Mapping[str, Any] | None = None
+
+    content_type = request.headers.get("content-type", "")
+    if "application/x-www-form-urlencoded" in content_type or "multipart/form-data" in content_type:
+        form = await request.form()
+        if "results_json" in form:
+            hx_request = True
+            results_json_value = form.get("results_json") or ""
+            if not results_json_value:
+                return _export_error_html("Results payload is required.", status.HTTP_400_BAD_REQUEST)
+            try:
+                parsed_results = json.loads(html.unescape(results_json_value))
+            except json.JSONDecodeError:
+                return _export_error_html("Invalid results payload.", status.HTTP_400_BAD_REQUEST)
+            if not isinstance(parsed_results, Mapping):
+                return _export_error_html("Invalid results payload.", status.HTTP_400_BAD_REQUEST)
+            raw_results = dict(parsed_results)
+
+    if raw_results is None:
+        try:
+            payload = await request.json()
+        except Exception as exc:  # pragma: no cover - FastAPI handles parsing
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Invalid JSON payload.") from exc
+
+        if not isinstance(payload, Mapping):
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Payload must be a JSON object.")
+
+        raw_results = payload.get("results")
+        if not isinstance(raw_results, Mapping):
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Results payload is required.")
+
+    try:
+        results_payload = _generate_zip_export_results(raw_results)
+    except HTTPException as exc:
+        if hx_request:
+            detail_text = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
+            return _export_error_html(detail_text, exc.status_code)
+        raise
+    except Exception as exc:  # pragma: no cover - defensive guard
+        if hx_request:
+            return _export_error_html(str(exc), status.HTTP_500_INTERNAL_SERVER_ERROR)
+        raise
+
+    if hx_request:
+        return _export_success_html("ZIP")
 
     return legacy_respond_success(results_payload)
 
