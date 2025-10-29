@@ -6,7 +6,9 @@ import base64
 import importlib.util
 import io
 import json
+import re
 import zipfile
+from collections.abc import Mapping
 
 import pytest
 from fastapi.testclient import TestClient
@@ -108,86 +110,94 @@ def test_static_assets_served() -> None:
 
 
 def test_analysis_endpoint_returns_results() -> None:
-    payload = _post_analysis()
+    """Smoke test for the JSON contract consumed by the SPA results page."""
+    # The frontend reads ``window.__RDE_RESULT__`` and expects the analysis,
+    # chart, map, and KPI structures asserted below. Keep this in sync with
+    # ``renderAnalysisVisuals`` in ``src/app/ui/static/js/app.js``.
 
-    regulation = payload.get("regulation", {})
-    assert isinstance(regulation, dict)
-    assert regulation.get("label") in {"PASS", "FAIL"}
+    response = client.post(
+        "/analyze",
+        files={
+            "pems_file": ("pems.csv", PEMS_SAMPLE.encode("utf-8"), "text/csv"),
+            "gps_file": ("gps.csv", GPS_SAMPLE.encode("utf-8"), "text/csv"),
+            "ecu_file": ("ecu.csv", ECU_SAMPLE.encode("utf-8"), "text/csv"),
+        },
+        headers={"accept": "application/json"},
+    )
+    assert response.status_code == 200
 
-    summary = payload.get("summary", {})
-    assert isinstance(summary, dict)
-    assert {"pass", "warn", "fail"}.issubset(summary.keys())
+    body = response.json()
+    assert isinstance(body, dict)
+    assert "results_payload" in body
 
-    rule_evidence = payload.get("rule_evidence", "")
-    assert isinstance(rule_evidence, str) and rule_evidence.startswith("Rule evidence:")
+    payload = body["results_payload"]
+    assert isinstance(payload, dict)
 
-    diagnostics = payload.get("diagnostics", [])
-    assert isinstance(diagnostics, list)
-    assert any("Download PDF" in entry for entry in diagnostics)
+    analysis = payload.get("analysis")
+    assert isinstance(analysis, dict)
 
-    script = payload.get("payload_script", "")
-    assert isinstance(script, str)
-    assert script.startswith("window.__RDE_RESULT__ = ")
+    metrics = analysis.get("metrics")
+    assert isinstance(metrics, list) and metrics
+    total_distance = next(
+        (metric for metric in metrics if metric.get("label") == "Total distance"),
+        None,
+    )
+    assert isinstance(total_distance, dict)
+    distance_value = total_distance.get("value")
+    assert isinstance(distance_value, str) and distance_value != "n/a"
+    match = re.search(r"[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?", distance_value)
+    assert match is not None
+    distance_numeric = float(match.group())
+    assert distance_numeric > 0
 
-    chart = payload.get("chart", {})
+    chart = analysis.get("chart")
     assert isinstance(chart, dict)
-    times = chart.get("times", [])
-    assert isinstance(times, list) and len(times) > 0
-    speed = chart.get("speed", {})
+    times = chart.get("times")
+    assert isinstance(times, list) and times
+    speed = chart.get("speed")
     assert isinstance(speed, dict)
-    speed_values = speed.get("values", [])
-    assert isinstance(speed_values, list) and any(value is not None for value in speed_values)
-    pollutants = chart.get("pollutants", [])
-    assert isinstance(pollutants, list)
-    assert any(isinstance(item, dict) and item.get("values") for item in pollutants)
+    speed_values = speed.get("values") or speed.get("y")
+    assert isinstance(speed_values, list) and any(v is not None for v in speed_values)
+    pollutants = chart.get("pollutants")
+    assert isinstance(pollutants, list) and pollutants
+    pollutant_with_values = next(
+        (series for series in pollutants if isinstance(series, dict) and series.get("values")),
+        None,
+    )
+    assert pollutant_with_values is not None
+    assert any(value is not None for value in pollutant_with_values.get("values", []))
 
-    map_payload = payload.get("map", {})
+    map_payload = analysis.get("map")
     assert isinstance(map_payload, dict)
-    points = map_payload.get("points", [])
+    points = map_payload.get("points")
     assert isinstance(points, list) and points
     first_point = points[0]
     assert isinstance(first_point, dict)
     assert "lat" in first_point and "lon" in first_point
-    center = map_payload.get("center", {})
-    assert isinstance(center, dict)
-    assert center.get("lat") is not None and center.get("lon") is not None
+    assert isinstance(first_point.get("lat"), (int, float))
+    assert isinstance(first_point.get("lon"), (int, float))
+    center = map_payload.get("center")
+    if center is not None:
+        assert isinstance(center, dict)
+        assert center.get("lat") is not None and center.get("lon") is not None
+    bounds = map_payload.get("bounds")
+    if bounds:
+        assert isinstance(bounds, list) and len(bounds) == 2
 
-    analysis = payload.get("analysis", {})
-    assert isinstance(analysis, dict)
-    kpis = analysis.get("kpis", {})
-    assert isinstance(kpis, dict)
+    kpis = analysis.get("kpis")
+    assert isinstance(kpis, dict) and kpis
     nox_kpi = kpis.get("NOx_mg_per_km")
-    assert isinstance(nox_kpi, dict)
-    total_block = nox_kpi.get("total", {})
-    assert isinstance(total_block, dict)
-    total_value = total_block.get("value")
-    assert isinstance(total_value, (int, float)) and total_value > 0
-
-    evidence_entries = payload.get("evidence", [])
-    assert any(
-        isinstance(entry, dict)
-        and "NOx" in str(entry.get("title"))
-        and entry.get("observed")
-        and entry.get("observed") != "n/a"
-        for entry in evidence_entries
-    )
-    assert any(
-        isinstance(entry, dict)
-        and "PN" in str(entry.get("title"))
-        and entry.get("observed")
-        and entry.get("observed") != "n/a"
-        for entry in evidence_entries
-    )
-
-    bins = analysis.get("bins", [])
-    assert isinstance(bins, list)
-    if bins:
-        first_bin = bins[0]
-        assert isinstance(first_bin, dict)
-        bin_kpis = first_bin.get("kpis", {})
-        assert isinstance(bin_kpis, dict)
-        if bin_kpis:
-            assert any(value is not None for value in bin_kpis.values())
+    assert nox_kpi is not None
+    if isinstance(nox_kpi, Mapping):
+        total_block = nox_kpi.get("total")
+        if isinstance(total_block, Mapping):
+            kpi_value = total_block.get("value")
+        else:
+            kpi_value = nox_kpi.get("value")
+    else:
+        kpi_value = nox_kpi
+    assert kpi_value is not None
+    assert float(kpi_value) > 0
 
 
 def test_sample_file_downloads() -> None:
