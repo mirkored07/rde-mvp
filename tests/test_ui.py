@@ -113,6 +113,48 @@ def test_analysis_endpoint_returns_results() -> None:
     assert isinstance(script, str)
     assert script.startswith("window.__RDE_RESULT__ = ")
 
+    chart = payload.get("chart", {})
+    assert isinstance(chart, dict)
+    times = chart.get("times", [])
+    assert isinstance(times, list) and len(times) > 0
+    speed = chart.get("speed", {})
+    assert isinstance(speed, dict)
+    speed_values = speed.get("values", [])
+    assert isinstance(speed_values, list) and any(value is not None for value in speed_values)
+    pollutants = chart.get("pollutants", [])
+    assert isinstance(pollutants, list)
+    assert any(isinstance(item, dict) and item.get("values") for item in pollutants)
+
+    map_payload = payload.get("map", {})
+    assert isinstance(map_payload, dict)
+    points = map_payload.get("points", [])
+    assert isinstance(points, list) and points
+    center = map_payload.get("center", {})
+    assert isinstance(center, dict)
+    assert center.get("lat") is not None and center.get("lon") is not None
+
+    analysis = payload.get("analysis", {})
+    assert isinstance(analysis, dict)
+    kpis = analysis.get("kpis", {})
+    assert isinstance(kpis, dict)
+    nox_kpi = kpis.get("NOx_mg_per_km")
+    assert isinstance(nox_kpi, dict)
+    total_block = nox_kpi.get("total", {})
+    assert isinstance(total_block, dict) and total_block.get("value") is not None
+
+    bins = analysis.get("bins", [])
+    assert isinstance(bins, list)
+    if bins:
+        first_bin = bins[0]
+        assert isinstance(first_bin, dict)
+        bin_kpis = first_bin.get("kpis", [])
+        assert isinstance(bin_kpis, list)
+        if bin_kpis:
+            assert any(
+                isinstance(row, dict) and row.get("value") and row.get("value") != "n/a"
+                for row in bin_kpis
+            )
+
 
 def test_sample_file_downloads() -> None:
     for name in ("pems_demo.csv", "gps_demo.csv", "ecu_demo.csv"):
@@ -224,6 +266,9 @@ def test_analysis_applies_column_mapping() -> None:
 
     kpis = payload.get("analysis", {}).get("kpis", {})
     assert "NOx_mg_per_km" in kpis
+    nox_metric = kpis["NOx_mg_per_km"]
+    assert isinstance(nox_metric, dict)
+    assert nox_metric.get("total", {}).get("value") == pytest.approx(10000.0, rel=1e-6)
 
 
 def test_analysis_accepts_inline_mapping_json() -> None:
