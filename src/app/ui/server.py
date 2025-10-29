@@ -114,6 +114,26 @@ def _ensure_string_list(value: Any | None) -> list[str]:
     return [str(value)]
 
 
+def _normalize_attachments(value: Any | None) -> list[dict[str, Any]]:
+    """Best-effort normalisation of attachment payloads."""
+
+    attachments: list[dict[str, Any]] = []
+
+    if value is None:
+        return attachments
+
+    if isinstance(value, Mapping):
+        attachments.append(dict(value))
+        return attachments
+
+    if isinstance(value, (list, tuple, set)):
+        for item in value:
+            if isinstance(item, Mapping):
+                attachments.append(dict(item))
+
+    return attachments
+
+
 def _coerce_int(value: Any) -> int:
     try:
         return int(value)  # type: ignore[arg-type]
@@ -2466,6 +2486,18 @@ def _prepare_export_results_payload(
         chart_payload = _ensure_dict(analysis_section.get("chart")) or {}
     else:
         chart_payload = dict(chart_payload)
+        analysis_section.setdefault("chart", chart_payload)
+
+    map_payload = _ensure_dict(raw_results.get("map"))
+    if map_payload is not None:
+        analysis_section.setdefault("map", map_payload)
+
+    kpis_payload = _ensure_dict(raw_results.get("kpis"))
+    if kpis_payload is not None:
+        analysis_section.setdefault("kpis", kpis_payload)
+
+    attachments = _normalize_attachments(raw_results.get("attachments"))
+    attachments.append(dict(attachment))
 
     diagnostics_list = _ensure_string_list(raw_results.get("diagnostics"))
     diagnostics_list.append(diagnostics_note)
@@ -2502,9 +2534,6 @@ def _prepare_export_results_payload(
         payload_snapshot=payload_snapshot,
     )
 
-    attachments = list(raw_results.get("attachments", []))
-    attachments.append(dict(attachment))
-
     results_payload["analysis"] = analysis_section
     results_payload["quality"] = _ensure_dict(raw_results.get("quality")) or {}
     results_payload["evidence"] = list(raw_results.get("evidence", []))
@@ -2516,6 +2545,12 @@ def _prepare_export_results_payload(
 def _generate_pdf_export_results(raw_results: Mapping[str, Any]) -> dict[str, Any]:
     results_copy = dict(raw_results)
 
+    if not WEASYPRINT_AVAILABLE:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="WeasyPrint not installed",
+        )
+
     try:
         html_document = build_report_html(results_copy)
     except Exception as exc:  # pragma: no cover - rendering failure
@@ -2526,8 +2561,11 @@ def _generate_pdf_export_results(raw_results: Mapping[str, Any]) -> dict[str, An
 
     try:
         pdf_bytes = html_to_pdf_bytes(html_document)
-    except RuntimeError as exc:
-        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+    except (ImportError, RuntimeError) as exc:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="WeasyPrint not installed",
+        ) from exc
     except Exception as exc:  # pragma: no cover - conversion failure
         raise HTTPException(
             status.HTTP_500_INTERNAL_SERVER_ERROR,
