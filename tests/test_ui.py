@@ -69,6 +69,7 @@ def _post_analysis() -> dict[str, object]:
             "gps_file": ("gps.csv", GPS_SAMPLE.encode("utf-8"), "text/csv"),
             "ecu_file": ("ecu.csv", ECU_SAMPLE.encode("utf-8"), "text/csv"),
         },
+        headers={"accept": "application/json"},
     )
     assert response.status_code == 200
     body = response.json()
@@ -204,6 +205,7 @@ def test_analysis_applies_column_mapping() -> None:
             "gps_file": ("gps.csv", CUSTOM_GPS.encode("utf-8"), "text/csv"),
             "ecu_file": ("ecu.csv", CUSTOM_ECU.encode("utf-8"), "text/csv"),
         },
+        headers={"accept": "application/json"},
     )
     assert response.status_code == 200
     payload = response.json()["results_payload"]
@@ -260,6 +262,7 @@ def test_analysis_accepts_inline_mapping_json() -> None:
             "gps_file": ("gps.csv", CUSTOM_GPS.encode("utf-8"), "text/csv"),
             "ecu_file": ("ecu.csv", CUSTOM_ECU.encode("utf-8"), "text/csv"),
         },
+        headers={"accept": "application/json"},
     )
     assert response.status_code == 200
     payload = response.json()["results_payload"]
@@ -288,6 +291,7 @@ def test_analysis_reports_missing_required_column_from_mapping() -> None:
             "gps_file": ("gps.csv", CUSTOM_GPS.encode("utf-8"), "text/csv"),
             "ecu_file": ("ecu.csv", ECU_SAMPLE.encode("utf-8"), "text/csv"),
         },
+        headers={"accept": "application/json"},
     )
     assert response.status_code == 400
     detail = response.json()["detail"]
@@ -325,3 +329,21 @@ def test_export_pdf_reports_missing_dependency() -> None:
     assert response.status_code == 503
     detail = response.json().get("detail", "")
     assert "WeasyPrint" in detail
+
+
+def test_analysis_results_page_renders_html() -> None:
+    response = client.post(
+        "/analyze",
+        files={
+            "pems_file": ("pems.csv", PEMS_SAMPLE.encode("utf-8"), "text/csv"),
+            "gps_file": ("gps.csv", GPS_SAMPLE.encode("utf-8"), "text/csv"),
+            "ecu_file": ("ecu.csv", ECU_SAMPLE.encode("utf-8"), "text/csv"),
+        },
+        headers={"accept": "text/html"},
+    )
+    assert response.status_code == 200
+    assert "<div id=\"drive-map\"" in response.text
+    assert "Charts &amp; KPIs" in response.text
+    assert "window.__RDE_RESULT__ =" in response.text
+    assert "data-results-payload" in response.text
+

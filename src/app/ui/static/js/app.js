@@ -808,11 +808,29 @@
     }
   }
 
+  function extractResultsPayload(container) {
+    if (!container) return null;
+    const scriptEl = container.querySelector("[data-results-payload]");
+    if (!scriptEl) return null;
+    const raw = scriptEl.textContent || "";
+    if (!raw.trim()) return null;
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object") {
+        window.__RDE_RESULT__ = parsed;
+        return parsed;
+      }
+    } catch (error) {
+      return null;
+    }
+    return null;
+  }
+
   function initializeResults(root) {
     const container = root.querySelector("[data-component='analysis-results']");
     if (!container) return;
     renderSummary(container);
-    const payload = getResultPayload();
+    const payload = extractResultsPayload(container) || getResultPayload();
     renderEmissionsChart(payload);
     applyChartThemes();
     if (typeof window.initMapFromResult === "function") {

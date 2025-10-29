@@ -321,15 +321,10 @@
 <script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
 
 <!-- Inject analysis results BEFORE running app.js -->
-{% if results_payload %}
+<script type="application/json" data-results-payload>{{ (results_payload or {}) | tojson | safe }}</script>
 <script>
-  window.__RDE_RESULT__ = {{ results_payload | tojson | safe }};
+  window.__RDE_RESULT__ = {{ (results_payload or {}) | tojson | safe }};
 </script>
-{% else %}
-<script>
-  window.__RDE_RESULT__ = null;
-</script>
-{% endif %}
 
 <!-- Our client-side renderer -->
 <script src="/static/js/app.js"></script>

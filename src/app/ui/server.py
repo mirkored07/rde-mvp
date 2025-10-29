@@ -2124,84 +2124,19 @@ async def analyze(request: Request) -> Response:
             kpis["NOx_mg_per_km"] = float(nox_mg_s)  # last resort: any numeric is fine for the test
     # === END CI NORMALIZATION & KPI FALLBACKS ===
 
+    context = _base_template_context(
+        request,
+        results=results_payload,
+        errors=[],
+    )
+    context["results_payload"] = results_payload
+
     if request.headers.get("HX-Request"):
-        summary_html = render_analysis_summary_html(results_payload)
-        payload_json = json.dumps(results_payload)
-        payload_json_safe = html.escape(payload_json, quote=False).replace("'", "&#39;")
-
-        pdf_ok = WEASYPRINT_AVAILABLE
-
-        if pdf_ok:
-            pdf_button_block = (
-                '      <form\n'
-                '        hx-post="/export_pdf"\n'
-                '        hx-trigger="click"\n'
-                '        hx-target="#export-result-msg"\n'
-                '        hx-swap="innerHTML"\n'
-                '        class="inline-block"\n'
-                '      >\n'
-                f"        <input type=\"hidden\" name=\"results_json\" value='{payload_json_safe}' />\n"
-                '        <button\n'
-                '          type="submit"\n'
-                '          class="inline-flex items-center gap-2 rounded-md bg-indigo-600/80 px-3 py-2 text-xs font-medium text-slate-100 ring-1 ring-indigo-400/40 hover:bg-indigo-500/80 hover:ring-indigo-300/60"\n'
-                '        >\n'
-                '          <span class="inline-block h-2 w-2 rounded-full bg-indigo-300 shadow-[0_0_6px_rgba(165,180,252,0.8)]"></span>\n'
-                '          <span>Download PDF</span>\n'
-                '        </button>\n'
-                '      </form>'
-            )
-        else:
-            pdf_button_block = (
-                '      <button\n'
-                '        type="button"\n'
-                '        disabled\n'
-                '        title="PDF export unavailable on this system"\n'
-                '        class="inline-flex cursor-not-allowed items-center gap-2 rounded-md bg-slate-700/30 px-3 py-2 text-xs font-medium text-slate-500 ring-1 ring-slate-600/30"\n'
-                '      >\n'
-                '        <span class="inline-block h-2 w-2 rounded-full bg-slate-500/50"></span>\n'
-                '        <span>Download PDF</span>\n'
-                '      </button>'
-            )
-
-        export_block = (
-            '<div class="mt-6 rounded-lg border border-slate-700/60 bg-slate-800/40 p-4 text-slate-200 shadow-inner">\n'
-            '  <div class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">\n'
-            '    <div class="text-sm font-medium text-slate-300">\n'
-            '      <div>Export report</div>\n'
-            '      <div class="text-xs text-slate-400">Download offline copy of this analysis</div>\n'
-            '    </div>\n'
-            '    \n'
-            '    <div class="flex flex-wrap gap-2">\n'
-            '      <form\n'
-            '        method="post"\n'
-            '        action="/export_zip_file"\n'
-            '        style="display:inline-block"\n'
-            '      >\n'
-            f"        <input type=\"hidden\" name=\"results\" value='{payload_json_safe}' />\n"
-            '        <button\n'
-            '          type="submit"\n'
-            '          class="inline-flex items-center gap-2 rounded-md bg-slate-700/70 px-3 py-2 text-xs font-medium text-slate-100 ring-1 ring-slate-500/40 hover:bg-slate-600/70 hover:ring-slate-400/50"\n'
-            '        >\n'
-            '          <span class="inline-block h-2 w-2 rounded-full bg-emerald-400 shadow-[0_0_6px_rgba(16,185,129,0.8)]"></span>\n'
-            '          <span>Download ZIP</span>\n'
-            '        </button>\n'
-            '      </form>\n'
-            f"{pdf_button_block}\n"
-            '    </div>\n'
-            '  </div>\n'
-            '\n'
-            '  <div id="export-result-msg" class="mt-3 text-xs text-slate-400"></div>\n'
-            '</div>'
+        return templates.TemplateResponse(
+            "results.html",
+            context,
+            status_code=status.HTTP_200_OK,
         )
-
-        final_html = (
-            '<div class="flex flex-col gap-6">\n'
-            f"{summary_html}\n"
-            f"{export_block}\n"
-            '</div>'
-        )
-
-        return Response(content=final_html, media_type="text/html")
 
     accept_header = (request.headers.get("accept") or "").lower()
     wants_json = "application/json" in accept_header
@@ -2209,13 +2144,6 @@ async def analyze(request: Request) -> Response:
 
     if wants_json or not wants_html:
         return legacy_respond_success(results_payload)
-
-    context = _base_template_context(
-        request,
-        results=results_payload,
-        errors=[],
-    )
-    context["results_payload"] = results_payload
 
     return templates.TemplateResponse(
         "results.html",
