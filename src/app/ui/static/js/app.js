@@ -1,6 +1,7 @@
 (function () {
   const THEME_KEY = "rde-theme";
   const MAPPING_STORAGE_KEY = "rde-mapping-state";
+  const CHART_TARGET_ID = "time-series-chart";
 
   function applyTheme(theme) {
     const root = document.documentElement;
@@ -678,9 +679,9 @@
     return Array.isArray(values) && values.some((value) => value !== null && value !== undefined);
   }
 
-  function applyChartThemes() {
+  function applyChartThemes(targetId = CHART_TARGET_ID) {
     if (!window.Plotly) return;
-    const chart = document.getElementById("emissions-chart");
+    const chart = document.getElementById(targetId);
     if (!chart || chart.dataset.chartReady !== "true") return;
     const isDark = document.documentElement.classList.contains("dark");
     const axisColor = isDark ? "#e2e8f0" : "#1e293b";
@@ -694,11 +695,11 @@
     });
   }
 
-  function renderEmissionsChart(payload) {
-    const chartEl = document.getElementById("emissions-chart");
+  function initChartFromResult(result, targetId = CHART_TARGET_ID) {
+    const chartEl = document.getElementById(targetId);
     if (!chartEl) return;
 
-    if (!payload || !window.Plotly) {
+    if (!result || !window.Plotly) {
       if (window.Plotly) {
         window.Plotly.purge(chartEl);
       }
@@ -706,7 +707,7 @@
       return;
     }
 
-    const chartPayload = resolveChartPayload(payload);
+    const chartPayload = resolveChartPayload(result);
     if (!chartPayload || typeof chartPayload !== "object") {
       window.Plotly.purge(chartEl);
       chartEl.dataset.chartReady = "false";
@@ -725,6 +726,7 @@
     if (hasNumericData(speedValues)) {
       const xValues = ensureXValues(times, speedValues.length);
       const label = (speed && speed.label) || "Vehicle speed";
+      const unit = speed && speed.unit ? ` (${speed.unit})` : "";
       traces.push({
         name: label,
         type: "scatter",
@@ -732,7 +734,7 @@
         x: xValues,
         y: speedValues,
         line: { width: 2.5, color: (speed && speed.color) || "#2563eb" },
-        hovertemplate: "%{y}<extra>" + label + "</extra>",
+        hovertemplate: `%{y}${unit}<extra>${label}</extra>`,
         yaxis: "y",
       });
     }
@@ -743,6 +745,7 @@
       const xSource = Array.isArray(pollutant.t) ? pollutant.t : times;
       const xValues = ensureXValues(xSource, values.length);
       const label = pollutant.label || pollutant.key || "Pollutant";
+      const unit = pollutant.unit ? ` (${pollutant.unit})` : "";
       traces.push({
         name: label,
         type: "scatter",
@@ -750,7 +753,7 @@
         x: xValues,
         y: values,
         line: { width: 2, color: pollutant.color || undefined },
-        hovertemplate: "%{y}<extra>" + label + "</extra>",
+        hovertemplate: `%{y}${unit}<extra>${label}</extra>`,
         yaxis: "y2",
       });
     });
@@ -770,14 +773,23 @@
     const isDark = document.documentElement.classList.contains("dark");
     const axisColor = isDark ? "#e2e8f0" : "#1e293b";
 
-    const layout = { ...baseLayout };
-    layout.margin = { ...(baseLayout.margin || {}), t: 32, r: 32, b: 48, l: 56 };
-    layout.legend = { orientation: "h", y: -0.2, ...(baseLayout.legend || {}) };
-    layout.xaxis = { title: "Time", ...(baseLayout.xaxis || {}) };
-    layout.yaxis = { title: "Vehicle speed", ...(baseLayout.yaxis || {}) };
-    layout.yaxis2 = { title: "Emission rate", ...(baseLayout.yaxis2 || {}) };
-    layout.paper_bgcolor = "rgba(0,0,0,0)";
-    layout.plot_bgcolor = "rgba(0,0,0,0)";
+    const layout = {
+      margin: { t: 40, r: 40, b: 50, l: 60 },
+      legend: { orientation: "h", x: 0, y: 1.15 },
+      hovermode: "x unified",
+      xaxis: { title: "Time" },
+      yaxis: { title: "Vehicle speed" },
+      yaxis2: { title: "Emission rate", overlaying: "y", side: "right" },
+      paper_bgcolor: "rgba(0,0,0,0)",
+      plot_bgcolor: "rgba(0,0,0,0)",
+      ...baseLayout,
+    };
+
+    layout.margin = { ...layout.margin, ...(baseLayout.margin || {}) };
+    layout.legend = { ...layout.legend, ...(baseLayout.legend || {}) };
+    layout.xaxis = { ...layout.xaxis, ...(baseLayout.xaxis || {}) };
+    layout.yaxis = { ...layout.yaxis, ...(baseLayout.yaxis || {}) };
+    layout.yaxis2 = { ...layout.yaxis2, ...(baseLayout.yaxis2 || {}) };
 
     layout.font = { ...(baseLayout.font || {}), color: axisColor };
     layout.xaxis.color = axisColor;
@@ -787,6 +799,7 @@
     chartEl.innerHTML = "";
     window.Plotly.newPlot(chartEl, traces, layout, { displayModeBar: false, responsive: true });
     chartEl.dataset.chartReady = "true";
+    applyChartThemes(targetId);
   }
 
   function populateExportForms(payload) {
@@ -831,13 +844,10 @@
     if (!container) return;
     renderSummary(container);
     const payload = extractResultsPayload(container) || getResultPayload();
-    renderEmissionsChart(payload);
-    applyChartThemes();
-    if (typeof window.initMapFromResult === "function") {
-      window.initMapFromResult(payload);
-    }
     populateExportForms(payload);
   }
+
+  window.initChartFromResult = initChartFromResult;
 
   document.addEventListener("DOMContentLoaded", () => {
     initTheme();
@@ -854,6 +864,15 @@
   document.addEventListener("htmx:afterSwap", (event) => {
     if (event.target && event.target.id === "analysis-results") {
       initializeResults(event.target);
+      const payload = getResultPayload();
+      if (payload) {
+        if (typeof window.initChartFromResult === "function") {
+          window.initChartFromResult(payload, CHART_TARGET_ID);
+        }
+        if (typeof window.initMapFromResult === "function") {
+          window.initMapFromResult(payload, "drive-map");
+        }
+      }
     }
   });
 
@@ -863,7 +882,7 @@
 
   window.addEventListener("resize", () => {
     if (!window.Plotly) return;
-    const chart = document.getElementById("emissions-chart");
+    const chart = document.getElementById(CHART_TARGET_ID);
     if (chart && chart.dataset.chartReady === "true") {
       window.Plotly.Plots.resize(chart);
     }
@@ -871,15 +890,26 @@
 })();
 
 (function () {
-  function initMapFromResult(result) {
-    if (!result || !result.map || typeof window.L === "undefined") {
+  const MAP_TARGET_ID = "drive-map";
+
+  function initMapFromResult(result, targetId = MAP_TARGET_ID) {
+    if (!result || typeof window.L === "undefined") {
       return;
     }
 
-    const mapEl = document.getElementById("drive-map");
+    const mapEl = document.getElementById(targetId);
     if (!mapEl) return;
 
-    const { center, points, bounds } = result.map || {};
+    const mapData =
+      (result.analysis && typeof result.analysis === "object" ? result.analysis.map : undefined) ||
+      result.map ||
+      null;
+
+    if (!mapData || typeof mapData !== "object") {
+      return;
+    }
+
+    const { center, points, bounds } = mapData;
     const centerLat = Number(center?.lat);
     const centerLon = Number(center?.lon);
     if (!Number.isFinite(centerLat) || !Number.isFinite(centerLon)) {
@@ -895,7 +925,7 @@
       mapEl._leafletInstance = undefined;
     }
 
-    const map = L.map("drive-map", {
+    const map = L.map(mapEl, {
       center: [centerLat, centerLon],
       zoom: 13,
       scrollWheelZoom: false,
@@ -920,7 +950,7 @@
       return;
     }
 
-    L.polyline(latlngs, {
+    const route = L.polyline(latlngs, {
       color: "#38bdf8",
       weight: 3,
     }).addTo(map);
@@ -928,17 +958,13 @@
     if (Array.isArray(bounds) && bounds.length === 2) {
       map.fitBounds(bounds);
     } else if (latlngs.length > 1) {
-      map.fitBounds(latlngs);
+      map.fitBounds(route.getBounds());
+    } else {
+      map.setView(latlngs[0], 13);
     }
 
     mapEl._leafletInstance = map;
   }
 
   window.initMapFromResult = initMapFromResult;
-
-  document.addEventListener("DOMContentLoaded", () => {
-    if (window.__RDE_RESULT__) {
-      initMapFromResult(window.__RDE_RESULT__);
-    }
-  });
 })();

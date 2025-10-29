@@ -271,13 +271,13 @@
     <section class="rounded-3xl border border-slate-200/70 bg-slate-900/5 p-6 shadow-card dark:border-slate-700/70 dark:bg-slate-900/40">
       <h3 class="text-sm font-semibold uppercase tracking-[0.3em] text-slate-500 dark:text-slate-300">Charts &amp; KPIs</h3>
       <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">Interactive time series for vehicle speed and pollutant emissions.</p>
-      <div id="emissions-chart" class="mt-4 h-[320px] w-full rounded-2xl border border-slate-200/70 bg-white/70 shadow-inner dark:border-slate-700/70 dark:bg-slate-900/60"></div>
+      <div id="time-series-chart" class="mt-4 h-[320px] w-full rounded-2xl border border-slate-700/50 bg-slate-900/40 shadow-inner dark:border-slate-600/70"></div>
     </section>
 
     <section class="rounded-3xl border border-slate-200/70 bg-slate-900/5 p-6 shadow-card dark:border-slate-700/70 dark:bg-slate-900/40">
       <h3 class="text-sm font-semibold uppercase tracking-[0.3em] text-slate-500 dark:text-slate-300">Drive map</h3>
       <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">Leaflet trace of the fused GPS route.</p>
-      <div id="drive-map" class="mt-4 h-[320px] w-full overflow-hidden rounded-2xl border border-slate-200/70 bg-white/70 shadow-inner dark:border-slate-700/70 dark:bg-slate-900/60"></div>
+      <div id="drive-map" class="mt-4 h-[320px] w-full overflow-hidden rounded-2xl border border-slate-700/50 bg-slate-900/40 shadow-inner dark:border-slate-600/70"></div>
     </section>
   </div>
 
@@ -320,12 +320,30 @@
 <!-- Plotly JS -->
 <script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
 
-<!-- Inject analysis results BEFORE running app.js -->
 <script type="application/json" data-results-payload>{{ (results_payload or {}) | tojson | safe }}</script>
+{% if results_payload %}
 <script>
-  window.__RDE_RESULT__ = {{ (results_payload or {}) | tojson | safe }};
+  window.__RDE_RESULT__ = {{ results_payload | tojson | safe }};
 </script>
+{% else %}
+<script>
+  window.__RDE_RESULT__ = null;
+</script>
+{% endif %}
 
 <!-- Our client-side renderer -->
 <script src="/static/js/app.js"></script>
+
+<script>
+  document.addEventListener("DOMContentLoaded", () => {
+    if (window.__RDE_RESULT__) {
+      if (window.initChartFromResult) {
+        window.initChartFromResult(window.__RDE_RESULT__, "time-series-chart");
+      }
+      if (window.initMapFromResult) {
+        window.initMapFromResult(window.__RDE_RESULT__, "drive-map");
+      }
+    }
+  });
+</script>
 
