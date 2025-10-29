@@ -147,13 +147,10 @@ def test_analysis_endpoint_returns_results() -> None:
     if bins:
         first_bin = bins[0]
         assert isinstance(first_bin, dict)
-        bin_kpis = first_bin.get("kpis", [])
-        assert isinstance(bin_kpis, list)
+        bin_kpis = first_bin.get("kpis", {})
+        assert isinstance(bin_kpis, dict)
         if bin_kpis:
-            assert any(
-                isinstance(row, dict) and row.get("value") and row.get("value") != "n/a"
-                for row in bin_kpis
-            )
+            assert any(value is not None for value in bin_kpis.values())
 
 
 def test_sample_file_downloads() -> None:

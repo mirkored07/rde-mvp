@@ -1,8 +1,6 @@
 (function () {
   const THEME_KEY = "rde-theme";
   const MAPPING_STORAGE_KEY = "rde-mapping-state";
-  const CHART_TARGET_ID = "time-series-chart";
-
   function applyTheme(theme) {
     const root = document.documentElement;
     if (theme === "dark") {
@@ -643,177 +641,6 @@
     return payload;
   }
 
-  function resolveChartPayload(payload) {
-    if (!payload || typeof payload !== "object") return null;
-    if (payload.chart && typeof payload.chart === "object") {
-      return payload.chart;
-    }
-    const analysis = payload.analysis;
-    if (analysis && typeof analysis === "object") {
-      const analysisChart = analysis.chart;
-      if (analysisChart && typeof analysisChart === "object") {
-        return analysisChart;
-      }
-    }
-    return null;
-  }
-
-  function toNumberOrNull(value) {
-    if (value === null || value === undefined) return null;
-    const num = Number(value);
-    return Number.isFinite(num) ? num : null;
-  }
-
-  function ensureArray(value) {
-    return Array.isArray(value) ? value : [];
-  }
-
-  function ensureXValues(times, length) {
-    if (Array.isArray(times) && times.length === length && times.length) {
-      return times;
-    }
-    return Array.from({ length }, (_, index) => index + 1);
-  }
-
-  function hasNumericData(values) {
-    return Array.isArray(values) && values.some((value) => value !== null && value !== undefined);
-  }
-
-  function applyChartThemes(targetId = CHART_TARGET_ID) {
-    if (!window.Plotly) return;
-    const chart = document.getElementById(targetId);
-    if (!chart || chart.dataset.chartReady !== "true") return;
-    const isDark = document.documentElement.classList.contains("dark");
-    const axisColor = isDark ? "#e2e8f0" : "#1e293b";
-    window.Plotly.relayout(chart, {
-      "font.color": axisColor,
-      "xaxis.color": axisColor,
-      "yaxis.color": axisColor,
-      "yaxis2.color": axisColor,
-      "paper_bgcolor": "rgba(0,0,0,0)",
-      "plot_bgcolor": "rgba(0,0,0,0)",
-    });
-  }
-
-  function initChartFromResult(result, targetId = CHART_TARGET_ID) {
-    const chartEl = document.getElementById(targetId);
-    if (!chartEl) {
-      console.warn(`initChartFromResult: container "${targetId}" not found`);
-      return;
-    }
-
-    if (!result) {
-      console.warn("initChartFromResult: missing result payload", result);
-      if (window.Plotly) {
-        window.Plotly.purge(chartEl);
-      }
-      chartEl.dataset.chartReady = "false";
-      return;
-    }
-
-    if (!window.Plotly) {
-      console.warn("initChartFromResult: Plotly library unavailable");
-      chartEl.dataset.chartReady = "false";
-      return;
-    }
-
-    const chartPayload = resolveChartPayload(result);
-    if (!chartPayload || typeof chartPayload !== "object") {
-      window.Plotly.purge(chartEl);
-      chartEl.dataset.chartReady = "false";
-      console.warn("initChartFromResult: chart payload missing or invalid", chartPayload);
-      return;
-    }
-
-    const times = ensureArray(chartPayload.times);
-    const speed = chartPayload.speed && typeof chartPayload.speed === "object" ? chartPayload.speed : null;
-    const speedValues = ensureArray(speed?.values).map(toNumberOrNull);
-    const pollutants = ensureArray(chartPayload.pollutants)
-      .map((pollutant) => (pollutant && typeof pollutant === "object" ? pollutant : null))
-      .filter(Boolean);
-
-    const traces = [];
-
-    if (hasNumericData(speedValues)) {
-      const xValues = ensureXValues(times, speedValues.length);
-      const label = (speed && speed.label) || "Vehicle speed";
-      const unit = speed && speed.unit ? ` (${speed.unit})` : "";
-      traces.push({
-        name: label,
-        type: "scatter",
-        mode: "lines",
-        x: xValues,
-        y: speedValues,
-        line: { width: 2.5, color: (speed && speed.color) || "#2563eb" },
-        hovertemplate: `%{y}${unit}<extra>${label}</extra>`,
-        yaxis: "y",
-      });
-    }
-
-    pollutants.forEach((pollutant) => {
-      const values = ensureArray(pollutant.values).map(toNumberOrNull);
-      if (!hasNumericData(values)) return;
-      const xSource = Array.isArray(pollutant.t) ? pollutant.t : times;
-      const xValues = ensureXValues(xSource, values.length);
-      const label = pollutant.label || pollutant.key || "Pollutant";
-      const unit = pollutant.unit ? ` (${pollutant.unit})` : "";
-      traces.push({
-        name: label,
-        type: "scatter",
-        mode: "lines",
-        x: xValues,
-        y: values,
-        line: { width: 2, color: pollutant.color || undefined },
-        hovertemplate: `%{y}${unit}<extra>${label}</extra>`,
-        yaxis: "y2",
-      });
-    });
-
-    if (!traces.length) {
-      window.Plotly.purge(chartEl);
-      chartEl.innerHTML = `<div class="flex h-full items-center justify-center text-xs text-slate-400 dark:text-slate-500">No chart data available.</div>`;
-      chartEl.dataset.chartReady = "false";
-      console.warn("initChartFromResult: no traces available for plotting", chartPayload);
-      return;
-    }
-
-    const baseLayout =
-      chartPayload.layout && typeof chartPayload.layout === "object"
-        ? JSON.parse(JSON.stringify(chartPayload.layout))
-        : {};
-
-    const isDark = document.documentElement.classList.contains("dark");
-    const axisColor = isDark ? "#e2e8f0" : "#1e293b";
-
-    const layout = {
-      margin: { t: 40, r: 40, b: 50, l: 60 },
-      legend: { orientation: "h", x: 0, y: 1.15 },
-      hovermode: "x unified",
-      xaxis: { title: "Time" },
-      yaxis: { title: "Vehicle speed" },
-      yaxis2: { title: "Emission rate", overlaying: "y", side: "right" },
-      paper_bgcolor: "rgba(0,0,0,0)",
-      plot_bgcolor: "rgba(0,0,0,0)",
-      ...baseLayout,
-    };
-
-    layout.margin = { ...layout.margin, ...(baseLayout.margin || {}) };
-    layout.legend = { ...layout.legend, ...(baseLayout.legend || {}) };
-    layout.xaxis = { ...layout.xaxis, ...(baseLayout.xaxis || {}) };
-    layout.yaxis = { ...layout.yaxis, ...(baseLayout.yaxis || {}) };
-    layout.yaxis2 = { ...layout.yaxis2, ...(baseLayout.yaxis2 || {}) };
-
-    layout.font = { ...(baseLayout.font || {}), color: axisColor };
-    layout.xaxis.color = axisColor;
-    layout.yaxis.color = axisColor;
-    layout.yaxis2.color = axisColor;
-
-    chartEl.innerHTML = "";
-    window.Plotly.newPlot(chartEl, traces, layout, { displayModeBar: false, responsive: true });
-    chartEl.dataset.chartReady = "true";
-    applyChartThemes(targetId);
-  }
-
   function populateExportForms(payload) {
     let serialised = "";
     if (payload) {
@@ -833,33 +660,13 @@
     }
   }
 
-  function extractResultsPayload(container) {
-    if (!container) return null;
-    const scriptEl = container.querySelector("[data-results-payload]");
-    if (!scriptEl) return null;
-    const raw = scriptEl.textContent || "";
-    if (!raw.trim()) return null;
-    try {
-      const parsed = JSON.parse(raw);
-      if (parsed && typeof parsed === "object") {
-        window.__RDE_RESULT__ = parsed;
-        return parsed;
-      }
-    } catch (error) {
-      return null;
-    }
-    return null;
-  }
-
   function initializeResults(root) {
     const container = root.querySelector("[data-component='analysis-results']");
     if (!container) return;
     renderSummary(container);
-    const payload = extractResultsPayload(container) || getResultPayload();
+    const payload = getResultPayload();
     populateExportForms(payload);
   }
-
-  window.initChartFromResult = initChartFromResult;
 
   document.addEventListener("DOMContentLoaded", () => {
     initTheme();
@@ -878,133 +685,91 @@
       initializeResults(event.target);
       const payload = getResultPayload();
       if (payload) {
-        if (typeof window.initChartFromResult === "function") {
-          window.initChartFromResult(payload, CHART_TARGET_ID);
-        }
-        if (typeof window.initMapFromResult === "function") {
-          window.initMapFromResult(payload, "drive-map");
-        }
+        initTimeseriesChart(payload);
+        initDriveMap(payload);
       }
-    }
-  });
-
-  document.addEventListener("themechange", () => {
-    applyChartThemes();
-  });
-
-  window.addEventListener("resize", () => {
-    if (!window.Plotly) return;
-    const chart = document.getElementById(CHART_TARGET_ID);
-    if (chart && chart.dataset.chartReady === "true") {
-      window.Plotly.Plots.resize(chart);
     }
   });
 })();
 
-(function () {
-  const MAP_TARGET_ID = "drive-map";
+function initTimeseriesChart(result) {
+  const el = document.getElementById("timeseries-chart");
+  if (!el) return;
+  const chart = result.analysis?.chart || result.chart;
+  if (!chart) return;
 
-  function initMapFromResult(result, targetId = MAP_TARGET_ID) {
-    if (!result) {
-      console.warn("initMapFromResult: missing result payload", result);
-      return;
-    }
+  const t = chart.times || [];
+  const speedTrace = {
+    x: t,
+    y: chart.speed?.values || [],
+    name: chart.speed?.label || "Speed",
+    yaxis: "y1",
+    type: "scatter",
+    mode: "lines",
+    line: { width: 1.5 },
+  };
+  const pollutantTraces = (chart.pollutants || []).map((p) => ({
+    x: p.t || t,
+    y: p.y || p.values || [],
+    name: p.key || "pollutant",
+    yaxis: "y2",
+    type: "scatter",
+    mode: "lines",
+    line: { width: 1 },
+  }));
+  const layout = {
+    margin: { t: 10, r: 10, b: 30, l: 40 },
+    paper_bgcolor: "rgba(0,0,0,0)",
+    plot_bgcolor: "rgba(0,0,0,0)",
+    xaxis: { title: "Time", showgrid: false, zeroline: false, color: "#cbd5e1" },
+    yaxis: { title: chart.speed?.label || "Speed", zeroline: false, color: "#cbd5e1" },
+    yaxis2: { title: "Emission rate", overlaying: "y", side: "right", color: "#cbd5e1", zeroline: false },
+    legend: { font: { color: "#cbd5e1", size: 10 }, orientation: "h", y: -0.3 },
+  };
+  Plotly.newPlot(el, [speedTrace, ...pollutantTraces], layout, {
+    displayModeBar: false,
+    responsive: true,
+  });
+}
 
-    if (typeof window.L === "undefined") {
-      console.warn("initMapFromResult: Leaflet library unavailable");
-      return;
-    }
-
-    const mapEl = document.getElementById(targetId);
-    if (!mapEl) {
-      console.warn(`initMapFromResult: container "${targetId}" not found`);
-      return;
-    }
-
-    const mapData =
-      (result.analysis && typeof result.analysis === "object" ? result.analysis.map : undefined) ||
-      result.map ||
-      null;
-
-    if (!mapData || typeof mapData !== "object") {
-      console.warn("initMapFromResult: map payload missing or invalid", mapData);
-      return;
-    }
-
-    const { center, points, bounds } = mapData;
-
-    if (!Array.isArray(points) || points.length === 0) {
-      console.warn("initMapFromResult: no map points available", mapData);
-      return;
-    }
-
-    const latlngs = points
-      .map((p) => {
-        if (!p) return null;
-        const lat = Number(p.lat);
-        const lon = Number(p.lon);
-        if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
-        return [lat, lon];
-      })
-      .filter(Boolean);
-
-    if (latlngs.length === 0) {
-      console.warn("initMapFromResult: map points missing valid coordinates", mapData);
-      return;
-    }
-
-    let centerLat = Number(center?.lat);
-    let centerLon = Number(center?.lon);
-    if (!Number.isFinite(centerLat) || !Number.isFinite(centerLon)) {
-      const sum = latlngs.reduce(
-        (acc, value) => {
-          acc.lat += value[0];
-          acc.lon += value[1];
-          return acc;
-        },
-        { lat: 0, lon: 0 },
-      );
-      centerLat = sum.lat / latlngs.length;
-      centerLon = sum.lon / latlngs.length;
-    }
-
-    if (!Number.isFinite(centerLat) || !Number.isFinite(centerLon)) {
-      console.warn("initMapFromResult: unable to determine map center", mapData);
-      return;
-    }
-
-    if (mapEl._leafletInstance) {
-      mapEl._leafletInstance.remove();
-      mapEl._leafletInstance = undefined;
-    }
-
-    const map = L.map(mapEl, {
-      center: [centerLat, centerLon],
-      zoom: 13,
-      scrollWheelZoom: false,
-    });
-
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      maxZoom: 19,
-      attribution: "&copy; OpenStreetMap contributors",
-    }).addTo(map);
-
-    const route = L.polyline(latlngs, {
-      color: "#38bdf8",
-      weight: 3,
-    }).addTo(map);
-
-    if (Array.isArray(bounds) && bounds.length === 2) {
-      map.fitBounds(bounds);
-    } else if (latlngs.length > 1) {
-      map.fitBounds(route.getBounds());
-    } else {
-      map.setView(latlngs[0], 13);
-    }
-
-    mapEl._leafletInstance = map;
-    mapEl.dataset.mapReady = "true";
+function initDriveMap(result) {
+  const el = document.getElementById("drive-map");
+  if (!el) return;
+  if (el._leafletInstance) {
+    el._leafletInstance.remove();
   }
+  const mapData = result.analysis?.map || result.map;
+  if (!mapData) return;
+  const m = L.map(el, {
+    scrollWheelZoom: false,
+    zoomControl: true,
+    attributionControl: false,
+  });
+  el._leafletInstance = m;
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19,
+  }).addTo(m);
+  const coords = (mapData.points || []).map((p) => [p.lat, p.lon]);
+  if (coords.length > 0) {
+    const line = L.polyline(coords, { color: "#38bdf8", weight: 3 }).addTo(m);
+    if (mapData.bounds && mapData.bounds.length === 2) {
+      m.fitBounds(mapData.bounds);
+    } else {
+      m.fitBounds(line.getBounds());
+    }
+  } else if (mapData.center) {
+    m.setView([mapData.center.lat, mapData.center.lon], 13);
+  } else {
+    m.setView([0, 0], 2);
+  }
+}
 
-  window.initMapFromResult = initMapFromResult;
+(function () {
+  const result = window.__RDE_RESULT__;
+  if (!result || typeof result !== "object") {
+    console.warn("No analysis payload found, skipping chart/map render.");
+    return;
+  }
+  initTimeseriesChart(result);
+  initDriveMap(result);
 })();
