@@ -685,148 +685,220 @@
       initializeResults(event.target);
       const payload = getResultPayload();
       if (payload) {
-        safeInitChartFromResult(payload);
-        safeInitMapFromResult(payload);
+        safeInitCharts(payload);
+        safeInitMap(payload);
       }
     }
   });
 })();
 
-function domReady(fn) {
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", fn);
-  } else {
-    fn();
-  }
-}
-
-function safeInitChartFromResult(result) {
-  const chartEl = document.getElementById("chart-card");
-  const chartData = result && (result.chart || (result.analysis && result.analysis.chart));
-  if (!chartEl || !chartData) return;
-
-  try {
-    const times = chartData.times || [];
-
-    const speedVals = (chartData.speed && chartData.speed.values) || [];
-    const speedTrace = {
-      x: times,
-      y: speedVals,
-      name: "Vehicle speed (m/s)",
-      yaxis: "y1",
-      mode: "lines",
-      line: { width: 1.5 },
-    };
-
-    const pollutantTraces = (chartData.pollutants || []).map((p) => ({
-      x: p.t || times,
-      y: p.y || p.values || [],
-      name: p.key,
-      yaxis: "y2",
-      mode: "lines",
-      line: { width: 1 },
-    }));
-
-    const traces = [speedTrace, ...pollutantTraces];
-
-    const layout = {
-      margin: { t: 16, r: 16, b: 24, l: 40 },
-      paper_bgcolor: "rgba(0,0,0,0)",
-      plot_bgcolor: "rgba(0,0,0,0)",
-      xaxis: {
-        title: "Time",
-        showgrid: false,
-        zeroline: false,
-        color: "#cbd5e1",
-      },
-      yaxis: {
-        title: "Speed (m/s)",
-        zeroline: false,
-        color: "#cbd5e1",
-      },
-      yaxis2: {
-        title: "Emission rate",
-        overlaying: "y",
-        side: "right",
-        zeroline: false,
-        color: "#cbd5e1",
-      },
-      legend: {
-        orientation: "h",
-        y: -0.3,
-        font: { size: 10, color: "#cbd5e1" },
-      },
-    };
-
-    Plotly.newPlot(chartEl, traces, layout, {
-      displaylogo: false,
-      responsive: true,
-    });
-  } catch (err) {
-    console.warn("chart render failed:", err);
-  }
-}
-
-function safeInitMapFromResult(result) {
-  const mapDiv = document.getElementById("drive-map");
-  const mapData = result && (result.analysis && result.analysis.map ? result.analysis.map : result.map);
-  if (!mapDiv || !mapData) return;
-
-  try {
-    const { points, center, bounds } = mapData;
-
-    if (mapDiv._leafletInstance) {
-      mapDiv._leafletInstance.remove();
-    }
-
-    const map = L.map("drive-map", {
-      zoomControl: true,
-      attributionControl: false,
-    });
-    mapDiv._leafletInstance = map;
-
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      maxZoom: 19,
-    }).addTo(map);
-
-    if (Array.isArray(points) && points.length > 0) {
-      const latlngs = points.map((p) => [p.lat, p.lon]);
-      const route = L.polyline(latlngs, { color: "#38bdf8", weight: 3 }).addTo(map);
-
-      if (Array.isArray(bounds) && bounds.length === 2) {
-        map.fitBounds(bounds);
-      } else {
-        map.fitBounds(route.getBounds());
-      }
-
-      L.circleMarker(latlngs[0], {
-        radius: 5,
-        color: "#22c55e",
-        fillColor: "#22c55e",
-        fillOpacity: 1.0,
-      }).addTo(map);
-
-      L.circleMarker(latlngs[latlngs.length - 1], {
-        radius: 5,
-        color: "#ef4444",
-        fillColor: "#ef4444",
-        fillOpacity: 1.0,
-      }).addTo(map);
-    } else if (center) {
-      map.setView([center.lat, center.lon], 13);
-    }
-  } catch (err) {
-    console.warn("map render failed:", err);
-  }
-}
-
-domReady(() => {
-  const result = window.__RDE_RESULT__;
-  if (!result) {
-    console.warn("No analysis payload found, skipping chart/map render.");
+function initChartsFromResult(payload) {
+  if (!payload || typeof payload !== "object") {
+    console.debug('analysis payload missing, skipping chart render.');
     return;
   }
+  if (typeof Plotly === 'undefined' || typeof Plotly.newPlot !== 'function') {
+    console.debug('Plotly not available, skipping chart render.');
+    return;
+  }
+  const chartEl = document.getElementById('analysis-chart');
+  if (!chartEl) {
+    console.debug('analysis chart container not found, skipping chart render.');
+    return;
+  }
+  const chartSource = payload.chart || (payload.analysis && payload.analysis.chart) || {};
+  if (!chartSource || typeof chartSource !== 'object') {
+    console.debug('chart data missing from payload, skipping chart render.');
+    return;
+  }
+  const times = Array.isArray(chartSource.times)
+    ? chartSource.times
+    : Array.isArray(chartSource.t)
+    ? chartSource.t
+    : [];
+  const speedSeries = chartSource.speed || {};
+  const speedValues = Array.isArray(speedSeries.values)
+    ? speedSeries.values
+    : Array.isArray(speedSeries.y)
+    ? speedSeries.y
+    : [];
+  const pollutantSeries = Array.isArray(chartSource.pollutants) ? chartSource.pollutants : [];
+  if (!times.length && !speedValues.length && !pollutantSeries.length) {
+    console.debug('no time-series data found in payload, skipping chart render.');
+    return;
+  }
+  const chartHeight = Math.max(chartEl.clientHeight || 0, 240);
+  const baseTimes = times.length ? times : speedValues.map((_, index) => index);
+  const speedTrace = {
+    x: baseTimes,
+    y: speedValues,
+    name: speedSeries.label || 'Vehicle speed (m/s)',
+    yaxis: 'y1',
+    mode: 'lines',
+    line: { width: 2, color: '#38bdf8' },
+  };
+  const pollutantTraces = pollutantSeries
+    .map((series, idx) => {
+      if (!series || typeof series !== 'object') {
+        return null;
+      }
+      const values = Array.isArray(series.values)
+        ? series.values
+        : Array.isArray(series.y)
+        ? series.y
+        : [];
+      const timestamps = Array.isArray(series.t) ? series.t : baseTimes;
+      return {
+        x: timestamps,
+        y: values,
+        name: series.label || series.name || series.key || `Series ${idx + 1}`,
+        yaxis: 'y2',
+        mode: 'lines',
+        line: { width: 1.5 },
+      };
+    })
+    .filter(Boolean);
+  const traces = [];
+  if (speedValues.length || baseTimes.length) {
+    traces.push(speedTrace);
+  }
+  traces.push(...pollutantTraces);
+  const layout = {
+    height: chartHeight,
+    margin: { t: 24, r: 24, b: 40, l: 48 },
+    paper_bgcolor: 'rgba(0,0,0,0)',
+    plot_bgcolor: 'rgba(0,0,0,0)',
+    font: { color: '#cbd5e1' },
+    xaxis: {
+      title: 'Time',
+      showgrid: false,
+      zeroline: false,
+      color: '#cbd5e1',
+    },
+    yaxis: {
+      title: speedSeries.unit ? `${speedSeries.unit}` : 'Speed (m/s)',
+      zeroline: false,
+      gridcolor: 'rgba(148, 163, 184, 0.25)',
+      color: '#cbd5e1',
+    },
+    yaxis2: {
+      title: 'Emission rate',
+      overlaying: 'y',
+      side: 'right',
+      zeroline: false,
+      gridcolor: 'rgba(148, 163, 184, 0.15)',
+      color: '#cbd5e1',
+    },
+    legend: {
+      orientation: 'h',
+      y: -0.25,
+      font: { size: 10, color: '#cbd5e1' },
+    },
+  };
+  const config = {
+    displaylogo: false,
+    responsive: true,
+    modeBarButtonsToRemove: ['lasso2d', 'select2d'],
+  };
+  Plotly.newPlot(chartEl, traces, layout, config);
+}
 
-  safeInitChartFromResult(result);
-  safeInitMapFromResult(result);
-});
+function initMapFromResult(payload) {
+  if (!payload || typeof payload !== 'object') {
+    console.debug('analysis payload missing, skipping map render.');
+    return;
+  }
+  if (typeof L === 'undefined' || typeof L.map !== 'function') {
+    console.debug('Leaflet not available, skipping map render.');
+    return;
+  }
+  const mapEl = document.getElementById('drive-map');
+  if (!mapEl) {
+    console.debug('drive map container not found, skipping map render.');
+    return;
+  }
+  const mapSource = payload.map || (payload.analysis && payload.analysis.map) || {};
+  if (!mapSource || typeof mapSource !== 'object') {
+    console.debug('map data missing from payload, skipping map render.');
+    return;
+  }
+  const points = Array.isArray(mapSource.points) ? mapSource.points : [];
+  const bounds = Array.isArray(mapSource.bounds) ? mapSource.bounds : null;
+  const center = mapSource.center || null;
+  if (mapEl.__leafletInstance) {
+    mapEl.__leafletInstance.remove();
+    mapEl.__leafletInstance = null;
+  }
+  const map = L.map(mapEl, { zoomControl: true, scrollWheelZoom: false });
+  mapEl.__leafletInstance = map;
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+  }).addTo(map);
+  const latLngs = points
+    .map((point) => {
+      if (!point || typeof point !== 'object') {
+        return null;
+      }
+      const { lat, lon } = point;
+      const latitude = Number(lat);
+      const longitude = Number(lon);
+      if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
+        return [latitude, longitude];
+      }
+      return null;
+    })
+    .filter(Boolean);
+  if (latLngs.length) {
+    const route = L.polyline(latLngs, { color: '#38bdf8', weight: 3 }).addTo(map);
+    if (bounds && bounds.length === 2) {
+      map.fitBounds(bounds, { padding: [16, 16] });
+    } else {
+      map.fitBounds(route.getBounds(), { padding: [16, 16] });
+    }
+    L.circleMarker(latLngs[0], {
+      radius: 5,
+      color: '#22c55e',
+      fillColor: '#22c55e',
+      fillOpacity: 1,
+    }).addTo(map);
+    L.circleMarker(latLngs[latLngs.length - 1], {
+      radius: 5,
+      color: '#ef4444',
+      fillColor: '#ef4444',
+      fillOpacity: 1,
+    }).addTo(map);
+  } else if (center && Number.isFinite(center.lat) && Number.isFinite(center.lon)) {
+    map.setView([center.lat, center.lon], 13);
+  } else {
+    console.debug('no map geometry found, skipping map render.');
+  }
+}
+
+function safeInitCharts(payload) {
+  try {
+    initChartsFromResult(payload);
+  } catch (error) {
+    console.warn('chart render failed:', error);
+  }
+}
+
+function safeInitMap(payload) {
+  try {
+    initMapFromResult(payload);
+  } catch (error) {
+    console.warn('map render failed:', error);
+  }
+}
+
+function init() {
+  const payload = window.__RDE_RESULT__;
+  if (!payload) {
+    console.warn('No analysis payload found, skipping chart/map render.');
+    return;
+  }
+  safeInitCharts(payload);
+  safeInitMap(payload);
+}
+
+document.addEventListener('DOMContentLoaded', init);
