@@ -2669,54 +2669,221 @@ async def export_pdf(request: Request) -> Response:
 
 @router.post("/export_zip", include_in_schema=False)
 async def export_zip(request: Request) -> Response:
-    hx_request = False
-    raw_results: Mapping[str, Any] | None = None
+    try:
+        payload = await request.json()
+    except Exception:  # pragma: no cover - FastAPI handles parsing
+        payload = None
 
-    content_type = request.headers.get("content-type", "")
-    if "application/x-www-form-urlencoded" in content_type or "multipart/form-data" in content_type:
-        form = await request.form()
-        if "results_json" in form:
-            hx_request = True
-            results_json_value = form.get("results_json") or ""
-            if not results_json_value:
-                return _export_error_html("Results payload is required.", status.HTTP_400_BAD_REQUEST)
-            try:
-                parsed_results = json.loads(html.unescape(results_json_value))
-            except json.JSONDecodeError:
-                return _export_error_html("Invalid results payload.", status.HTTP_400_BAD_REQUEST)
-            if not isinstance(parsed_results, Mapping):
-                return _export_error_html("Invalid results payload.", status.HTTP_400_BAD_REQUEST)
-            raw_results = dict(parsed_results)
+    results_data: dict[str, Any] = {}
+    if isinstance(payload, Mapping):
+        candidate = payload.get("results", {}) if payload else {}
+        if isinstance(candidate, Mapping):
+            results_data = dict(candidate)
 
-    if raw_results is None:
-        try:
-            payload = await request.json()
-        except Exception as exc:  # pragma: no cover - FastAPI handles parsing
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Invalid JSON payload.") from exc
-
-        if not isinstance(payload, Mapping):
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Payload must be a JSON object.")
-
-        raw_results = payload.get("results")
-        if not isinstance(raw_results, Mapping):
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Results payload is required.")
+    summary_value: Mapping[str, Any] | dict[str, Any] = {}
+    quality_value: Mapping[str, Any] | dict[str, Any] = {}
+    evidence_value: list[Any] = []
 
     try:
-        results_payload = _generate_zip_export_results(raw_results)
-    except HTTPException as exc:
-        if hx_request:
-            detail_text = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
-            return _export_error_html(detail_text, exc.status_code)
-        raise
-    except Exception as exc:  # pragma: no cover - defensive guard
-        if hx_request:
-            return _export_error_html(str(exc), status.HTTP_500_INTERNAL_SERVER_ERROR)
-        raise
+        raw_summary = results_data.get("summary")
+        if isinstance(raw_summary, Mapping):
+            summary_value = raw_summary
 
-    if hx_request:
-        return _export_success_html("ZIP")
+        raw_quality = results_data.get("quality")
+        if isinstance(raw_quality, Mapping):
+            quality_value = raw_quality
 
-    return legacy_respond_success(results_payload)
+        raw_evidence = results_data.get("evidence")
+        if isinstance(raw_evidence, Mapping):
+            evidence_value = [raw_evidence]
+        elif isinstance(raw_evidence, (list, tuple, set)):
+            evidence_value = [item for item in raw_evidence if item is not None]
+        elif raw_evidence is not None:
+            evidence_value = [raw_evidence]
+
+        regulation_value = results_data.get("regulation")
+        if isinstance(regulation_value, Mapping):
+            regulation_label = regulation_value.get("label") or regulation_value.get("status") or ""
+        else:
+            regulation_label = ""
+
+        summary_label = ""
+        if isinstance(summary_value, Mapping):
+            summary_label_candidate = summary_value.get("label") or summary_value.get("status") or ""
+            if isinstance(summary_label_candidate, str):
+                summary_label = summary_label_candidate
+
+        status_label = results_data.get("status_label") or summary_label or regulation_label or "Unknown"
+        status_label_text = html.escape(str(status_label))
+
+        summary_text: str = ""
+        if isinstance(summary_value, Mapping):
+            candidate_text = (
+                summary_value.get("markdown")
+                or summary_value.get("text")
+                or summary_value.get("description")
+                or ""
+            )
+            if isinstance(candidate_text, (dict, list)):
+                candidate_text = json.dumps(candidate_text, indent=2)
+            summary_text = str(candidate_text)
+        summary_html = (
+            f"<p>{html.escape(summary_text)}</p>" if summary_text else "<p>No summary available.</p>"
+        )
+
+        quality_summary = ""
+        if isinstance(quality_value, Mapping):
+            quality_summary_value = quality_value.get("summary")
+            if isinstance(quality_summary_value, Mapping):
+                quality_summary_candidate = (
+                    quality_summary_value.get("text")
+                    or quality_summary_value.get("description")
+                    or quality_summary_value.get("label")
+                    or ""
+                )
+            else:
+                quality_summary_candidate = quality_summary_value or quality_value.get("label") or ""
+            if isinstance(quality_summary_candidate, (dict, list)):
+                quality_summary_candidate = json.dumps(quality_summary_candidate, indent=2)
+            if quality_summary_candidate:
+                quality_summary = str(quality_summary_candidate)
+        quality_html = (
+            f"<p>{html.escape(quality_summary)}</p>"
+            if quality_summary
+            else "<p>No quality diagnostics available.</p>"
+        )
+
+        evidence_items: list[str] = []
+        for item in evidence_value:
+            evidence_items.append(f"<li>{html.escape(str(item))}</li>")
+        evidence_html = (
+            f"<ul>{''.join(evidence_items)}</ul>" if evidence_items else "<p>No evidence provided.</p>"
+        )
+
+        index_html = f"""<!DOCTYPE html>
+<html lang=\"en\">
+<head>
+<meta charset=\"utf-8\" />
+<title>RDE Analysis Export</title>
+<style>
+body {{ font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f172a; color: #e2e8f0; padding: 2rem; }}
+section {{ margin-top: 1.5rem; padding: 1.5rem; background: rgba(15, 23, 42, 0.65); border-radius: 1rem; border: 1px solid rgba(148, 163, 184, 0.2); }}
+h1 {{ font-size: 1.5rem; margin-bottom: 0.5rem; }}
+.status {{ display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.35rem 0.85rem; border-radius: 9999px; background: rgba(52, 211, 153, 0.15); color: #34d399; font-weight: 600; font-size: 0.875rem; letter-spacing: 0.02em; }}
+h2 {{ font-size: 1.1rem; margin-bottom: 0.75rem; }}
+ul {{ margin: 0; padding-left: 1.25rem; }}
+li {{ margin-bottom: 0.5rem; }}
+</style>
+</head>
+<body>
+<header>
+  <h1>RDE Analysis Export</h1>
+  <div class=\"status\">{status_label_text}</div>
+</header>
+<section>
+  <h2>Summary</h2>
+  {summary_html}
+</section>
+<section>
+  <h2>Quality</h2>
+  {quality_html}
+</section>
+<section>
+  <h2>Evidence</h2>
+  {evidence_html}
+</section>
+</body>
+</html>
+"""
+
+        diagnostics_payload = {
+            "summary": summary_value if isinstance(summary_value, Mapping) else {},
+            "quality": quality_value if isinstance(quality_value, Mapping) else {},
+            "evidence": results_data.get("evidence", []),
+        }
+        diagnostics_json = json.dumps(
+            diagnostics_payload,
+            indent=2,
+            default=lambda value: str(value),
+        )
+    except Exception:
+        diagnostics_json = json.dumps(
+            {
+                "summary": {},
+                "quality": {},
+                "evidence": [],
+            },
+            indent=2,
+        )
+        index_html = """<!DOCTYPE html>
+<html lang=\"en\">
+<head>
+<meta charset=\"utf-8\" />
+<title>RDE Analysis Export</title>
+<style>
+body { font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f172a; color: #e2e8f0; padding: 2rem; }
+.status { display: inline-flex; align-items: center; padding: 0.35rem 0.85rem; border-radius: 9999px; background: rgba(148, 163, 184, 0.2); color: #e2e8f0; font-weight: 600; }
+</style>
+</head>
+<body>
+<header>
+  <h1>RDE Analysis Export</h1>
+  <div class=\"status\">Unavailable</div>
+</header>
+<section>
+  <h2>Summary</h2>
+  <p>No summary available.</p>
+</section>
+<section>
+  <h2>Quality</h2>
+  <p>No quality diagnostics available.</p>
+</section>
+<section>
+  <h2>Evidence</h2>
+  <p>No evidence provided.</p>
+</section>
+</body>
+</html>
+"""
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("index.html", index_html)
+        archive.writestr("diagnostics.json", diagnostics_json)
+    buffer.seek(0)
+    zip_b64 = base64.b64encode(buffer.read()).decode("utf-8")
+
+    response_payload = dict(results_data)
+
+    diagnostics_messages: list[str] = []
+    raw_diagnostics = response_payload.get("diagnostics")
+    if isinstance(raw_diagnostics, list):
+        diagnostics_messages = [str(item) for item in raw_diagnostics]
+    elif raw_diagnostics:
+        diagnostics_messages = [str(raw_diagnostics)]
+    diagnostics_messages.append("Download ZIP ready")
+    response_payload["diagnostics"] = diagnostics_messages
+
+    existing_attachments: list[dict[str, Any]] = []
+    raw_attachments = response_payload.get("attachments")
+    if isinstance(raw_attachments, list):
+        for item in raw_attachments:
+            if isinstance(item, Mapping):
+                existing_attachments.append(dict(item))
+
+    attachment = {
+        "filename": "rde_export.zip",
+        "media_type": "application/zip",
+        "content_base64": zip_b64,
+    }
+    response_payload["attachments"] = [attachment, *existing_attachments]
+
+    return JSONResponse(
+        status_code=200,
+        content={
+            "results_payload": response_payload,
+        },
+    )
 
 
 @router.post(
