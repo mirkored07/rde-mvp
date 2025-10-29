@@ -301,7 +301,7 @@
       <h3 class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-300">Charts &amp; KPIs</h3>
       <p class="mt-1 text-[11px] text-slate-400">Interactive time series for vehicle speed and pollutant emissions.</p>
       <div class="mt-4 rounded-xl border border-slate-700/70 bg-slate-900/60 p-3 shadow-inner">
-        <div id="timeseries-chart" class="h-64 w-full"></div>
+        <div id="chart-card" class="h-64 w-full"></div>
       </div>
     </div>
     <div class="rounded-2xl border border-slate-700/70 bg-slate-900/40 p-4 shadow-card">
@@ -342,8 +342,16 @@
      dev browser was blocking the resources due to hash mismatch.
      In production we can restore SRI, but for local dev we allow load. -->
 
-{% set _results_json = (results_payload or {}) | tojson %}
-<script>window.__RDE_RESULT__ = {% if has_results %}{{ _results_json | safe }}{% else %}null{% endif %};</script>
+{# Inject analysis results BEFORE running app.js #}
+{% if results_payload %}
+<script>
+  window.__RDE_RESULT__ = {{ results_payload | tojson | safe }};
+</script>
+{% else %}
+<script>
+  window.__RDE_RESULT__ = null;
+</script>
+{% endif %}
 
 <script src="/static/js/plotly.min.js"></script>
 
