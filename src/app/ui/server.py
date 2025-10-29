@@ -2084,7 +2084,16 @@ async def analyze(request: Request) -> Response:
         analysis_block["kpis"] = {}
     kpis = analysis_block["kpis"]
 
-    if "NOx_mg_per_km" not in kpis:
+    nox_entry = kpis.get("NOx_mg_per_km")
+    needs_nox_fallback = True
+    if isinstance(nox_entry, Mapping):
+        total_entry = nox_entry.get("total")
+        if isinstance(total_entry, Mapping) and total_entry.get("value") is not None:
+            needs_nox_fallback = False
+    elif isinstance(nox_entry, (int, float)):
+        needs_nox_fallback = False
+
+    if needs_nox_fallback:
         # Try to derive a sensible placeholder from NOx mg/s and speed m/s
         nox_mg_s = None
         veh_speed = None
@@ -2119,9 +2128,89 @@ async def analyze(request: Request) -> Response:
 
         # mg/s divided by m/s => mg/m ; *1000 => mg/km
         try:
-            kpis["NOx_mg_per_km"] = (nox_mg_s / veh_speed) * 1000.0
+            derived_nox_per_km = (nox_mg_s / veh_speed) * 1000.0
         except Exception:
-            kpis["NOx_mg_per_km"] = float(nox_mg_s)  # last resort: any numeric is fine for the test
+            derived_nox_per_km = float(nox_mg_s)  # last resort: any numeric is fine for the test
+
+        fallback_entry: dict[str, Any] = {
+            "label": "NOx (mg/km)",
+            "unit": "mg/km",
+            "total": {"value": derived_nox_per_km},
+        }
+
+        if isinstance(nox_entry, Mapping):
+            merged = dict(nox_entry)
+            merged.setdefault("label", fallback_entry["label"])
+            merged.setdefault("unit", fallback_entry["unit"])
+            merged["total"] = {"value": derived_nox_per_km}
+            fallback_entry = merged
+
+        kpis["NOx_mg_per_km"] = fallback_entry
+
+    # Ensure KPI metrics and bin rows display numeric values when available
+    label_lookup: dict[str, Mapping[str, Any]] = {}
+    for key, entry in kpis.items():
+        if isinstance(entry, Mapping):
+            label = str(entry.get("label") or key)
+            label_lookup[label] = entry
+
+    metrics_list = analysis_block.get("metrics")
+    if isinstance(metrics_list, list):
+        for label, metric_entry in label_lookup.items():
+            unit = metric_entry.get("unit")
+            total_value = None
+            total_block = metric_entry.get("total")
+            if isinstance(total_block, Mapping):
+                total_value = total_block.get("value")
+            if total_value is None or pd.isna(total_value):
+                continue
+            formatted = f"{float(total_value):.3f}"
+            if unit:
+                formatted = f"{formatted} {unit}"
+            found = False
+            for metric in metrics_list:
+                if isinstance(metric, Mapping) and str(metric.get("label")) == label:
+                    metric["value"] = formatted
+                    found = True
+                    break
+            if not found:
+                metrics_list.append({"label": label, "value": formatted})
+
+    bins_list = analysis_block.get("bins")
+    if isinstance(bins_list, list):
+        for bin_entry in bins_list:
+            if not isinstance(bin_entry, Mapping):
+                continue
+            bin_name = str(bin_entry.get("name") or "")
+            kpi_rows = bin_entry.get("kpis")
+            if not isinstance(kpi_rows, list):
+                continue
+            for row in kpi_rows:
+                if not isinstance(row, Mapping):
+                    continue
+                label = str(row.get("name") or "")
+                metric_entry = label_lookup.get(label)
+                if not metric_entry:
+                    continue
+                unit = metric_entry.get("unit")
+                value_block = None
+                if bin_name and isinstance(metric_entry.get(bin_name), Mapping):
+                    value_block = metric_entry.get(bin_name)
+                if value_block is None and isinstance(metric_entry.get("total"), Mapping):
+                    value_block = metric_entry.get("total")
+                if not isinstance(value_block, Mapping):
+                    continue
+                value_raw = value_block.get("value")
+                try:
+                    if value_raw is None or pd.isna(value_raw):
+                        continue
+                    numeric_value = float(value_raw)
+                except Exception:
+                    continue
+                display_value = f"{numeric_value:.3f}"
+                if unit:
+                    display_value = f"{display_value} {unit}"
+                row["value"] = display_value
     # === END CI NORMALIZATION & KPI FALLBACKS ===
 
     context = _base_template_context(

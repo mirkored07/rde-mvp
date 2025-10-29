@@ -697,12 +697,22 @@
 
   function initChartFromResult(result, targetId = CHART_TARGET_ID) {
     const chartEl = document.getElementById(targetId);
-    if (!chartEl) return;
+    if (!chartEl) {
+      console.warn(`initChartFromResult: container "${targetId}" not found`);
+      return;
+    }
 
-    if (!result || !window.Plotly) {
+    if (!result) {
+      console.warn("initChartFromResult: missing result payload", result);
       if (window.Plotly) {
         window.Plotly.purge(chartEl);
       }
+      chartEl.dataset.chartReady = "false";
+      return;
+    }
+
+    if (!window.Plotly) {
+      console.warn("initChartFromResult: Plotly library unavailable");
       chartEl.dataset.chartReady = "false";
       return;
     }
@@ -711,6 +721,7 @@
     if (!chartPayload || typeof chartPayload !== "object") {
       window.Plotly.purge(chartEl);
       chartEl.dataset.chartReady = "false";
+      console.warn("initChartFromResult: chart payload missing or invalid", chartPayload);
       return;
     }
 
@@ -762,6 +773,7 @@
       window.Plotly.purge(chartEl);
       chartEl.innerHTML = `<div class="flex h-full items-center justify-center text-xs text-slate-400 dark:text-slate-500">No chart data available.</div>`;
       chartEl.dataset.chartReady = "false";
+      console.warn("initChartFromResult: no traces available for plotting", chartPayload);
       return;
     }
 
@@ -893,12 +905,21 @@
   const MAP_TARGET_ID = "drive-map";
 
   function initMapFromResult(result, targetId = MAP_TARGET_ID) {
-    if (!result || typeof window.L === "undefined") {
+    if (!result) {
+      console.warn("initMapFromResult: missing result payload", result);
+      return;
+    }
+
+    if (typeof window.L === "undefined") {
+      console.warn("initMapFromResult: Leaflet library unavailable");
       return;
     }
 
     const mapEl = document.getElementById(targetId);
-    if (!mapEl) return;
+    if (!mapEl) {
+      console.warn(`initMapFromResult: container "${targetId}" not found`);
+      return;
+    }
 
     const mapData =
       (result.analysis && typeof result.analysis === "object" ? result.analysis.map : undefined) ||
@@ -906,17 +927,49 @@
       null;
 
     if (!mapData || typeof mapData !== "object") {
+      console.warn("initMapFromResult: map payload missing or invalid", mapData);
       return;
     }
 
     const { center, points, bounds } = mapData;
-    const centerLat = Number(center?.lat);
-    const centerLon = Number(center?.lon);
-    if (!Number.isFinite(centerLat) || !Number.isFinite(centerLon)) {
+
+    if (!Array.isArray(points) || points.length === 0) {
+      console.warn("initMapFromResult: no map points available", mapData);
       return;
     }
 
-    if (!Array.isArray(points) || points.length === 0) {
+    const latlngs = points
+      .map((p) => {
+        if (!p) return null;
+        const lat = Number(p.lat);
+        const lon = Number(p.lon);
+        if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+        return [lat, lon];
+      })
+      .filter(Boolean);
+
+    if (latlngs.length === 0) {
+      console.warn("initMapFromResult: map points missing valid coordinates", mapData);
+      return;
+    }
+
+    let centerLat = Number(center?.lat);
+    let centerLon = Number(center?.lon);
+    if (!Number.isFinite(centerLat) || !Number.isFinite(centerLon)) {
+      const sum = latlngs.reduce(
+        (acc, value) => {
+          acc.lat += value[0];
+          acc.lon += value[1];
+          return acc;
+        },
+        { lat: 0, lon: 0 },
+      );
+      centerLat = sum.lat / latlngs.length;
+      centerLon = sum.lon / latlngs.length;
+    }
+
+    if (!Number.isFinite(centerLat) || !Number.isFinite(centerLon)) {
+      console.warn("initMapFromResult: unable to determine map center", mapData);
       return;
     }
 
@@ -936,20 +989,6 @@
       attribution: "&copy; OpenStreetMap contributors",
     }).addTo(map);
 
-    const latlngs = points
-      .map((p) => {
-        if (!p) return null;
-        const lat = Number(p.lat);
-        const lon = Number(p.lon);
-        if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
-        return [lat, lon];
-      })
-      .filter(Boolean);
-
-    if (latlngs.length === 0) {
-      return;
-    }
-
     const route = L.polyline(latlngs, {
       color: "#38bdf8",
       weight: 3,
@@ -964,6 +1003,7 @@
     }
 
     mapEl._leafletInstance = map;
+    mapEl.dataset.mapReady = "true";
   }
 
   window.initMapFromResult = initMapFromResult;
