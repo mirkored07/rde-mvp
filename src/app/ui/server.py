@@ -819,6 +819,18 @@ def _format_metric(label: str, value: float | None, suffix: str) -> dict[str, st
     return {"label": label, "value": display}
 
 
+def _normalize_kpi_key(raw_key: str) -> str:
+    key = str(raw_key or "").strip()
+    if not key:
+        return "kpi"
+    lowered = key.lower()
+    if "nox" in lowered and "km" in lowered:
+        return "NOx_mg_per_km"
+    if lowered.startswith("pn") and "km" in lowered:
+        return "PN_1_per_km"
+    return key.replace(" ", "_").replace("/", "_per_")
+
+
 def _format_value(value: float | None, units: str | None, *, decimals: int | None = None) -> str:
     if value is None or pd.isna(value):
         return "n/a"
@@ -907,12 +919,14 @@ def _prepare_results(
     bins_payload = result.analysis.get("bins") or {}
     kpi_order = [key for key in kpi_payload if isinstance(kpi_payload.get(key), Mapping)]
     bin_rows: list[dict[str, Any]] = []
+
     for name, info in bins_payload.items():
         time_s = info.get("time_s")
         distance_km = info.get("distance_km")
         raw_kpis = info.get("kpis")
         kpi_map = dict(raw_kpis) if isinstance(raw_kpis, Mapping) else {}
         kpi_rows: list[dict[str, str]] = []
+        kpi_values: dict[str, float] = {}
 
         for key in kpi_order:
             metric_info = kpi_payload.get(key)
@@ -921,12 +935,17 @@ def _prepare_results(
             label = str(metric_info.get("label") or key)
             unit = metric_info.get("unit")
             raw_value = kpi_map.get(key)
-            if raw_value is None or pd.isna(raw_value):
-                display = "n/a"
-            else:
-                display = f"{float(raw_value):.3f}"
-                if unit:
-                    display = f"{display} {unit}"
+            display = "n/a"
+            if raw_value is not None and not pd.isna(raw_value):
+                try:
+                    numeric = float(raw_value)
+                except Exception:
+                    numeric = None
+                else:
+                    display = f"{numeric:.3f}"
+                    if unit:
+                        display = f"{display} {unit}"
+                    kpi_values[_normalize_kpi_key(key)] = numeric
             kpi_rows.append({"name": label, "value": display})
 
         extra_keys = [extra for extra in kpi_map.keys() if extra not in kpi_order]
@@ -935,7 +954,13 @@ def _prepare_results(
             if raw_value is None or pd.isna(raw_value):
                 display = "n/a"
             else:
-                display = f"{float(raw_value):.3f}"
+                try:
+                    numeric = float(raw_value)
+                except Exception:
+                    display = "n/a"
+                else:
+                    display = f"{numeric:.3f}"
+                    kpi_values[_normalize_kpi_key(extra)] = numeric
             kpi_rows.append({"name": extra, "value": display})
 
         bin_rows.append(
@@ -944,18 +969,75 @@ def _prepare_results(
                 "valid": bool(info.get("valid")),
                 "time": f"{float(time_s):.1f}" if isinstance(time_s, (int, float)) else "0.0",
                 "distance": f"{float(distance_km):.3f}" if isinstance(distance_km, (int, float)) else "0.000",
-                "kpis": kpi_rows,
+                "kpis": kpi_values,
+                "kpi_rows": kpi_rows,
             }
         )
 
     chart_payload = _prepare_chart_payload(result.derived)
     map_payload = _prepare_map_payload(result.derived)
 
+    def _resolve_rule_observed(metric_path: str | None) -> float | None:
+        if not metric_path:
+            return None
+        parts = str(metric_path).split(".")
+        if not parts:
+            return None
+        head = parts[0]
+        if head == "kpis" and len(parts) >= 2:
+            kpi_name = parts[1]
+            if len(parts) >= 3:
+                bin_name = parts[2]
+                bin_info = bins_payload.get(bin_name)
+                if isinstance(bin_info, Mapping):
+                    bin_kpis = bin_info.get("kpis")
+                    if isinstance(bin_kpis, Mapping):
+                        value = bin_kpis.get(kpi_name)
+                        if value is not None and not pd.isna(value):
+                            try:
+                                return float(value)
+                            except Exception:
+                                return None
+            kpi_info = kpi_payload.get(kpi_name)
+            if isinstance(kpi_info, Mapping):
+                total_block = kpi_info.get("total")
+                if isinstance(total_block, Mapping):
+                    value = total_block.get("value")
+                    if value is not None and not pd.isna(value):
+                        try:
+                            return float(value)
+                        except Exception:
+                            return None
+                value = kpi_info.get("value")
+                if value is not None and not pd.isna(value):
+                    try:
+                        return float(value)
+                    except Exception:
+                        return None
+        if head in bins_payload:
+            current: Any = bins_payload.get(head)
+            for key in parts[1:]:
+                if isinstance(current, Mapping):
+                    current = current.get(key)
+                else:
+                    current = None
+                    break
+            if current is not None and not pd.isna(current):
+                try:
+                    return float(current)
+                except Exception:
+                    return None
+        return None
+
     evidence_rows: list[dict[str, Any]] = []
     for item in evaluation.evidence:
         rule = item.rule
         requirement_value = _format_value(rule.threshold, rule.units)
         observed_value = _format_value(item.actual, rule.units)
+        if observed_value == "n/a":
+            resolved_actual = _resolve_rule_observed(rule.metric)
+            if resolved_actual is not None:
+                observed_value = _format_value(resolved_actual, rule.units)
         requirement = (
             f"{rule.comparator} {requirement_value}"
             if requirement_value != "n/a"
@@ -2182,35 +2264,56 @@ async def analyze(request: Request) -> Response:
             if not isinstance(bin_entry, Mapping):
                 continue
             bin_name = str(bin_entry.get("name") or "")
-            kpi_rows = bin_entry.get("kpis")
-            if not isinstance(kpi_rows, list):
-                continue
-            for row in kpi_rows:
-                if not isinstance(row, Mapping):
-                    continue
-                label = str(row.get("name") or "")
-                metric_entry = label_lookup.get(label)
-                if not metric_entry:
-                    continue
-                unit = metric_entry.get("unit")
-                value_block = None
-                if bin_name and isinstance(metric_entry.get(bin_name), Mapping):
-                    value_block = metric_entry.get(bin_name)
-                if value_block is None and isinstance(metric_entry.get("total"), Mapping):
-                    value_block = metric_entry.get("total")
-                if not isinstance(value_block, Mapping):
-                    continue
-                value_raw = value_block.get("value")
-                try:
-                    if value_raw is None or pd.isna(value_raw):
+            kpi_rows = bin_entry.get("kpi_rows")
+            if isinstance(kpi_rows, list):
+                for row in kpi_rows:
+                    if not isinstance(row, Mapping):
                         continue
-                    numeric_value = float(value_raw)
-                except Exception:
-                    continue
-                display_value = f"{numeric_value:.3f}"
-                if unit:
-                    display_value = f"{display_value} {unit}"
-                row["value"] = display_value
+                    label = str(row.get("name") or "")
+                    metric_entry = label_lookup.get(label)
+                    if not metric_entry:
+                        continue
+                    unit = metric_entry.get("unit")
+                    value_block = None
+                    if bin_name and isinstance(metric_entry.get(bin_name), Mapping):
+                        value_block = metric_entry.get(bin_name)
+                    if value_block is None and isinstance(metric_entry.get("total"), Mapping):
+                        value_block = metric_entry.get("total")
+                    if not isinstance(value_block, Mapping):
+                        continue
+                    value_raw = value_block.get("value")
+                    try:
+                        if value_raw is None or pd.isna(value_raw):
+                            continue
+                        numeric_value = float(value_raw)
+                    except Exception:
+                        continue
+                    display_value = f"{numeric_value:.3f}"
+                    if unit:
+                        display_value = f"{display_value} {unit}"
+                    row["value"] = display_value
+            kpi_values = bin_entry.get("kpis")
+            if isinstance(kpi_values, Mapping):
+                for key, metric_entry in label_lookup.items():
+                    normalized_key = _normalize_kpi_key(key)
+                    if normalized_key in kpi_values:
+                        continue
+                    unit = metric_entry.get("unit")
+                    value_block = None
+                    if bin_name and isinstance(metric_entry.get(bin_name), Mapping):
+                        value_block = metric_entry.get(bin_name)
+                    if value_block is None and isinstance(metric_entry.get("total"), Mapping):
+                        value_block = metric_entry.get("total")
+                    if not isinstance(value_block, Mapping):
+                        continue
+                    raw_value = value_block.get("value")
+                    if raw_value is None or pd.isna(raw_value):
+                        continue
+                    try:
+                        numeric_value = float(raw_value)
+                    except Exception:
+                        continue
+                    kpi_values[_normalize_kpi_key(key)] = numeric_value
     # === END CI NORMALIZATION & KPI FALLBACKS ===
 
     context = _base_template_context(

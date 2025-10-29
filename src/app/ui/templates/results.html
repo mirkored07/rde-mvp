@@ -242,15 +242,37 @@
                 <td class="px-4 py-4">{{ bin.time }}</td>
                 <td class="px-4 py-4">{{ bin.distance }}</td>
                 <td class="px-4 py-4">
-                  {% if bin.kpis %}
-                  <ul class="space-y-1">
-                    {% for kpi in bin.kpis %}
-                    <li><span class="font-medium text-slate-900 dark:text-white">{{ kpi.name }}:</span> {{ kpi.value }}</li>
-                    {% endfor %}
-                  </ul>
+                  {% set bin_kpis = bin.kpis if bin.kpis is mapping else {} %}
+                  {% set extras = namespace(items=[]) %}
+                  {% for row in bin.kpi_rows or [] %}
+                  {% set label = (row.name or '') %}
+                  {% set label_lower = label | lower %}
+                  {% if 'nox' in label_lower and 'km' in label_lower %}
+                  {% elif label_lower.startswith('pn') and 'km' in label_lower %}
                   {% else %}
-                  <span class="text-xs uppercase tracking-[0.3em] text-slate-400 dark:text-slate-500">No KPIs configured</span>
+                  {% set _ = extras.items.append(row) %}
                   {% endif %}
+                  {% endfor %}
+                  {% set display = namespace(has_values=false) %}
+                  <ul class="space-y-1">
+                    {% if bin_kpis and bin_kpis.NOx_mg_per_km is defined %}
+                    {% set display.has_values = True %}
+                    <li><span class="font-medium text-slate-900 dark:text-white">NOx:</span> {{ "%.1f" | format(bin_kpis.NOx_mg_per_km) }} mg/km</li>
+                    {% endif %}
+                    {% if bin_kpis and bin_kpis.PN_1_per_km is defined %}
+                    {% set display.has_values = True %}
+                    <li><span class="font-medium text-slate-900 dark:text-white">PN:</span> {{ "%.2g" | format(bin_kpis.PN_1_per_km) }} 1/km</li>
+                    {% endif %}
+                    {% for extra in extras.items %}
+                    {% if extra.value and extra.value != 'n/a' %}
+                    {% set display.has_values = True %}
+                    <li><span class="font-medium text-slate-900 dark:text-white">{{ extra.name }}:</span> {{ extra.value }}</li>
+                    {% endif %}
+                    {% endfor %}
+                    {% if not display.has_values %}
+                    <li><span class="text-slate-500">no KPI configured</span></li>
+                    {% endif %}
+                  </ul>
                 </td>
               </tr>
               {% endfor %}
@@ -267,21 +289,22 @@
     <script id="summary-data" type="application/json">{{ analysis.summary_md | tojson }}</script>
   </div>
 
-  <div class="mt-10 grid gap-6 lg:grid-cols-2">
-    <section class="rounded-3xl border border-slate-200/70 bg-slate-900/5 p-6 shadow-card dark:border-slate-700/70 dark:bg-slate-900/40">
-      <h3 class="text-sm font-semibold uppercase tracking-[0.3em] text-slate-500 dark:text-slate-300">Charts &amp; KPIs</h3>
-      <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">Interactive time series for vehicle speed and pollutant emissions.</p>
-      <div id="time-series-chart" class="mt-4 h-[320px] w-full rounded-2xl border border-slate-700/50 bg-slate-900/40 shadow-inner dark:border-slate-600/70"></div>
-    </section>
-
-    <section class="rounded-3xl border border-slate-200/70 bg-slate-900/5 p-6 shadow-card dark:border-slate-700/70 dark:bg-slate-900/40">
-      <h3 class="text-sm font-semibold uppercase tracking-[0.3em] text-slate-500 dark:text-slate-300">Drive map</h3>
-      <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">Leaflet trace of the fused GPS route.</p>
-      <div id="drive-map" class="mt-4 h-[320px] w-full overflow-hidden rounded-2xl border border-slate-700/50 bg-slate-900/40 shadow-inner dark:border-slate-600/70"></div>
-    </section>
-  </div>
-
-  <script id="analysis-results-payload" type="application/json" data-results-payload>{{ (results_payload or {}) | tojson | safe }}</script>
+  <section class="mt-10 grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-2">
+    <div class="rounded-2xl border border-slate-700/70 bg-slate-900/40 p-4 shadow-card">
+      <h3 class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-300">Charts &amp; KPIs</h3>
+      <p class="mt-1 text-[11px] text-slate-400">Interactive time series for vehicle speed and pollutant emissions.</p>
+      <div class="mt-4 rounded-xl border border-slate-700/70 bg-slate-900/60 p-3 shadow-inner">
+        <div id="timeseries-chart" class="h-64 w-full"></div>
+      </div>
+    </div>
+    <div class="rounded-2xl border border-slate-700/70 bg-slate-900/40 p-4 shadow-card">
+      <h3 class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-300">Drive map</h3>
+      <p class="mt-1 text-[11px] text-slate-400">Leaflet trace of the fused GPS route.</p>
+      <div class="mt-4 rounded-xl border border-slate-700/70 bg-slate-900/60 shadow-inner">
+        <div id="drive-map" class="h-64 w-full rounded-xl"></div>
+      </div>
+    </div>
+  </section>
   {% if include_export_controls %}
   <div class="mt-10 rounded-3xl border border-slate-200/70 bg-white/95 p-6 shadow-card dark:border-slate-800/70 dark:bg-slate-900/80">
     <h3 class="text-sm font-semibold uppercase tracking-[0.3em] text-slate-500 dark:text-slate-400">Export report</h3>
@@ -312,33 +335,14 @@
      dev browser was blocking the resources due to hash mismatch.
      In production we can restore SRI, but for local dev we allow load. -->
 
-<!-- Local Leaflet CSS -->
-<link rel="stylesheet" href="/static/leaflet/leaflet.css" />
+{% set _results_json = (results_payload or {}) | tojson %}
+<script>window.__RDE_RESULT__ = {% if has_results %}{{ _results_json | safe }}{% else %}null{% endif %};</script>
 
-<!-- Local Leaflet JS -->
-<script src="/static/leaflet/leaflet.js"></script>
-
-<!-- Plotly JS -->
 <script src="/static/js/plotly.min.js"></script>
 
-{% set _results_json = (results_payload or {}) | tojson %}
-<script>
-  window.__RDE_RESULT__ = {% if has_results %}{{ _results_json | safe }}{% else %}null{% endif %};
-</script>
+<script src="/static/leaflet/leaflet.js"></script>
 
-<!-- Our client-side renderer -->
+<link rel="stylesheet" href="/static/leaflet/leaflet.css" />
+
 <script src="/static/js/app.js"></script>
-
-<script>
-  document.addEventListener("DOMContentLoaded", () => {
-    if (window.__RDE_RESULT__) {
-      if (window.initChartFromResult) {
-        window.initChartFromResult(window.__RDE_RESULT__, "time-series-chart");
-      }
-      if (window.initMapFromResult) {
-        window.initMapFromResult(window.__RDE_RESULT__, "drive-map");
-      }
-    }
-  });
-</script>
 
