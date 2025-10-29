@@ -77,6 +77,22 @@ def _post_analysis() -> dict[str, object]:
     assert "results_payload" in body
     return body["results_payload"]  # type: ignore[return-value]
 
+def _post_analysis_html() -> str:
+    response = client.post(
+        "/analyze",
+        files={
+            "pems_file": ("pems.csv", PEMS_SAMPLE.encode("utf-8"), "text/csv"),
+            "gps_file": ("gps.csv", GPS_SAMPLE.encode("utf-8"), "text/csv"),
+            "ecu_file": ("ecu.csv", ECU_SAMPLE.encode("utf-8"), "text/csv"),
+        },
+        headers={"accept": "text/html"},
+    )
+    assert response.status_code == 200
+    return response.text
+
+
+
+
 
 def test_index_page_renders() -> None:
     response = client.get("/")
@@ -374,18 +390,22 @@ def test_export_pdf_reports_missing_dependency() -> None:
 
 
 def test_analysis_results_page_renders_html() -> None:
-    response = client.post(
-        "/analyze",
-        files={
-            "pems_file": ("pems.csv", PEMS_SAMPLE.encode("utf-8"), "text/csv"),
-            "gps_file": ("gps.csv", GPS_SAMPLE.encode("utf-8"), "text/csv"),
-            "ecu_file": ("ecu.csv", ECU_SAMPLE.encode("utf-8"), "text/csv"),
-        },
-        headers={"accept": "text/html"},
-    )
-    assert response.status_code == 200
-    assert "<div id=\"drive-map\"" in response.text
-    assert "Charts &amp; KPIs" in response.text
-    assert "window.__RDE_RESULT__ =" in response.text
-    assert "data-results-payload" in response.text
+    html = _post_analysis_html()
+    assert "id=\"analysis-chart\"" in html
+    assert "id=\"drive-map\"" in html
+    assert "window.__RDE_RESULT__ =" in html
+    assert "/static/js/app.js" in html
+
+def test_results_page_includes_map_container() -> None:
+    html = _post_analysis_html()
+    assert "id=\"drive-map\"" in html
+
+
+def test_payload_script_precedes_app_bundle() -> None:
+    html = _post_analysis_html()
+    payload_index = html.find("window.__RDE_RESULT__ =")
+    bundle_index = html.find("/static/js/app.js")
+    assert payload_index != -1 and bundle_index != -1
+    assert payload_index < bundle_index
+
 
