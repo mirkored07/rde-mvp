@@ -685,91 +685,148 @@
       initializeResults(event.target);
       const payload = getResultPayload();
       if (payload) {
-        initTimeseriesChart(payload);
-        initDriveMap(payload);
+        safeInitChartFromResult(payload);
+        safeInitMapFromResult(payload);
       }
     }
   });
 })();
 
-function initTimeseriesChart(result) {
-  const el = document.getElementById("timeseries-chart");
-  if (!el) return;
-  const chart = result.analysis?.chart || result.chart;
-  if (!chart) return;
-
-  const t = chart.times || [];
-  const speedTrace = {
-    x: t,
-    y: chart.speed?.values || [],
-    name: chart.speed?.label || "Speed",
-    yaxis: "y1",
-    type: "scatter",
-    mode: "lines",
-    line: { width: 1.5 },
-  };
-  const pollutantTraces = (chart.pollutants || []).map((p) => ({
-    x: p.t || t,
-    y: p.y || p.values || [],
-    name: p.key || "pollutant",
-    yaxis: "y2",
-    type: "scatter",
-    mode: "lines",
-    line: { width: 1 },
-  }));
-  const layout = {
-    margin: { t: 10, r: 10, b: 30, l: 40 },
-    paper_bgcolor: "rgba(0,0,0,0)",
-    plot_bgcolor: "rgba(0,0,0,0)",
-    xaxis: { title: "Time", showgrid: false, zeroline: false, color: "#cbd5e1" },
-    yaxis: { title: chart.speed?.label || "Speed", zeroline: false, color: "#cbd5e1" },
-    yaxis2: { title: "Emission rate", overlaying: "y", side: "right", color: "#cbd5e1", zeroline: false },
-    legend: { font: { color: "#cbd5e1", size: 10 }, orientation: "h", y: -0.3 },
-  };
-  Plotly.newPlot(el, [speedTrace, ...pollutantTraces], layout, {
-    displayModeBar: false,
-    responsive: true,
-  });
-}
-
-function initDriveMap(result) {
-  const el = document.getElementById("drive-map");
-  if (!el) return;
-  if (el._leafletInstance) {
-    el._leafletInstance.remove();
-  }
-  const mapData = result.analysis?.map || result.map;
-  if (!mapData) return;
-  const m = L.map(el, {
-    scrollWheelZoom: false,
-    zoomControl: true,
-    attributionControl: false,
-  });
-  el._leafletInstance = m;
-  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    maxZoom: 19,
-  }).addTo(m);
-  const coords = (mapData.points || []).map((p) => [p.lat, p.lon]);
-  if (coords.length > 0) {
-    const line = L.polyline(coords, { color: "#38bdf8", weight: 3 }).addTo(m);
-    if (mapData.bounds && mapData.bounds.length === 2) {
-      m.fitBounds(mapData.bounds);
-    } else {
-      m.fitBounds(line.getBounds());
-    }
-  } else if (mapData.center) {
-    m.setView([mapData.center.lat, mapData.center.lon], 13);
+function domReady(fn) {
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", fn);
   } else {
-    m.setView([0, 0], 2);
+    fn();
   }
 }
 
-(function () {
+function safeInitChartFromResult(result) {
+  const chartEl = document.getElementById("chart-card");
+  const chartData = result && (result.chart || (result.analysis && result.analysis.chart));
+  if (!chartEl || !chartData) return;
+
+  try {
+    const times = chartData.times || [];
+
+    const speedVals = (chartData.speed && chartData.speed.values) || [];
+    const speedTrace = {
+      x: times,
+      y: speedVals,
+      name: "Vehicle speed (m/s)",
+      yaxis: "y1",
+      mode: "lines",
+      line: { width: 1.5 },
+    };
+
+    const pollutantTraces = (chartData.pollutants || []).map((p) => ({
+      x: p.t || times,
+      y: p.y || p.values || [],
+      name: p.key,
+      yaxis: "y2",
+      mode: "lines",
+      line: { width: 1 },
+    }));
+
+    const traces = [speedTrace, ...pollutantTraces];
+
+    const layout = {
+      margin: { t: 16, r: 16, b: 24, l: 40 },
+      paper_bgcolor: "rgba(0,0,0,0)",
+      plot_bgcolor: "rgba(0,0,0,0)",
+      xaxis: {
+        title: "Time",
+        showgrid: false,
+        zeroline: false,
+        color: "#cbd5e1",
+      },
+      yaxis: {
+        title: "Speed (m/s)",
+        zeroline: false,
+        color: "#cbd5e1",
+      },
+      yaxis2: {
+        title: "Emission rate",
+        overlaying: "y",
+        side: "right",
+        zeroline: false,
+        color: "#cbd5e1",
+      },
+      legend: {
+        orientation: "h",
+        y: -0.3,
+        font: { size: 10, color: "#cbd5e1" },
+      },
+    };
+
+    Plotly.newPlot(chartEl, traces, layout, {
+      displaylogo: false,
+      responsive: true,
+    });
+  } catch (err) {
+    console.warn("chart render failed:", err);
+  }
+}
+
+function safeInitMapFromResult(result) {
+  const mapDiv = document.getElementById("drive-map");
+  const mapData = result && (result.analysis && result.analysis.map ? result.analysis.map : result.map);
+  if (!mapDiv || !mapData) return;
+
+  try {
+    const { points, center, bounds } = mapData;
+
+    if (mapDiv._leafletInstance) {
+      mapDiv._leafletInstance.remove();
+    }
+
+    const map = L.map("drive-map", {
+      zoomControl: true,
+      attributionControl: false,
+    });
+    mapDiv._leafletInstance = map;
+
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19,
+    }).addTo(map);
+
+    if (Array.isArray(points) && points.length > 0) {
+      const latlngs = points.map((p) => [p.lat, p.lon]);
+      const route = L.polyline(latlngs, { color: "#38bdf8", weight: 3 }).addTo(map);
+
+      if (Array.isArray(bounds) && bounds.length === 2) {
+        map.fitBounds(bounds);
+      } else {
+        map.fitBounds(route.getBounds());
+      }
+
+      L.circleMarker(latlngs[0], {
+        radius: 5,
+        color: "#22c55e",
+        fillColor: "#22c55e",
+        fillOpacity: 1.0,
+      }).addTo(map);
+
+      L.circleMarker(latlngs[latlngs.length - 1], {
+        radius: 5,
+        color: "#ef4444",
+        fillColor: "#ef4444",
+        fillOpacity: 1.0,
+      }).addTo(map);
+    } else if (center) {
+      map.setView([center.lat, center.lon], 13);
+    }
+  } catch (err) {
+    console.warn("map render failed:", err);
+  }
+}
+
+domReady(() => {
   const result = window.__RDE_RESULT__;
-  if (!result || typeof result !== "object") {
+  if (!result) {
     console.warn("No analysis payload found, skipping chart/map render.");
     return;
   }
-  initTimeseriesChart(result);
-  initDriveMap(result);
-})();
+
+  safeInitChartFromResult(result);
+  safeInitMapFromResult(result);
+});
