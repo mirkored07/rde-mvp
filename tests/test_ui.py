@@ -145,6 +145,9 @@ def test_analysis_endpoint_returns_results() -> None:
     assert isinstance(map_payload, dict)
     points = map_payload.get("points", [])
     assert isinstance(points, list) and points
+    first_point = points[0]
+    assert isinstance(first_point, dict)
+    assert "lat" in first_point and "lon" in first_point
     center = map_payload.get("center", {})
     assert isinstance(center, dict)
     assert center.get("lat") is not None and center.get("lon") is not None
@@ -156,7 +159,25 @@ def test_analysis_endpoint_returns_results() -> None:
     nox_kpi = kpis.get("NOx_mg_per_km")
     assert isinstance(nox_kpi, dict)
     total_block = nox_kpi.get("total", {})
-    assert isinstance(total_block, dict) and total_block.get("value") is not None
+    assert isinstance(total_block, dict)
+    total_value = total_block.get("value")
+    assert isinstance(total_value, (int, float)) and total_value > 0
+
+    evidence_entries = payload.get("evidence", [])
+    assert any(
+        isinstance(entry, dict)
+        and "NOx" in str(entry.get("title"))
+        and entry.get("observed")
+        and entry.get("observed") != "n/a"
+        for entry in evidence_entries
+    )
+    assert any(
+        isinstance(entry, dict)
+        and "PN" in str(entry.get("title"))
+        and entry.get("observed")
+        and entry.get("observed") != "n/a"
+        for entry in evidence_entries
+    )
 
     bins = analysis.get("bins", [])
     assert isinstance(bins, list)
@@ -391,7 +412,8 @@ def test_export_pdf_reports_missing_dependency() -> None:
 
 def test_analysis_results_page_renders_html() -> None:
     html = _post_analysis_html()
-    assert "id=\"analysis-chart\"" in html
+    assert "data-results-payload=\"true\"" in html
+    assert "id=\"charts-kpis\"" in html
     assert "id=\"drive-map\"" in html
     assert "window.__RDE_RESULT__ =" in html
     assert "/static/js/app.js" in html

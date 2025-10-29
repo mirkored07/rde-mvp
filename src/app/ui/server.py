@@ -53,8 +53,8 @@ router = APIRouter(include_in_schema=False)
 template_dir = Path(__file__).parent / "templates"
 templates = Jinja2Templates(directory=str(template_dir))
 
-BADGE_PASS = "px-2 py-1 rounded bg-green-600/10 text-green-700 dark:text-green-300 border border-green-600/20"
-BADGE_FAIL = "px-2 py-1 rounded bg-red-600/10 text-red-700 dark:text-red-300 border border-red-600/20"
+BADGE_PASS = "bg-emerald-500/15 text-emerald-600 dark:bg-emerald-500/25 dark:text-emerald-200"
+BADGE_FAIL = "bg-rose-500/15 text-rose-600 dark:bg-rose-500/25 dark:text-rose-200"
 
 SUMMARY_BADGE_PASS = (
     "inline-flex items-center rounded-md bg-emerald-500/10 text-emerald-400 "

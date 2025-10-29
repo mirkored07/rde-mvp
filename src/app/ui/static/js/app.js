@@ -668,7 +668,7 @@
     populateExportForms(payload);
   }
 
-  document.addEventListener("DOMContentLoaded", () => {
+  domReady(() => {
     initTheme();
     initThemeToggle();
     initDropzones(document);
@@ -678,37 +678,33 @@
       initFormValidation(form);
     }
     initializeResults(document);
+    renderAnalysisVisuals(getResultPayload());
   });
 
   document.addEventListener("htmx:afterSwap", (event) => {
     if (event.target && event.target.id === "analysis-results") {
       initializeResults(event.target);
-      const payload = getResultPayload();
-      if (payload) {
-        safeInitCharts(payload);
-        safeInitMap(payload);
-      }
+      renderAnalysisVisuals(getResultPayload());
     }
   });
 })();
 
-function initChartsFromResult(payload) {
+function renderChartFromPayload(payload, chartEl) {
   if (!payload || typeof payload !== "object") {
-    console.debug('analysis payload missing, skipping chart render.');
+    console.warn('Analysis payload missing, skipping chart render.');
+    return;
+  }
+  if (!chartEl) {
+    console.warn('Chart container #charts-kpis not found, skipping chart render.');
     return;
   }
   if (typeof Plotly === 'undefined' || typeof Plotly.newPlot !== 'function') {
-    console.debug('Plotly not available, skipping chart render.');
-    return;
-  }
-  const chartEl = document.getElementById('analysis-chart');
-  if (!chartEl) {
-    console.debug('analysis chart container not found, skipping chart render.');
+    console.warn('Plotly not available, skipping chart render.');
     return;
   }
   const chartSource = payload.chart || (payload.analysis && payload.analysis.chart) || {};
   if (!chartSource || typeof chartSource !== 'object') {
-    console.debug('chart data missing from payload, skipping chart render.');
+    console.warn('Chart data missing from payload, skipping chart render.');
     return;
   }
   const times = Array.isArray(chartSource.times)
@@ -724,10 +720,10 @@ function initChartsFromResult(payload) {
     : [];
   const pollutantSeries = Array.isArray(chartSource.pollutants) ? chartSource.pollutants : [];
   if (!times.length && !speedValues.length && !pollutantSeries.length) {
-    console.debug('no time-series data found in payload, skipping chart render.');
+    console.warn('No time-series data found in payload, skipping chart render.');
     return;
   }
-  const chartHeight = Math.max(chartEl.clientHeight || 0, 240);
+  const chartHeight = Math.max(chartEl.clientHeight || 0, 280);
   const baseTimes = times.length ? times : speedValues.map((_, index) => index);
   const speedTrace = {
     x: baseTimes,
@@ -803,102 +799,111 @@ function initChartsFromResult(payload) {
   Plotly.newPlot(chartEl, traces, layout, config);
 }
 
-function initMapFromResult(payload) {
+function renderMapFromPayload(payload, mapEl) {
   if (!payload || typeof payload !== 'object') {
-    console.debug('analysis payload missing, skipping map render.');
+    console.warn('Analysis payload missing, skipping map render.');
+    return;
+  }
+  if (!mapEl) {
+    console.warn('Map container #drive-map not found, skipping map render.');
     return;
   }
   if (typeof L === 'undefined' || typeof L.map !== 'function') {
-    console.debug('Leaflet not available, skipping map render.');
-    return;
-  }
-  const mapEl = document.getElementById('drive-map');
-  if (!mapEl) {
-    console.debug('drive map container not found, skipping map render.');
+    console.warn('Leaflet not available, skipping map render.');
     return;
   }
   const mapSource = payload.map || (payload.analysis && payload.analysis.map) || {};
   if (!mapSource || typeof mapSource !== 'object') {
-    console.debug('map data missing from payload, skipping map render.');
+    console.warn('Map data missing from payload, skipping map render.');
     return;
   }
+
   const points = Array.isArray(mapSource.points) ? mapSource.points : [];
   const bounds = Array.isArray(mapSource.bounds) ? mapSource.bounds : null;
   const center = mapSource.center || null;
+
   if (mapEl.__leafletInstance) {
     mapEl.__leafletInstance.remove();
     mapEl.__leafletInstance = null;
   }
-  const map = L.map(mapEl, { zoomControl: true, scrollWheelZoom: false });
-  mapEl.__leafletInstance = map;
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    maxZoom: 19,
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-  }).addTo(map);
-  const latLngs = points
-    .map((point) => {
-      if (!point || typeof point !== 'object') {
+
+  try {
+    const map = L.map(mapEl, { zoomControl: true, scrollWheelZoom: false });
+    mapEl.__leafletInstance = map;
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '© OpenStreetMap contributors',
+    }).addTo(map);
+
+    const latLngs = points
+      .map((point) => {
+        if (!point || typeof point !== 'object') {
+          return null;
+        }
+        const { lat, lon } = point;
+        const latitude = Number(lat);
+        const longitude = Number(lon);
+        if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
+          return [latitude, longitude];
+        }
         return null;
+      })
+      .filter(Boolean);
+
+    if (latLngs.length) {
+      const route = L.polyline(latLngs, { color: '#38bdf8', weight: 3 }).addTo(map);
+      if (bounds && bounds.length === 2) {
+        map.fitBounds(bounds, { padding: [16, 16] });
+      } else {
+        map.fitBounds(route.getBounds(), { padding: [16, 16] });
       }
-      const { lat, lon } = point;
-      const latitude = Number(lat);
-      const longitude = Number(lon);
-      if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
-        return [latitude, longitude];
-      }
-      return null;
-    })
-    .filter(Boolean);
-  if (latLngs.length) {
-    const route = L.polyline(latLngs, { color: '#38bdf8', weight: 3 }).addTo(map);
-    if (bounds && bounds.length === 2) {
-      map.fitBounds(bounds, { padding: [16, 16] });
+      L.circleMarker(latLngs[0], {
+        radius: 5,
+        color: '#22c55e',
+        fillColor: '#22c55e',
+        fillOpacity: 1,
+      }).addTo(map);
+      L.circleMarker(latLngs[latLngs.length - 1], {
+        radius: 5,
+        color: '#ef4444',
+        fillColor: '#ef4444',
+        fillOpacity: 1,
+      }).addTo(map);
+    } else if (center && Number.isFinite(center.lat) && Number.isFinite(center.lon)) {
+      map.setView([center.lat, center.lon], 14);
     } else {
-      map.fitBounds(route.getBounds(), { padding: [16, 16] });
+      console.warn('No map geometry found, skipping map render.');
     }
-    L.circleMarker(latLngs[0], {
-      radius: 5,
-      color: '#22c55e',
-      fillColor: '#22c55e',
-      fillOpacity: 1,
-    }).addTo(map);
-    L.circleMarker(latLngs[latLngs.length - 1], {
-      radius: 5,
-      color: '#ef4444',
-      fillColor: '#ef4444',
-      fillOpacity: 1,
-    }).addTo(map);
-  } else if (center && Number.isFinite(center.lat) && Number.isFinite(center.lon)) {
-    map.setView([center.lat, center.lon], 13);
-  } else {
-    console.debug('no map geometry found, skipping map render.');
-  }
-}
-
-function safeInitCharts(payload) {
-  try {
-    initChartsFromResult(payload);
-  } catch (error) {
-    console.warn('chart render failed:', error);
-  }
-}
-
-function safeInitMap(payload) {
-  try {
-    initMapFromResult(payload);
   } catch (error) {
     console.warn('map render failed:', error);
   }
 }
 
-function init() {
-  const payload = window.__RDE_RESULT__;
+function renderAnalysisVisuals(payload) {
   if (!payload) {
-    console.warn('No analysis payload found, skipping chart/map render.');
+    console.warn('No analysis payload found, skipping chart and map render.');
     return;
   }
-  safeInitCharts(payload);
-  safeInitMap(payload);
+  const chartEl = document.getElementById('charts-kpis');
+  const mapEl = document.getElementById('drive-map');
+
+  if (!chartEl) {
+    console.warn('Chart container #charts-kpis not found, skipping chart render.');
+  } else {
+    renderChartFromPayload(payload, chartEl);
+  }
+
+  if (!mapEl) {
+    console.warn('Map container #drive-map not found, skipping map render.');
+  } else {
+    renderMapFromPayload(payload, mapEl);
+  }
 }
 
-document.addEventListener('DOMContentLoaded', init);
+function domReady(callback) {
+  if (document.readyState === 'complete' || document.readyState === 'interactive') {
+    window.setTimeout(callback, 0);
+    return;
+  }
+  document.addEventListener('DOMContentLoaded', callback, { once: true });
+}
