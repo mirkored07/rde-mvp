@@ -503,19 +503,11 @@
 
 <script src="/static/leaflet/leaflet.js"></script>
 
-<!-- RDE payload (must precede app bundle) -->
-{% if results_payload %}
-<script id="rde-payload-script">
-  window.__RDE_RESULT__={{ results_payload | tojson | safe }};
+<!-- Inject analysis payload BEFORE app bundle -->
+<script>
+  window.__RDE_RESULT__ = {{ results_payload | tojson | safe }};
   document.dispatchEvent(new Event('rde:payload-ready'));
 </script>
-{% else %}
-<script id="rde-payload-script">
-  window.__RDE_RESULT__=null;
-  document.dispatchEvent(new Event('rde:payload-ready'));
-</script>
-{% endif %}
-
 <!-- App bundle must come after payload -->
 <script src="/static/js/app.js"></script>
 
