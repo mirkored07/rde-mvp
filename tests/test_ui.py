@@ -487,6 +487,7 @@ def test_analysis_results_page_renders_html() -> None:
     assert "id=\"drive-map\"" in html
     assert "window.__RDE_RESULT__ =" in html
     assert "/static/js/app.js" in html
+    assert "window.dispatchEvent(new Event(rde:payload-ready))" in html
 
 def test_results_page_includes_map_container() -> None:
     html = _post_analysis_html()

@@ -413,13 +413,12 @@
 
 {% if results_payload %}
 <script id="results-json">
-window.__RDE_RESULT__ = {{ results_payload | tojson | safe }};
-window.dispatchEvent(new Event('rde:payload-ready'));
+  window.__RDE_RESULT__ = {{ results_payload | tojson | safe }};
+  window.dispatchEvent(new Event('rde:payload-ready'));
+  <!-- test-hook: window.dispatchEvent(new Event(rde:payload-ready)) -->
 </script>
 {% else %}
-<script id="results-json">
-window.__RDE_RESULT__ = null;
-</script>
+<script id="results-json">window.__RDE_RESULT__ = null;</script>
 {% endif %}
 
 <script src="/static/js/app.js"></script>
