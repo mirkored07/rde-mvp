@@ -9,6 +9,7 @@ import json
 import re
 import zipfile
 from collections.abc import Mapping
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -113,7 +114,18 @@ def test_analysis_endpoint_returns_results() -> None:
     """Smoke test for the JSON contract consumed by the SPA results page."""
     # The frontend reads ``window.__RDE_RESULT__`` and expects the analysis,
     # chart, map, and KPI structures asserted below. Keep this in sync with
-    # ``renderAnalysisVisuals`` in ``src/app/ui/static/js/app.js``.
+    # ``renderAll`` in ``src/app/ui/static/js/app.js``.
+
+    html = _post_analysis_html()
+    assert 'id="results-json"' in html
+    assert 'window.dispatchEvent(new Event(''rde:payload-ready''))' in html
+
+    payload_pos = html.find("window.__RDE_RESULT__ =")
+    app_js_pos = html.find("/static/js/app.js")
+    assert payload_pos != -1 and app_js_pos != -1 and payload_pos < app_js_pos
+
+    for element_id in ("chart-speed", "chart-nox", "chart-pn", "chart-pm", "drive-map"):
+        assert f'id="{element_id}"' in html
 
     response = client.post(
         "/analyze",
@@ -198,6 +210,54 @@ def test_analysis_endpoint_returns_results() -> None:
         kpi_value = nox_kpi
     assert kpi_value is not None
     assert float(kpi_value) > 0
+
+
+def test_results_payload_has_chart_and_map_shapes() -> None:
+    samples_dir = Path(__file__).resolve().parents[1] / "data" / "samples"
+    pems_text = (samples_dir / "pems_demo.csv").read_text()
+    gps_text = (samples_dir / "gps_demo.csv").read_text()
+    ecu_text = (samples_dir / "ecu_demo.csv").read_text()
+
+    response = client.post(
+        "/analyze",
+        files={
+            "pems_file": ("pems_demo.csv", pems_text.encode("utf-8"), "text/csv"),
+            "gps_file": ("gps_demo.csv", gps_text.encode("utf-8"), "text/csv"),
+            "ecu_file": ("ecu_demo.csv", ecu_text.encode("utf-8"), "text/csv"),
+        },
+        headers={"accept": "text/html"},
+    )
+    assert response.status_code == 200
+
+    html = response.text
+    match = re.search(r"window.__RDE_RESULT__ = (.*?);\s*window.dispatchEvent", html, re.DOTALL)
+    assert match is not None
+    payload_json = match.group(1)
+    payload = json.loads(payload_json)
+
+    analysis = payload.get("analysis")
+    assert isinstance(analysis, dict)
+
+    chart = analysis.get("chart")
+    assert isinstance(chart, dict)
+
+    times = chart.get("times")
+    assert isinstance(times, list) and len(times) > 100
+
+    speed = chart.get("speed", {})
+    speed_values = speed.get("values") or speed.get("y")
+    assert isinstance(speed_values, list)
+    assert len(speed_values) == len(times)
+
+    pollutants = chart.get("pollutants")
+    assert isinstance(pollutants, list)
+    keys = {entry.get("key") for entry in pollutants if isinstance(entry, Mapping)}
+    assert {"NOx", "PN", "PM"}.issubset(keys)
+
+    map_payload = analysis.get("map")
+    assert isinstance(map_payload, dict)
+    points = map_payload.get("points")
+    assert isinstance(points, list) and len(points) > 0
 
 
 def test_sample_file_downloads() -> None:
