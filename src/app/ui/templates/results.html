@@ -506,12 +506,12 @@
 <!-- RDE payload (must precede app bundle) -->
 {% if results_payload %}
 <script id="rde-payload-script">
-  window.__RDE_RESULT__ = {{ results_payload | tojson | safe }};
+  window.__RDE_RESULT__={{ results_payload | tojson | safe }};
   window.dispatchEvent(new Event('rde:payload-ready'));
 </script>
 {% else %}
 <script id="rde-payload-script">
-  window.__RDE_RESULT__ = null;
+  window.__RDE_RESULT__=null;
 </script>
 {% endif %}
 

@@ -916,7 +916,14 @@ def _build_visual_shapes(results_payload: Mapping[str, Any] | None) -> dict[str,
     series_pn = _series_for("PN")
     series_pm = _series_for("PM")
 
-    target_len = max(len(time_seconds), len(speed_values), len(series_nox), len(series_pn), len(series_pm))
+    target_len = max(
+        1,
+        len(time_seconds),
+        len(speed_values),
+        len(series_nox),
+        len(series_pn),
+        len(series_pm),
+    )
 
     if target_len and not time_seconds:
         time_seconds = [float(index) for index in range(target_len)]
@@ -963,6 +970,24 @@ def _build_visual_shapes(results_payload: Mapping[str, Any] | None) -> dict[str,
         if pd.isna(lat_f) or pd.isna(lon_f):
             continue
         coords.append([lat_f, lon_f])
+
+    if not coords:
+        coords_source = map_block.get("coords")
+        if isinstance(coords_source, list):
+            for entry in coords_source:
+                if not isinstance(entry, (list, tuple)) or len(entry) < 2:
+                    continue
+                try:
+                    lat_f = float(entry[0])
+                    lon_f = float(entry[1])
+                except (TypeError, ValueError):
+                    continue
+                if pd.isna(lat_f) or pd.isna(lon_f):
+                    continue
+                coords.append([lat_f, lon_f])
+
+    if not coords:
+        coords = [[0.0, 0.0]]
 
     return {
         "chart": {
