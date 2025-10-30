@@ -2666,8 +2666,8 @@ async def analyze(request: Request) -> Response:
                     kpi_values[_normalize_kpi_key(key)] = numeric_value
     # === END CI NORMALIZATION & KPI FALLBACKS ===
 
-    if not isinstance(results_payload, dict):
-        results_payload = dict(results_payload or {})
+    if hasattr(results_payload, "model_dump"):
+        results_payload = results_payload.model_dump()
 
     results_payload = ensure_results_payload_defaults(results_payload)
 
