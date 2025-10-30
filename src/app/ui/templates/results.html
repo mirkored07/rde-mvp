@@ -504,7 +504,7 @@
     {{ results_payload | tojson | safe }}
   </script>
   <script>
-    window.__RDE_RESULT__ = JSON.parse(document.getElementById('rde-payload').textContent);
+    window.__RDE_RESULT__={{ results_payload | tojson | safe }};
     window.dispatchEvent(new Event('rde:payload-ready'));
     document.dispatchEvent(new Event('rde:payload-ready'));
   </script>

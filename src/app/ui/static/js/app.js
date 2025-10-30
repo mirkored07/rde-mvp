@@ -89,7 +89,7 @@ function renderAnalysisVisuals(payload) {
   window.__rdeInitFromPayload__ = initFromPayload;
 
   // EXACT LITERAL required by tests:
-  window.addEventListener('rde:payload-ready', () => {
+  window.addEventListener("rde:payload-ready", () => {
     initFromPayload();
   });
 
