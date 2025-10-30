@@ -654,11 +654,30 @@
     const container = root.querySelector("[data-component='analysis-results']");
     if (!container) return;
     renderSummary(container);
-    const payload = getPayload();
-    populateExportForms(payload);
   }
 
-  onReady(() => {
+  function safeInit() {
+    const payload = getPayload();
+    populateExportForms(payload);
+    if (!payload) {
+      console.info("RDE: analysis payload unavailable; skipping charts and map.");
+      return;
+    }
+
+    const chartsOk = renderChartsFromPayload(payload);
+    const mapOk = renderMapFromPayload(payload);
+    const kpiOk = injectKpisFromPayload(payload);
+
+    if (!chartsOk || !mapOk) {
+      console.warn("RDE: chart/map render skipped or partial");
+    }
+
+    if (!kpiOk) {
+      console.info("RDE: KPI injection skipped; nothing to update.");
+    }
+  }
+
+  function handleDomReady() {
     initTheme();
     initThemeToggle();
     initDropzones(document);
@@ -668,31 +687,28 @@
       initFormValidation(form);
     }
     initializeResults(document);
-    whenPayload((payload) => {
-      populateExportForms(payload);
-      renderAll(payload);
-    });
-  });
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", handleDomReady);
+  } else {
+    handleDomReady();
+  }
+
+  document.addEventListener("DOMContentLoaded", safeInit);
+  if (document.readyState !== "loading") {
+    safeInit();
+  }
+
+  window.addEventListener("rde:payload-ready", safeInit);
 
   document.addEventListener("htmx:afterSwap", (event) => {
     if (event.target && event.target.id === "analysis-results") {
       initializeResults(event.target);
-      whenPayload((payload) => {
-        populateExportForms(payload);
-        renderAll(payload);
-      });
+      safeInit();
     }
   });
 })();
-
-function onReady(fn) {
-  if (typeof fn !== "function") return;
-  if (document.readyState !== "loading") {
-    fn();
-  } else {
-    document.addEventListener("DOMContentLoaded", fn);
-  }
-}
 
 function getPayload() {
   const payload = window.__RDE_RESULT__;
@@ -700,150 +716,6 @@ function getPayload() {
     return null;
   }
   return payload;
-}
-
-function whenPayload(cb) {
-  if (typeof cb !== "function") return;
-  const current = getPayload();
-  if (current) {
-    cb(current);
-    return;
-  }
-  const handler = () => {
-    window.removeEventListener("rde:payload-ready", handler);
-    const ready = getPayload();
-    if (ready) {
-      cb(ready);
-    }
-  };
-  window.addEventListener("rde:payload-ready", handler);
-}
-
-function renderSpeedChart(payload) {
-  const el = document.getElementById("chart-speed");
-  if (!el) return;
-  if (!payload || typeof payload !== "object") return;
-  if (typeof Plotly === "undefined" || typeof Plotly.newPlot !== "function") return;
-
-  const chart = (payload.analysis && payload.analysis.chart) || payload.chart || {};
-  const times = Array.isArray(chart.times) ? chart.times : null;
-  const speedBlock = chart.speed || {};
-  const series = Array.isArray(speedBlock.values)
-    ? speedBlock.values
-    : Array.isArray(speedBlock.y)
-    ? speedBlock.y
-    : [];
-  if (!Array.isArray(series) || !series.some((value) => value != null)) return;
-
-  const traceTimes = Array.isArray(times) && times.length === series.length
-    ? times
-    : series.map((_, index) => index);
-
-  const trace = {
-    x: traceTimes,
-    y: series,
-    name: "Vehicle speed (m/s)",
-    mode: "lines",
-  };
-
-  Plotly.newPlot(
-    el,
-    [trace],
-    {
-      margin: { t: 16, r: 8, b: 36, l: 48 },
-      xaxis: { title: "Time" },
-      yaxis: { title: "m/s" },
-    },
-    { displaylogo: false, responsive: true },
-  );
-}
-
-function renderLineChart(elId, times, values, name, ytitle) {
-  if (!elId) return;
-  const el = document.getElementById(elId);
-  if (!el) return;
-  if (!Array.isArray(values) || !values.some((value) => value != null)) return;
-  if (typeof Plotly === "undefined" || typeof Plotly.newPlot !== "function") return;
-
-  const traceTimes = Array.isArray(times) && times.length === values.length
-    ? times
-    : values.map((_, index) => index);
-
-  Plotly.newPlot(
-    el,
-    [
-      {
-        x: traceTimes,
-        y: values,
-        name,
-        mode: "lines",
-      },
-    ],
-    {
-      margin: { t: 16, r: 8, b: 36, l: 48 },
-      xaxis: { title: "Time" },
-      yaxis: { title: ytitle },
-    },
-    { displaylogo: false, responsive: true },
-  );
-}
-
-function renderEmissionCharts(payload) {
-  if (!payload || typeof payload !== "object") return;
-  const chart = (payload.analysis && payload.analysis.chart) || payload.chart || {};
-  const pollutants = Array.isArray(chart.pollutants) ? chart.pollutants : [];
-  const baseTimes =
-    (pollutants[0] && Array.isArray(pollutants[0].t) && pollutants[0].t) || chart.times || null;
-
-  const findSeries = (key) => {
-    const entry = pollutants.find((item) => item && item.key === key);
-    if (!entry || typeof entry !== "object") return [];
-    if (Array.isArray(entry.y)) return entry.y;
-    if (Array.isArray(entry.values)) return entry.values;
-    return [];
-  };
-
-  renderLineChart("chart-nox", baseTimes, findSeries("NOx"), "NOx", "mg/s");
-  renderLineChart("chart-pn", baseTimes, findSeries("PN"), "PN", "1/s");
-  renderLineChart("chart-pm", baseTimes, findSeries("PM"), "PM", "mg/s");
-}
-
-function renderMap(payload) {
-  const el = document.getElementById("drive-map");
-  if (!el) {
-    console.info("RDE: skipping map init; container missing.");
-    return;
-  }
-  if (!payload || typeof payload !== "object") return;
-  if (typeof L === "undefined" || typeof L.map !== "function") return;
-
-  const mapPayload = (payload.analysis && payload.analysis.map) || payload.map || {};
-  const points = Array.isArray(mapPayload.points) ? mapPayload.points : [];
-  if (!points.length) return;
-
-  if (el.__leafletInstance) {
-    el.__leafletInstance.remove();
-    el.__leafletInstance = null;
-  }
-
-  const map = L.map(el, { zoomControl: true });
-  el.__leafletInstance = map;
-  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19 }).addTo(map);
-
-  const latlngs = points
-    .map((point) => {
-      if (!point || typeof point !== "object") return null;
-      const lat = Number(point.lat);
-      const lon = Number(point.lon);
-      if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
-      return [lat, lon];
-    })
-    .filter(Boolean);
-
-  if (!latlngs.length) return;
-
-  const polyline = L.polyline(latlngs, { weight: 3 }).addTo(map);
-  map.fitBounds(polyline.getBounds(), { padding: [16, 16] });
 }
 
 function parseNumeric(value) {
@@ -882,64 +754,6 @@ function getSpeedSeries(payload) {
   return { values, times };
 }
 
-function parseTotalDistanceKm(payload) {
-  const analysis = payload && payload.analysis;
-  const metrics = analysis && Array.isArray(analysis.metrics) ? analysis.metrics : [];
-  for (const metric of metrics) {
-    if (!metric || typeof metric !== "object") continue;
-    const label = String(metric.label || "").toLowerCase();
-    if (label.includes("total distance")) {
-      const parsed = parseNumeric(metric.value);
-      if (parsed !== null) return parsed;
-    }
-  }
-
-  if (analysis && analysis.overall) {
-    const overallDistance =
-      parseNumeric(analysis.overall.total_distance_km) ||
-      parseNumeric(analysis.overall.total_distance);
-    if (overallDistance !== null) return overallDistance;
-  }
-
-  const bins = analysis && Array.isArray(analysis.bins) ? analysis.bins : [];
-  if (bins.length) {
-    let sum = 0;
-    let found = false;
-    bins.forEach((bin) => {
-      if (!bin || typeof bin !== "object") return;
-      const distance = parseNumeric(bin.distance);
-      if (distance !== null) {
-        sum += distance;
-        found = true;
-      }
-    });
-    if (found) return sum;
-  }
-
-  return null;
-}
-
-function extractKpiValue(payload, key) {
-  const kpis = payload && payload.analysis && payload.analysis.kpis;
-  if (!kpis) return null;
-  const entry = kpis[key];
-  if (entry == null) return null;
-  if (typeof entry === "number") {
-    return Number.isFinite(entry) ? entry : null;
-  }
-  if (typeof entry === "object") {
-    if (entry.total && entry.total.value != null) {
-      const parsed = Number(entry.total.value);
-      return Number.isFinite(parsed) ? parsed : null;
-    }
-    if (entry.value != null) {
-      const parsed = Number(entry.value);
-      return Number.isFinite(parsed) ? parsed : null;
-    }
-  }
-  return null;
-}
-
 function formatKpiValue(value, unit) {
   if (!Number.isFinite(value)) return "n/a";
   const abs = Math.abs(value);
@@ -947,69 +761,253 @@ function formatKpiValue(value, unit) {
   return unit ? `${formatted} ${unit}` : formatted;
 }
 
-function updateKpiNodes(key, text) {
-  if (!key) return;
-  const nodes = document.querySelectorAll(`[data-kpi="${key}"]`);
+function setKpiText(key, scope, text) {
+  if (!key || typeof text !== "string") return false;
+  let selector = `[data-kpi="${key}"]`;
+  if (scope === null) {
+    selector = `${selector}:not([data-kpi-scope])`;
+  } else if (typeof scope === "string") {
+    selector = `${selector}[data-kpi-scope="${scope}"]`;
+  }
+
+  const nodes = document.querySelectorAll(selector);
+  if (!nodes.length) return false;
   nodes.forEach((node) => {
     node.textContent = text;
   });
+  return true;
 }
 
-function computeAndInjectKPIs(payload) {
-  if (!payload || typeof payload !== "object") return;
+function injectKpisFromPayload(payload) {
+  if (!payload || typeof payload !== "object") return false;
+  const analysis = payload.analysis;
+  if (!analysis || typeof analysis !== "object") return false;
 
-  let distanceKm = parseTotalDistanceKm(payload);
-  if (!(Number.isFinite(distanceKm) && distanceKm > 0)) {
-    const { values } = getSpeedSeries(payload);
-    if (Array.isArray(values) && values.length) {
-      const sumSpeed = values.reduce((sum, value) => sum + (Number(value) || 0), 0);
-      const estimated = sumSpeed / 1000;
-      if (estimated > 0) {
-        distanceKm = estimated;
-      }
+  const kpis = analysis.kpis && typeof analysis.kpis === "object" ? analysis.kpis : {};
+  const bins = Array.isArray(analysis.bins) ? analysis.bins : [];
+  const unitCache = new Map();
+
+  const getUnit = (key) => {
+    if (unitCache.has(key)) return unitCache.get(key);
+    const entry = kpis[key];
+    const unit = entry && typeof entry === "object" ? entry.unit : null;
+    unitCache.set(key, unit || null);
+    return unit || null;
+  };
+
+  let updated = false;
+
+  Object.entries(kpis).forEach(([key, entry]) => {
+    if (!entry || typeof entry !== "object") return;
+    const unit = getUnit(key);
+    const totalBlock = entry.total && typeof entry.total === "object" ? entry.total : null;
+    const directTotal = totalBlock && totalBlock.value != null ? parseNumeric(totalBlock.value) : null;
+    const fallbackTotal = entry.value != null ? parseNumeric(entry.value) : null;
+    const totalValue = directTotal ?? fallbackTotal;
+    if (totalValue != null) {
+      const text = formatKpiValue(totalValue, unit);
+      if (setKpiText(key, null, text)) updated = true;
+      if (setKpiText(key, "total", text)) updated = true;
     }
+
+    Object.entries(entry).forEach(([scope, scopeEntry]) => {
+      if (scope === "label" || scope === "unit" || scope === "total" || scope === "value") return;
+      if (!scopeEntry || typeof scopeEntry !== "object") return;
+      const numeric = scopeEntry.value != null ? parseNumeric(scopeEntry.value) : null;
+      if (numeric == null) return;
+      const text = formatKpiValue(numeric, unit);
+      if (setKpiText(key, scope, text)) updated = true;
+    });
+  });
+
+  bins.forEach((bin) => {
+    if (!bin || typeof bin !== "object") return;
+    const scope = bin.name;
+    if (!scope) return;
+    const binKpis = bin.kpis && typeof bin.kpis === "object" ? bin.kpis : {};
+    Object.entries(binKpis).forEach(([key, rawValue]) => {
+      const numeric = parseNumeric(rawValue);
+      if (numeric == null) return;
+      const unit = getUnit(key);
+      const text = formatKpiValue(numeric, unit);
+      if (setKpiText(key, scope, text)) updated = true;
+    });
+  });
+
+  return updated;
+}
+
+function renderChartsFromPayload(payload) {
+  if (!payload || typeof payload !== "object") return false;
+  if (typeof Plotly === "undefined" || typeof Plotly.newPlot !== "function") {
+    console.warn("RDE: Plotly unavailable; charts skipped.");
+    return false;
   }
 
-  const definitions = [
-    { pollutantKey: "NOx", kpiKey: "NOx_mg_per_km", unit: "mg/km" },
-    { pollutantKey: "PN", kpiKey: "PN_1_per_km", unit: "1/km" },
+  const { values: speedValuesRaw, times: speedTimes } = getSpeedSeries(payload);
+  const speedEl = document.getElementById("chart-speed");
+
+  const sanitizeSeries = (values) => {
+    if (!Array.isArray(values)) return [];
+    return values.map((value) => {
+      const numeric = Number(value);
+      return Number.isFinite(numeric) ? numeric : null;
+    });
+  };
+
+  const alignTimes = (candidate, fallback, length) => {
+    if (Array.isArray(candidate) && candidate.length === length) {
+      return candidate;
+    }
+    if (Array.isArray(fallback) && fallback.length === length) {
+      return fallback;
+    }
+    return Array.from({ length }, (_, index) => index);
+  };
+
+  let plotted = false;
+
+  const speedSeries = sanitizeSeries(speedValuesRaw);
+  if (speedEl && speedSeries.length && speedSeries.some((value) => value != null)) {
+    const x = alignTimes(speedTimes, null, speedSeries.length);
+    Plotly.newPlot(
+      speedEl,
+      [
+        {
+          x,
+          y: speedSeries,
+          name: "Vehicle speed",
+          mode: "lines",
+          line: { color: "#38bdf8" },
+        },
+      ],
+      {
+        margin: { t: 24, r: 16, b: 48, l: 64 },
+        xaxis: { title: "Time" },
+        yaxis: { title: "m/s" },
+        paper_bgcolor: "transparent",
+        plot_bgcolor: "transparent",
+      },
+      { displaylogo: false, responsive: true },
+    );
+    plotted = true;
+  }
+
+  const pollutantCharts = [
+    { key: "NOx", elementId: "chart-nox", label: "NOx emission rate", unit: "mg/s", color: "#f97316" },
+    { key: "PN", elementId: "chart-pn", label: "PN emission rate", unit: "1/s", color: "#8b5cf6" },
+    { key: "PM", elementId: "chart-pm", label: "PM emission rate", unit: "mg/s", color: "#14b8a6" },
   ];
 
-  definitions.forEach((def) => {
-    let numeric = extractKpiValue(payload, def.kpiKey);
-
-    if (!Number.isFinite(numeric) && Number.isFinite(distanceKm) && distanceKm > 0) {
-      const { values } = findPollutantSeries(payload, def.pollutantKey);
-      if (Array.isArray(values) && values.length) {
-        const total = values.reduce((sum, value) => sum + (Number(value) || 0), 0);
-        const derived = total / distanceKm;
-        if (Number.isFinite(derived)) {
-          numeric = derived;
-        }
-      }
-    }
-
-    if (Number.isFinite(numeric)) {
-      updateKpiNodes(def.kpiKey, formatKpiValue(numeric, def.unit));
-    }
+  pollutantCharts.forEach(({ key, elementId, label, unit, color }) => {
+    const target = document.getElementById(elementId);
+    if (!target) return;
+    const series = findPollutantSeries(payload, key);
+    const values = sanitizeSeries(series.values);
+    if (!values.length || !values.some((value) => value != null)) return;
+    const x = alignTimes(series.times, speedTimes, values.length);
+    Plotly.newPlot(
+      target,
+      [
+        {
+          x,
+          y: values,
+          name: label,
+          mode: "lines",
+          line: { color },
+        },
+      ],
+      {
+        margin: { t: 24, r: 16, b: 48, l: 64 },
+        xaxis: { title: "Time" },
+        yaxis: { title: unit },
+        paper_bgcolor: "transparent",
+        plot_bgcolor: "transparent",
+      },
+      { displaylogo: false, responsive: true },
+    );
+    plotted = true;
   });
+
+  return plotted;
 }
 
-function renderAll(payload) {
-  if (!payload || typeof payload !== "object") {
-    console.info("RDE: skipping visualisation init; payload unavailable.");
-    return;
+function renderMapFromPayload(payload) {
+  const el = document.getElementById("drive-map");
+  if (!el) {
+    return false;
+  }
+  if (!payload || typeof payload !== "object") return false;
+  if (typeof L === "undefined" || typeof L.map !== "function") {
+    console.warn("RDE: Leaflet unavailable; map skipped.");
+    return false;
   }
 
-  const chartsContainer = document.getElementById("charts-kpis");
-  if (!chartsContainer) {
-    console.info("RDE: skipping chart init; charts container missing.");
+  const mapPayload = (payload.analysis && payload.analysis.map) || payload.map || {};
+  const points = Array.isArray(mapPayload.points) ? mapPayload.points : [];
+  const latlngs = points
+    .map((point) => {
+      if (!point || typeof point !== "object") return null;
+      const lat = parseNumeric(point.lat);
+      const lon = parseNumeric(point.lon);
+      if (lat == null || lon == null) return null;
+      return [lat, lon];
+    })
+    .filter(Boolean);
+
+  let map = window.__RDE_MAP__;
+  if (map && map._container !== el) {
+    map.remove();
+    map = null;
+  }
+
+  if (!map) {
+    map = L.map(el, { zoomControl: true, attributionControl: true });
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19,
+      attribution: "&copy; OpenStreetMap contributors",
+    }).addTo(map);
+    window.__RDE_MAP__ = map;
+  }
+
+  map.invalidateSize();
+
+  if (window.__RDE_MAP_TRACE__) {
+    try {
+      window.__RDE_MAP_TRACE__.remove();
+    } catch (error) {
+      // ignore stale layer removal errors
+    }
+    window.__RDE_MAP_TRACE__ = null;
+  }
+
+  if (latlngs.length) {
+    const polyline = L.polyline(latlngs, { color: "#22d3ee", weight: 3, opacity: 0.85 }).addTo(map);
+    window.__RDE_MAP_TRACE__ = polyline;
+    try {
+      map.fitBounds(polyline.getBounds(), { padding: [32, 32] });
+    } catch (error) {
+      const first = latlngs[0];
+      map.setView(first, 12);
+    }
+  } else if (mapPayload && Array.isArray(mapPayload.bounds) && mapPayload.bounds.length === 2) {
+    try {
+      map.fitBounds(mapPayload.bounds, { padding: [32, 32] });
+    } catch (error) {
+      map.setView([0, 0], 2);
+    }
+  } else if (mapPayload && typeof mapPayload.center === "object") {
+    const centerLat = parseNumeric(mapPayload.center.lat);
+    const centerLon = parseNumeric(mapPayload.center.lon);
+    if (centerLat != null && centerLon != null) {
+      map.setView([centerLat, centerLon], 12);
+    } else {
+      map.setView([0, 0], 2);
+    }
   } else {
-    renderSpeedChart(payload);
-    renderEmissionCharts(payload);
-    computeAndInjectKPIs(payload);
+    map.setView([0, 0], 2);
   }
 
-  renderMap(payload);
+  return true;
 }
 

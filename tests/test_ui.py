@@ -114,17 +114,17 @@ def test_analysis_endpoint_returns_results() -> None:
     """Smoke test for the JSON contract consumed by the SPA results page."""
     # The frontend reads ``window.__RDE_RESULT__`` and expects the analysis,
     # chart, map, and KPI structures asserted below. Keep this in sync with
-    # ``renderAll`` in ``src/app/ui/static/js/app.js``.
+    # ``renderChartsFromPayload`` and ``renderMapFromPayload`` in
+    # ``src/app/ui/static/js/app.js``.
 
     html = _post_analysis_html()
-    assert 'id="results-json"' in html
     assert 'window.dispatchEvent(new Event(''rde:payload-ready''))' in html
 
     payload_pos = html.find("window.__RDE_RESULT__ =")
     app_js_pos = html.find("/static/js/app.js")
     assert payload_pos != -1 and app_js_pos != -1 and payload_pos < app_js_pos
 
-    for element_id in ("chart-speed", "chart-nox", "chart-pn", "chart-pm", "drive-map"):
+    for element_id in ("charts-kpis", "chart-speed", "chart-nox", "chart-pn", "chart-pm", "drive-map", "drive-map-card"):
         assert f'id="{element_id}"' in html
 
     response = client.post(
@@ -258,6 +258,69 @@ def test_results_payload_has_chart_and_map_shapes() -> None:
     assert isinstance(map_payload, dict)
     points = map_payload.get("points")
     assert isinstance(points, list) and len(points) > 0
+
+
+def test_results_page_renders_kpi_numbers() -> None:
+    html = _post_analysis_html()
+    match = re.search(r"window.__RDE_RESULT__ = (.*?);\s*window.dispatchEvent", html, re.DOTALL)
+    assert match is not None
+    payload = json.loads(match.group(1))
+
+    analysis = payload.get("analysis") or {}
+    kpis = analysis.get("kpis") or {}
+    assert kpis, "expected KPI payload"
+
+    def _format_value(value: object, unit: str | None) -> str:
+        numeric = float(value)
+        formatted = f"{numeric:.3f}"
+        if unit:
+            formatted = f"{formatted} {unit}"
+        return formatted
+
+    def _extract_values(key: str, scope: str | None) -> list[str]:
+        if scope is None:
+            pattern = rf'data-kpi="{key}"(?![^>]*data-kpi-scope)[^>]*>([^<]+)<'
+        else:
+            pattern = rf'data-kpi="{key}"[^>]*data-kpi-scope="{scope}"[^>]*>([^<]+)<'
+        return re.findall(pattern, html)
+
+    for key, entry in kpis.items():
+        if not isinstance(entry, Mapping):
+            continue
+        unit = entry.get("unit") if isinstance(entry.get("unit"), str) else None
+        total_block = entry.get("total")
+        if isinstance(total_block, Mapping) and total_block.get("value") is not None:
+            formatted_total = _format_value(total_block.get("value"), unit)
+            assert formatted_total in html
+            total_nodes = _extract_values(key, "total") or _extract_values(key, None)
+            assert total_nodes, f"expected rendered KPI total for {key}"
+            assert all("n/a" not in node.lower() for node in total_nodes)
+
+        for scope, scope_entry in entry.items():
+            if scope in {"label", "unit", "total", "value"}:
+                continue
+            if isinstance(scope_entry, Mapping) and scope_entry.get("value") is not None:
+                formatted_scope = _format_value(scope_entry.get("value"), unit)
+                assert formatted_scope in html
+                scope_nodes = _extract_values(key, scope)
+                assert scope_nodes, f"expected rendered KPI value for {key} scope {scope}"
+                assert all("n/a" not in node.lower() for node in scope_nodes)
+
+    bins = analysis.get("bins") or []
+    for bin_entry in bins:
+        if not isinstance(bin_entry, Mapping):
+            continue
+        scope = bin_entry.get("name")
+        bin_kpis = bin_entry.get("kpis") or {}
+        if not scope or not isinstance(bin_kpis, Mapping):
+            continue
+        for key, value in bin_kpis.items():
+            if value is None:
+                continue
+            scope_nodes = _extract_values(key, scope)
+            if not scope_nodes:
+                continue
+            assert all("n/a" not in node.lower() for node in scope_nodes)
 
 
 def test_sample_file_downloads() -> None:
