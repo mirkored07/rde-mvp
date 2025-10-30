@@ -501,7 +501,33 @@
   <div id="drive-map" style="height: 360px; width: 100%;"></div>
 
   <script id="rde-payload" type="application/json">
-    {{ results_payload | tojson | safe }}
+  {{
+    {
+      "visual": {
+        "map": (
+          (results_payload.visual.map)
+          if results_payload and results_payload.visual is defined
+             and results_payload.visual.map is defined and results_payload.visual.map is not none
+          else {"center": {"lat": 48.2082, "lon": 16.3738, "zoom": 8}, "latlngs": []}
+        ),
+        "chart": (
+          (results_payload.visual.chart)
+          if results_payload and results_payload.visual is defined
+             and results_payload.visual.chart is defined and results_payload.visual.chart is not none
+          else {"series": [], "labels": []}
+        )
+      },
+      "kpi_numbers": (
+        results_payload.kpi_numbers
+        if results_payload and results_payload.kpi_numbers is defined and results_payload.kpi_numbers is not none
+        else [
+          {"label": "Trips", "value": 0},
+          {"label": "Distance [km]", "value": 0},
+          {"label": "Avg Speed [km/h]", "value": 0}
+        ]
+      )
+    } | tojson | safe
+  }}
   </script>
   <script>
     // Expose payload for app.js

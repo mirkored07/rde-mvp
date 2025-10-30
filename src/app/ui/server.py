@@ -1374,23 +1374,27 @@ def _build_results_context(
     *,
     include_export_controls: bool = True,
 ) -> dict[str, Any]:
+    normalised_results = ensure_results_payload_defaults(results)
+
     context: dict[str, Any] = {
         "errors": errors,
         "has_errors": bool(errors),
         "include_export_controls": include_export_controls,
         "has_results": bool(results) and not errors,
-        "results": results,
+        "results": normalised_results,
     }
 
-    context["results_payload"] = results
+    context["results_payload"] = normalised_results
+
+    try:
+        context["results_payload_json"] = json.dumps(normalised_results)
+    except (TypeError, ValueError):
+        context["results_payload_json"] = "{}"
 
     if errors or results is None:
         return context
 
-    try:
-        context["results_payload_json"] = json.dumps(results)
-    except (TypeError, ValueError):
-        context["results_payload_json"] = "{}"
+    results = normalised_results
 
     regulation = results.get("regulation") or {}
     counts = regulation.get("counts") or {}
