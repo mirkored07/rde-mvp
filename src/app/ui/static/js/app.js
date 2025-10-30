@@ -810,7 +810,10 @@ function renderEmissionCharts(payload) {
 
 function renderMap(payload) {
   const el = document.getElementById("drive-map");
-  if (!el) return;
+  if (!el) {
+    console.info("RDE: skipping map init; container missing.");
+    return;
+  }
   if (!payload || typeof payload !== "object") return;
   if (typeof L === "undefined" || typeof L.map !== "function") return;
 
@@ -993,10 +996,20 @@ function computeAndInjectKPIs(payload) {
 }
 
 function renderAll(payload) {
-  if (!payload || typeof payload !== "object") return;
-  renderSpeedChart(payload);
-  renderEmissionCharts(payload);
+  if (!payload || typeof payload !== "object") {
+    console.info("RDE: skipping visualisation init; payload unavailable.");
+    return;
+  }
+
+  const chartsContainer = document.getElementById("charts-kpis");
+  if (!chartsContainer) {
+    console.info("RDE: skipping chart init; charts container missing.");
+  } else {
+    renderSpeedChart(payload);
+    renderEmissionCharts(payload);
+    computeAndInjectKPIs(payload);
+  }
+
   renderMap(payload);
-  computeAndInjectKPIs(payload);
 }
 
