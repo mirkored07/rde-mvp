@@ -42,6 +42,7 @@ from src.app.utils.mappings import (
     serialise_mapping_state,
     slugify_profile_name,
 )
+from src.app.utils.payload import ensure_results_payload_defaults
 from src.app.ui.responses import (
     make_results_payload as legacy_make_results_payload,
     respond_success as legacy_respond_success,
@@ -1779,7 +1780,7 @@ def _base_template_context(
 @router.get("/")
 async def index(request: Request) -> Response:
     context = _base_template_context(request, results=None, errors=[])
-    return templates.TemplateResponse("index.html", context)
+    return templates.TemplateResponse(request, "index.html", context)
 
 
 async def _extract_form_data(
@@ -2664,23 +2665,7 @@ async def analyze(request: Request) -> Response:
     if not isinstance(results_payload, dict):
         results_payload = dict(results_payload or {})
 
-    results_payload = results_payload or {}
-
-    visual_raw = results_payload.get("visual")
-    visual = dict(visual_raw) if isinstance(visual_raw, Mapping) else {}
-    visual.setdefault(
-        "map",
-        {"center": {"lat": 48.2082, "lon": 16.3738, "zoom": 8}, "latlngs": []},
-    )
-    visual.setdefault("chart", {"series": [], "labels": []})
-    results_payload["visual"] = visual
-
-    if results_payload.get("kpi_numbers") is None:
-        results_payload["kpi_numbers"] = [
-            {"label": "Trips", "value": 0},
-            {"label": "Distance [km]", "value": 0},
-            {"label": "Avg Speed [km/h]", "value": 0},
-        ]
+    results_payload = ensure_results_payload_defaults(results_payload)
 
     visual_shapes = _build_visual_shapes(results_payload)
     results_payload["visual"] = visual_shapes
@@ -2695,6 +2680,7 @@ async def analyze(request: Request) -> Response:
 
     if request.headers.get("HX-Request"):
         return templates.TemplateResponse(
+            request,
             "results.html",
             context,
             status_code=status.HTTP_200_OK,
@@ -2708,6 +2694,7 @@ async def analyze(request: Request) -> Response:
         return legacy_respond_success(results_payload)
 
     return templates.TemplateResponse(
+        request,
         "results.html",
         context,
         status_code=status.HTTP_200_OK,
