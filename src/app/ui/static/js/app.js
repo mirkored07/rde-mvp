@@ -1,3 +1,8 @@
+// Singleton slots – do NOT use `let/const` twice across reloads
+window.__leafletMap = window.__leafletMap || null;
+window.__leafletTile = window.__leafletTile || null;
+window.__rdeMapInitScheduled = window.__rdeMapInitScheduled || false;
+
 (function () {
   const THEME_KEY = "rde-theme";
   const MAPPING_STORAGE_KEY = "rde-mapping-state";
@@ -657,7 +662,7 @@
   }
 
   function safeInit() {
-    const payload = getPayload();
+    const payload = getResultPayload();
     populateExportForms(payload);
     if (!payload) {
       console.info("RDE: analysis payload unavailable; skipping charts and map.");
@@ -711,7 +716,7 @@
   });
 })();
 
-function getPayload() {
+function getResultPayload() {
   const payload = window.__RDE_RESULT__;
   if (!payload || typeof payload !== "object") {
     return null;
@@ -934,171 +939,157 @@ function renderChartsFromPayload(payload) {
 }
 
 // --- Map lifecycle guards ---
-let __leafletMap = null;
+function getPayload() {
+  return typeof window !== "undefined" &&
+    window.__RDE_RESULT__ &&
+    window.__RDE_RESULT__.visual &&
+    window.__RDE_RESULT__.visual.map
+    ? window.__RDE_RESULT__
+    : null;
+}
 
-function destroyMap() {
-  if (__leafletMap && typeof __leafletMap.remove === "function") {
-    __leafletMap.remove();
+function getMapContainer() {
+  return document.getElementById("drive-map") || null;
+}
+
+function containerIsVisible(el) {
+  if (!el) return false;
+  const r = el.getBoundingClientRect();
+  return r.width > 0 && r.height > 0;
+}
+
+function destroyLeaflet() {
+  if (window.__leafletMap && typeof window.__leafletMap.remove === "function") {
+    try {
+      window.__leafletMap.remove();
+    } catch (_) {}
   }
-  __leafletMap = null;
-}
-
-function getDriveMapEl() {
-  return document.getElementById("drive-map");
-}
-
-function extractGpsTrack(payload) {
-  if (!payload || typeof payload !== "object") return [];
-
-  const direct = Array.isArray(payload.gps) ? payload.gps : null;
-  const analysisMap = payload.analysis && typeof payload.analysis === "object" ? payload.analysis.map : null;
-  const topLevelMap = payload.map && typeof payload.map === "object" ? payload.map : null;
-  const candidatePoints = Array.isArray(analysisMap?.points)
-    ? analysisMap.points
-    : Array.isArray(topLevelMap?.points)
-    ? topLevelMap.points
-    : Array.isArray(direct)
-    ? direct
-    : [];
-
-  return candidatePoints
-    .map((point) => {
-      if (!point || typeof point !== "object") return null;
-      const lat = parseNumeric(point.lat ?? point.latitude);
-      const lon = parseNumeric(point.lon ?? point.lng ?? point.longitude);
-      if (lat == null || lon == null) return null;
-      return { lat, lon };
-    })
-    .filter(Boolean);
+  window.__leafletMap = null;
+  window.__leafletTile = null;
 }
 
 function renderLeafletFromPayload(payload) {
-  const el = getDriveMapEl();
-  if (!el) return false;
-  if (typeof window.L === "undefined" || typeof window.L.map !== "function") {
-    return false;
+  if (typeof window === "undefined" || typeof window.L === "undefined") {
+    throw new Error("Leaflet is not available");
   }
 
-  const track = extractGpsTrack(payload);
-  if (!track.length) {
-    destroyMap();
-    el.innerHTML = "";
-    return false;
+  const mapData = payload?.visual?.map;
+  const coords = Array.isArray(mapData?.coords)
+    ? mapData.coords
+        .map((pair) => (Array.isArray(pair) && pair.length >= 2 ? [Number(pair[0]), Number(pair[1])] : null))
+        .filter((pair) => pair && Number.isFinite(pair[0]) && Number.isFinite(pair[1]))
+    : [];
+
+  const el = getMapContainer();
+  if (!el) {
+    throw new Error("Map container not found");
   }
 
-  destroyMap();
-
-  if (!el.style.height) {
-    el.style.height = "360px";
+  if (!window.__leafletMap) {
+    window.__leafletMap = window.L.map(el, { zoomControl: true });
+    window.__leafletTile = window.L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19,
+      attribution: "&copy; OpenStreetMap",
+    }).addTo(window.__leafletMap);
+  } else if (window.__leafletMap._container !== el) {
+    destroyLeaflet();
+    window.__leafletMap = window.L.map(el, { zoomControl: true });
+    window.__leafletTile = window.L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19,
+      attribution: "&copy; OpenStreetMap",
+    }).addTo(window.__leafletMap);
   }
 
-  el.innerHTML = "";
-
-  const map = window.L.map(el, { preferCanvas: true });
-  __leafletMap = map;
-
-  window.L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    attribution: "&copy; OpenStreetMap contributors",
-    maxZoom: 19,
-  }).addTo(map);
-
-  const latlngs = track.map((point) => [point.lat, point.lon]);
-  const route = window.L.polyline(latlngs, { weight: 3 }).addTo(map);
-
-  try {
-    map.fitBounds(route.getBounds(), { padding: [20, 20] });
-  } catch (error) {
-    if (latlngs.length) {
-      map.setView(latlngs[0], 14);
-    }
+  if (window.__leafletMap && typeof window.__leafletMap.eachLayer === "function") {
+    window.__leafletMap.eachLayer((layer) => {
+      if (layer && layer !== window.__leafletTile) {
+        try {
+          window.__leafletMap.removeLayer(layer);
+        } catch (_) {}
+      }
+    });
   }
 
-  requestAnimationFrame(() => map.invalidateSize());
-  return true;
-}
-
-const USE_GMAPS_FALLBACK = false; // set true to test
-
-function renderGoogleFromPayload(payload) {
-  const el = getDriveMapEl();
-  if (!el) return false;
-  const track = extractGpsTrack(payload);
-  if (!track.length || !(window.google && window.google.maps)) {
-    return false;
+  if (coords.length >= 2) {
+    const latlngs = coords.map(([lat, lon]) => window.L.latLng(lat, lon));
+    window.L.polyline(latlngs, { weight: 3, opacity: 0.8 }).addTo(window.__leafletMap);
+    window.__leafletMap.fitBounds(window.L.latLngBounds(latlngs), { padding: [20, 20] });
+  } else if (coords.length === 1) {
+    window.__leafletMap.setView([coords[0][0], coords[0][1]], 14);
+  } else {
+    window.__leafletMap.setView([47.0707, 15.4395], 11);
   }
 
-  destroyMap();
-  el.innerHTML = "";
-
-  const map = new window.google.maps.Map(el, { mapTypeId: "terrain" });
-  const path = track.map((point) => ({ lat: point.lat, lng: point.lon }));
-  const polyline = new window.google.maps.Polyline({ path, strokeWeight: 3 });
-  polyline.setMap(map);
-
-  const bounds = new window.google.maps.LatLngBounds();
-  path.forEach((pt) => bounds.extend(pt));
-  map.fitBounds(bounds);
-
-  return true;
+  setTimeout(() => {
+    try {
+      window.__leafletMap.invalidateSize();
+    } catch (_) {}
+  }, 0);
 }
 
 function renderMapFromPayload(payload) {
   try {
-    if (!USE_GMAPS_FALLBACK && window.L) {
-      const ok = renderLeafletFromPayload(payload);
-      if (ok) {
-        return true;
-      }
-      if (window.google && window.google.maps) {
-        return renderGoogleFromPayload(payload);
-      }
-      return ok;
-    }
-    return renderGoogleFromPayload(payload);
-  } catch (error) {
-    console.error("Map render failed:", error);
-    if (!USE_GMAPS_FALLBACK && window.google && window.google.maps) {
-      return renderGoogleFromPayload(payload);
-    }
+    renderLeafletFromPayload(payload);
+    return true;
+  } catch (err) {
+    console.warn("Map render failed:", err);
     return false;
   }
 }
 
-function safeInitMap(payload, attempts = 0) {
-  const el = getDriveMapEl();
-  if (!el) {
-    destroyMap();
-  }
-  if (el && payload) {
-    renderMapFromPayload(payload);
+function tryInitMapOnceReady() {
+  const el = getMapContainer();
+  const payload = getPayload();
+
+  if (!el || !containerIsVisible(el) || !payload) {
+    if (!window.__rdeMapInitScheduled) {
+      window.__rdeMapInitScheduled = true;
+      requestAnimationFrame(() => {
+        window.__rdeMapInitScheduled = false;
+        tryInitMapOnceReady();
+      });
+    }
     return;
   }
-  if (attempts < 40) {
-    setTimeout(() => safeInitMap(window.__RDE_RESULT__, attempts + 1), 50);
+
+  try {
+    renderLeafletFromPayload(payload);
+  } catch (err) {
+    console.warn("Map render failed:", err);
   }
 }
 
-// Event wiring:
-// 1) When payload is injected
+function safeInitMap() {
+  tryInitMapOnceReady();
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  safeInitMap(window.__RDE_RESULT__);
+});
+
 window.addEventListener("rde:payload-ready", () => {
   safeInitMap(window.__RDE_RESULT__);
 });
 
-// 2) After HTMX swaps the results region
 document.addEventListener("htmx:afterSwap", (event) => {
-  const target = event.target || event.detail?.target || null;
-  if (
-    (target && (target.id === "analysis-results" || (typeof target.querySelector === "function" && target.querySelector("#drive-map")))) ||
-    getDriveMapEl()
-  ) {
-    safeInitMap(window.__RDE_RESULT__);
-  }
+  safeInitMap(window.__RDE_RESULT__);
 });
 
-// 3) Fallback on DOM ready (non-HTMX path)
-document.addEventListener("DOMContentLoaded", () => {
-  if (getDriveMapEl()) {
-    safeInitMap(window.__RDE_RESULT__);
+function bindHtmxLifecycle() {
+  if (!document.body) {
+    return;
   }
-});
+  document.body.addEventListener("htmx:beforeSwap", () => {
+    destroyLeaflet();
+  });
+  document.body.addEventListener("htmx:afterSwap", () => {
+    tryInitMapOnceReady();
+  });
+}
+
+if (document.body) {
+  bindHtmxLifecycle();
+} else {
+  document.addEventListener("DOMContentLoaded", bindHtmxLifecycle, { once: true });
+}
 
