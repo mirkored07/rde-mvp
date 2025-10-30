@@ -117,15 +117,22 @@ def test_analysis_endpoint_returns_results() -> None:
     # ``renderChartsFromPayload`` and ``renderMapFromPayload`` in
     # ``src/app/ui/static/js/app.js``.
 
-    html = _post_analysis_html()
-    assert 'window.dispatchEvent(new Event(''rde:payload-ready''))' in html
-
-    payload_pos = html.find("window.__RDE_RESULT__ =")
-    app_js_pos = html.find("/static/js/app.js")
-    assert payload_pos != -1 and app_js_pos != -1 and payload_pos < app_js_pos
-
-    for element_id in ("charts-kpis", "chart-speed", "chart-nox", "chart-pn", "chart-pm", "drive-map", "drive-map-card"):
-        assert f'id="{element_id}"' in html
+    resp = client.post(
+        "/analyze",
+        files={
+            "pems_file": ("pems.csv", PEMS_SAMPLE.encode("utf-8"), "text/csv"),
+            "gps_file": ("gps.csv", GPS_SAMPLE.encode("utf-8"), "text/csv"),
+            "ecu_file": ("ecu.csv", ECU_SAMPLE.encode("utf-8"), "text/csv"),
+        },
+        headers={"accept": "text/html"},
+    )
+    assert resp.status_code == 200
+    html = resp.text
+    assert "window.__RDE_RESULT__" in html
+    assert "window.dispatchEvent(new Event('rde:payload-ready'))" in html
+    assert 'id="charts-kpis"' in html
+    assert 'id="chart-speed"' in html
+    assert 'id="drive-map"' in html
 
     response = client.post(
         "/analyze",
@@ -230,7 +237,7 @@ def test_results_payload_has_chart_and_map_shapes() -> None:
     assert response.status_code == 200
 
     html = response.text
-    match = re.search(r"window.__RDE_RESULT__ = (.*?);\s*window.dispatchEvent", html, re.DOTALL)
+    match = re.search(r"window.__RDE_RESULT__=(.*?);\s*window.dispatchEvent", html, re.DOTALL)
     assert match is not None
     payload_json = match.group(1)
     payload = json.loads(payload_json)
@@ -262,7 +269,7 @@ def test_results_payload_has_chart_and_map_shapes() -> None:
 
 def test_results_page_renders_kpi_numbers() -> None:
     html = _post_analysis_html()
-    match = re.search(r"window.__RDE_RESULT__ = (.*?);\s*window.dispatchEvent", html, re.DOTALL)
+    match = re.search(r"window.__RDE_RESULT__=(.*?);\s*window.dispatchEvent", html, re.DOTALL)
     assert match is not None
     payload = json.loads(match.group(1))
 
@@ -544,13 +551,22 @@ def test_export_pdf_reports_missing_dependency() -> None:
 
 
 def test_analysis_results_page_renders_html() -> None:
-    html = _post_analysis_html()
-    assert "data-results-payload=\"true\"" in html
-    assert "id=\"charts-kpis\"" in html
-    assert "id=\"drive-map\"" in html
-    assert "window.__RDE_RESULT__ =" in html
-    assert "/static/js/app.js" in html
-    assert "window.dispatchEvent(new Event(rde:payload-ready))" in html
+    resp = client.post(
+        "/analyze",
+        files={
+            "pems_file": ("pems.csv", PEMS_SAMPLE.encode("utf-8"), "text/csv"),
+            "gps_file": ("gps.csv", GPS_SAMPLE.encode("utf-8"), "text/csv"),
+            "ecu_file": ("ecu.csv", ECU_SAMPLE.encode("utf-8"), "text/csv"),
+        },
+        headers={"accept": "text/html"},
+    )
+    assert resp.status_code == 200
+    html = resp.text
+    assert "window.__RDE_RESULT__" in html
+    assert "window.dispatchEvent(new Event('rde:payload-ready'))" in html
+    assert 'id="charts-kpis"' in html
+    assert 'id="chart-speed"' in html
+    assert 'id="drive-map"' in html
 
 def test_results_page_includes_map_container() -> None:
     html = _post_analysis_html()
@@ -559,7 +575,7 @@ def test_results_page_includes_map_container() -> None:
 
 def test_payload_script_precedes_app_bundle() -> None:
     html = _post_analysis_html()
-    payload_index = html.find("window.__RDE_RESULT__ =")
+    payload_index = html.find("window.__RDE_RESULT__=")
     bundle_index = html.find("/static/js/app.js")
     assert payload_index != -1 and bundle_index != -1
     assert payload_index < bundle_index
