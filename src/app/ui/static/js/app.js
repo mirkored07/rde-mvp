@@ -1,7 +1,8 @@
-// Singleton slots – do NOT use `let/const` twice across reloads
-window.__leafletMap = window.__leafletMap || null;
-window.__leafletTile = window.__leafletTile || null;
-window.__rdeMapInitScheduled = window.__rdeMapInitScheduled || false;
+;(() => {
+  window.__rde = window.__rde || {};
+  const R = window.__rde;
+  R.map = R.map || { instance: null, wired: false };
+})();
 
 (function () {
   const THEME_KEY = "rde-theme";
@@ -939,200 +940,98 @@ function renderChartsFromPayload(payload) {
 }
 
 // --- Map lifecycle guards ---
-function getPayload() {
-  return typeof window !== "undefined" &&
-    window.__RDE_RESULT__ &&
-    window.__RDE_RESULT__.visual &&
-    window.__RDE_RESULT__.visual.map
-    ? window.__RDE_RESULT__
-    : null;
-}
-
 function getMapContainer() {
-  return document.getElementById("drive-map") || null;
+  return document.getElementById("drive-map");
 }
 
-function containerIsVisible(el) {
-  if (!el) return false;
-  const r = el.getBoundingClientRect();
-  return r.width > 0 && r.height > 0;
+function getAnalysisPayload() {
+  return window.__RDE_RESULT__ && window.__RDE_RESULT__.visual ? window.__RDE_RESULT__.visual : null;
 }
 
-function destroyLeaflet() {
-  if (window.__leafletMap && typeof window.__leafletMap.remove === "function") {
+function destroyMap() {
+  const R = window.__rde;
+  if (!R || !R.map) return;
+  if (R.map.instance && typeof R.map.instance.remove === "function") {
     try {
-      window.__leafletMap.remove();
+      R.map.instance.remove();
     } catch (_) {}
   }
-  window.__leafletMap = null;
-  window.__leafletTile = null;
+  R.map.instance = null;
 }
 
-function renderLeafletFromPayload(payload) {
-  if (typeof window === "undefined" || typeof window.L === "undefined") {
-    throw new Error("Leaflet is not available");
-  }
-  if (input.analysis && input.analysis.map) {
-    return input.analysis.map;
-  }
-  if (input.map && typeof input.map === "object") {
-    return input.map;
-  }
-  return null;
-}
-
-  const mapData = payload?.visual?.map;
-  const coords = Array.isArray(mapData?.coords)
-    ? mapData.coords
-        .map((pair) => (Array.isArray(pair) && pair.length >= 2 ? [Number(pair[0]), Number(pair[1])] : null))
-        .filter((pair) => pair && Number.isFinite(pair[0]) && Number.isFinite(pair[1]))
-    : [];
-
+function renderLeafletFromPayload(visual) {
+  const R = window.__rde;
   const el = getMapContainer();
-  if (!el) {
-    throw new Error("Map container not found");
+  if (!el) throw new Error("drive-map container not found");
+  if (!visual) throw new Error("visual payload missing");
+  if (typeof L === "undefined") throw new Error("Leaflet is not available");
+
+  destroyMap();
+
+  const map = L.map(el, { attributionControl: false, zoomControl: true });
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19 }).addTo(map);
+
+  if (visual.map && Array.isArray(visual.map.latlngs) && visual.map.latlngs.length) {
+    const latlngs = visual.map.latlngs.map(({ lat, lon }) => [lat, lon]);
+    const line = L.polyline(latlngs, { weight: 3, opacity: 0.9 });
+    line.addTo(map);
+    map.fitBounds(line.getBounds(), { padding: [18, 18] });
+  } else if (visual.map && visual.map.center) {
+    const c = visual.map.center;
+    map.setView([c.lat, c.lon], c.zoom || 12);
+  } else {
+    map.setView([48.2082, 16.3738], 11);
   }
 
-  if (!window.__leafletMap) {
-    window.__leafletMap = window.L.map(el, { zoomControl: true });
-    window.__leafletTile = window.L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      maxZoom: 19,
-      attribution: "&copy; OpenStreetMap",
-    }).addTo(window.__leafletMap);
-  } else if (window.__leafletMap._container !== el) {
-    destroyLeaflet();
-    window.__leafletMap = window.L.map(el, { zoomControl: true });
-    window.__leafletTile = window.L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      maxZoom: 19,
-      attribution: "&copy; OpenStreetMap",
-    }).addTo(window.__leafletMap);
-  }
+  R.map.instance = map;
+  setTimeout(() => map.invalidateSize(), 0);
+}
 
-  if (window.__leafletMap && typeof window.__leafletMap.eachLayer === "function") {
-    window.__leafletMap.eachLayer((layer) => {
-      if (layer && layer !== window.__leafletTile) {
-        try {
-          window.__leafletMap.removeLayer(layer);
-        } catch (_) {}
-      }
-    });
-  }
+function tryInitMapOnceReady(deadlineMs = 3000) {
   const start = Date.now();
-  state._waiting = true;
-
-  const poll = () => {
-    const container = getDriveMapEl();
-    const hasContainer = Boolean(container);
-    const hasSize = hasContainer && container.offsetWidth > 0 && container.offsetHeight > 0;
-    const payload = state.latestPayload || extractMapPayload(window.__RDE_RESULT__);
-    const payloadReady = Boolean(payload && (state.latestPayload || isResultPayloadReady()));
-
-    if (hasContainer && hasSize && payloadReady) {
-      state._waiting = false;
-      state._waitId = null;
-      state.latestPayload = payload;
-      renderMapFromPayload(payload);
+  const tick = () => {
+    const el = getMapContainer();
+    const visual = getAnalysisPayload();
+    if (el && el.offsetWidth && el.offsetHeight && visual) {
+      try {
+        renderLeafletFromPayload(visual);
+      } catch (error) {
+        console.warn("Map render failed:", error);
+      }
       return;
     }
+    if (Date.now() - start < deadlineMs) {
+      requestAnimationFrame(tick);
+    } else if (!visual) {
+      console.warn("RDE: analysis payload unavailable; skipping charts and map.");
+    }
+  };
+  tick();
+}
 
-  if (coords.length >= 2) {
-    const latlngs = coords.map(([lat, lon]) => window.L.latLng(lat, lon));
-    window.L.polyline(latlngs, { weight: 3, opacity: 0.8 }).addTo(window.__leafletMap);
-    window.__leafletMap.fitBounds(window.L.latLngBounds(latlngs), { padding: [20, 20] });
-  } else if (coords.length === 1) {
-    window.__leafletMap.setView([coords[0][0], coords[0][1]], 14);
+(function wireLifecycle() {
+  const R = window.__rde;
+  if (R.map.wired) return;
+  R.map.wired = true;
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", () => tryInitMapOnceReady());
   } else {
-    window.__leafletMap.setView([47.0707, 15.4395], 11);
-  }
-
-  setTimeout(() => {
-    try {
-      window.__leafletMap.invalidateSize();
-    } catch (_) {}
-  }, 0);
-}
-
-function renderMapFromPayload(payload) {
-  try {
-    renderLeafletFromPayload(payload);
-    return true;
-  } catch (err) {
-    console.warn("Map render failed:", err);
-    return false;
-  }
-  scheduleInitWhenReady();
-}
-
-function tryInitMapOnceReady() {
-  const el = getMapContainer();
-  const payload = getPayload();
-
-  if (!el || !containerIsVisible(el) || !payload) {
-    if (!window.__rdeMapInitScheduled) {
-      window.__rdeMapInitScheduled = true;
-      requestAnimationFrame(() => {
-        window.__rdeMapInitScheduled = false;
-        tryInitMapOnceReady();
-      });
-    }
-    return;
-  }
-
-  try {
-    renderLeafletFromPayload(payload);
-  } catch (err) {
-    console.warn("Map render failed:", err);
-  }
-  state._resizeWired = true;
-  window.addEventListener("resize", () => {
-    if (!state.instance) return;
-    if (state._resizeTimer) {
-      window.clearTimeout(state._resizeTimer);
-    }
-    state._resizeTimer = window.setTimeout(() => {
-      if (state.instance && typeof state.instance.invalidateSize === "function") {
-        state.instance.invalidateSize();
-      }
-    }, 150);
-  });
-}
-
-function safeInitMap() {
-  tryInitMapOnceReady();
-}
-
-document.addEventListener("DOMContentLoaded", () => {
-  safeInitMap(window.__RDE_RESULT__);
-});
-
-window.addEventListener("rde:payload-ready", () => {
-  safeInitMap(window.__RDE_RESULT__);
-});
-
-document.addEventListener("htmx:afterSwap", (event) => {
-  safeInitMap(window.__RDE_RESULT__);
-});
-
-function bindHtmxLifecycle() {
-  if (!document.body) {
-    return;
-  }
-  document.body.addEventListener("htmx:beforeSwap", () => {
-    destroyLeaflet();
-  });
-  document.body.addEventListener("htmx:afterSwap", () => {
     tryInitMapOnceReady();
+  }
+
+  document.addEventListener("rde:payload-ready", () => tryInitMapOnceReady());
+
+  if (window.htmx) {
+    document.body.addEventListener("htmx:beforeSwap", () => destroyMap(), { passive: true });
+    document.body.addEventListener("htmx:afterSwap", () => tryInitMapOnceReady(), { passive: true });
+  }
+
+  window.addEventListener("resize", () => {
+    const map = R.map.instance;
+    if (map && typeof map.invalidateSize === "function") {
+      map.invalidateSize();
+    }
   });
-}
-
-if (document.body) {
-  bindHtmxLifecycle();
-} else {
-  document.addEventListener("DOMContentLoaded", bindHtmxLifecycle, { once: true });
-}
-
-if (document.readyState !== "loading") {
-  wireHtmxLifecycle();
-  wireResizeListener();
-}
+})();
 
