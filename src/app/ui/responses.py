@@ -7,6 +7,8 @@ from typing import Any, Dict, List
 
 from fastapi.responses import JSONResponse
 
+from src.app.utils.payload import ensure_results_payload_defaults
+
 __all__ = ["make_results_payload", "respond_success"]
 
 
@@ -171,4 +173,5 @@ def make_results_payload(
 def respond_success(payload: Dict[str, Any]) -> JSONResponse:
     """Wrap the payload in the canonical API response envelope."""
 
-    return JSONResponse(status_code=200, content={"results_payload": payload})
+    normalised = ensure_results_payload_defaults(payload)
+    return JSONResponse(status_code=200, content={"results_payload": normalised})

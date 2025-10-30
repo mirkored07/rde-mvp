@@ -1,5 +1,7 @@
 from typing import Any, Dict, List, Optional, Tuple
 
+from src.app.utils.payload import ensure_results_payload_defaults
+
 
 def _preview_table() -> Tuple[List[str], List[List[Any]]]:
     """
@@ -87,8 +89,10 @@ def wrap_http(results_payload: Dict[str, Any], *, http_status: int = 200) -> Dic
         payload["values"]   # must not KeyError
     So we MUST set "results_payload" at the top level.
     """
+    normalised_payload = ensure_results_payload_defaults(results_payload)
+
     return {
-        "results_payload": results_payload,
+        "results_payload": normalised_payload,
         "http_status": http_status,
         "status_code": http_status,
     }
