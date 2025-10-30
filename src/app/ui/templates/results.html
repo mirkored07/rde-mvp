@@ -350,7 +350,7 @@
       </div>
 
       <div class="flex flex-col gap-8">
-        <section class="rounded-3xl border border-slate-200/70 bg-slate-900/5 p-6 shadow-card dark:border-slate-700/70 dark:bg-slate-900/40">
+        <section id="charts-kpis" class="rounded-3xl border border-slate-200/70 bg-slate-900/5 p-6 shadow-card dark:border-slate-700/70 dark:bg-slate-900/40">
           <h3 class="text-sm font-semibold uppercase tracking-[0.3em] text-slate-500 dark:text-slate-300">Charts &amp; KPIs</h3>
           <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">Interactive time series.</p>
 
@@ -413,11 +413,13 @@
 
 {% if results_payload %}
 <script id="results-json">
-  window.__RDE_RESULT__ = {{ results_payload | tojson | safe }};
-  window.dispatchEvent(new Event('rde:payload-ready'));
+window.__RDE_RESULT__ = {{ results_payload | tojson | safe }};
+window.dispatchEvent(new Event('rde:payload-ready'));
 </script>
 {% else %}
-<script id="results-json">window.__RDE_RESULT__ = null;</script>
+<script id="results-json">
+window.__RDE_RESULT__ = null;
+</script>
 {% endif %}
 
 <script src="/static/js/app.js"></script>
