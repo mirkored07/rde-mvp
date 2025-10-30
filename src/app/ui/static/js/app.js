@@ -972,6 +972,14 @@ function renderLeafletFromPayload(payload) {
   if (typeof window === "undefined" || typeof window.L === "undefined") {
     throw new Error("Leaflet is not available");
   }
+  if (input.analysis && input.analysis.map) {
+    return input.analysis.map;
+  }
+  if (input.map && typeof input.map === "object") {
+    return input.map;
+  }
+  return null;
+}
 
   const mapData = payload?.visual?.map;
   const coords = Array.isArray(mapData?.coords)
@@ -1009,6 +1017,23 @@ function renderLeafletFromPayload(payload) {
       }
     });
   }
+  const start = Date.now();
+  state._waiting = true;
+
+  const poll = () => {
+    const container = getDriveMapEl();
+    const hasContainer = Boolean(container);
+    const hasSize = hasContainer && container.offsetWidth > 0 && container.offsetHeight > 0;
+    const payload = state.latestPayload || extractMapPayload(window.__RDE_RESULT__);
+    const payloadReady = Boolean(payload && (state.latestPayload || isResultPayloadReady()));
+
+    if (hasContainer && hasSize && payloadReady) {
+      state._waiting = false;
+      state._waitId = null;
+      state.latestPayload = payload;
+      renderMapFromPayload(payload);
+      return;
+    }
 
   if (coords.length >= 2) {
     const latlngs = coords.map(([lat, lon]) => window.L.latLng(lat, lon));
@@ -1035,6 +1060,7 @@ function renderMapFromPayload(payload) {
     console.warn("Map render failed:", err);
     return false;
   }
+  scheduleInitWhenReady();
 }
 
 function tryInitMapOnceReady() {
@@ -1057,6 +1083,18 @@ function tryInitMapOnceReady() {
   } catch (err) {
     console.warn("Map render failed:", err);
   }
+  state._resizeWired = true;
+  window.addEventListener("resize", () => {
+    if (!state.instance) return;
+    if (state._resizeTimer) {
+      window.clearTimeout(state._resizeTimer);
+    }
+    state._resizeTimer = window.setTimeout(() => {
+      if (state.instance && typeof state.instance.invalidateSize === "function") {
+        state.instance.invalidateSize();
+      }
+    }, 150);
+  });
 }
 
 function safeInitMap() {
@@ -1091,5 +1129,10 @@ if (document.body) {
   bindHtmxLifecycle();
 } else {
   document.addEventListener("DOMContentLoaded", bindHtmxLifecycle, { once: true });
+}
+
+if (document.readyState !== "loading") {
+  wireHtmxLifecycle();
+  wireResizeListener();
 }
 
