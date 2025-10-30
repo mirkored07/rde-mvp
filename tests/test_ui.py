@@ -219,6 +219,23 @@ def test_analysis_endpoint_returns_results() -> None:
     assert float(kpi_value) > 0
 
 
+def test_results_template_injects_payload_before_app_js() -> None:
+    html = _post_analysis_html()
+
+    assert 'id="drive-map"' in html
+    assert 'style="height: 360px; width: 100%;"' in html
+
+    payload_pos = html.find("window.__RDE_RESULT__")
+    app_pos = html.find('/static/js/app.js')
+    assert payload_pos != -1
+    assert app_pos != -1
+    assert payload_pos < app_pos
+
+    assert "window.dispatchEvent(new Event('rde:payload-ready'))" in html
+    assert '<link rel="stylesheet" href="/static/leaflet/leaflet.css">' in html
+    assert '<script src="/static/leaflet/leaflet.js"></script>' in html
+
+
 def test_results_payload_has_chart_and_map_shapes() -> None:
     samples_dir = Path(__file__).resolve().parents[1] / "data" / "samples"
     pems_text = (samples_dir / "pems_demo.csv").read_text()
@@ -265,6 +282,14 @@ def test_results_payload_has_chart_and_map_shapes() -> None:
     assert isinstance(map_payload, dict)
     points = map_payload.get("points")
     assert isinstance(points, list) and len(points) > 0
+
+
+def test_app_js_registers_map_event_hooks() -> None:
+    script = Path("src/app/ui/static/js/app.js").read_text(encoding="utf-8")
+
+    assert 'window.addEventListener("rde:payload-ready", () => {' in script
+    assert 'document.addEventListener("htmx:afterSwap", (event) => {' in script
+    assert 'safeInitMap(window.__RDE_RESULT__' in script
 
 
 def test_results_page_renders_kpi_numbers() -> None:
