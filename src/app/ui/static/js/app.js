@@ -631,16 +631,6 @@
       target.textContent = markdown;
     }
   }
-
-
-  function getResultPayload() {
-    const payload = window.__RDE_RESULT__;
-    if (!payload || typeof payload !== "object") {
-      return null;
-    }
-    return payload;
-  }
-
   function populateExportForms(payload) {
     let serialised = "";
     if (payload) {
@@ -664,11 +654,11 @@
     const container = root.querySelector("[data-component='analysis-results']");
     if (!container) return;
     renderSummary(container);
-    const payload = getResultPayload();
+    const payload = getPayload();
     populateExportForms(payload);
   }
 
-  domReady(() => {
+  onReady(() => {
     initTheme();
     initThemeToggle();
     initDropzones(document);
@@ -678,232 +668,335 @@
       initFormValidation(form);
     }
     initializeResults(document);
-    renderAnalysisVisuals(getResultPayload());
+    whenPayload((payload) => {
+      populateExportForms(payload);
+      renderAll(payload);
+    });
   });
 
   document.addEventListener("htmx:afterSwap", (event) => {
     if (event.target && event.target.id === "analysis-results") {
       initializeResults(event.target);
-      renderAnalysisVisuals(getResultPayload());
+      whenPayload((payload) => {
+        populateExportForms(payload);
+        renderAll(payload);
+      });
     }
   });
 })();
 
-function renderChartFromPayload(payload, chartEl) {
+function onReady(fn) {
+  if (typeof fn !== "function") return;
+  if (document.readyState !== "loading") {
+    fn();
+  } else {
+    document.addEventListener("DOMContentLoaded", fn);
+  }
+}
+
+function getPayload() {
+  const payload = window.__RDE_RESULT__;
   if (!payload || typeof payload !== "object") {
-    console.warn('Analysis payload missing, skipping chart render.');
+    return null;
+  }
+  return payload;
+}
+
+function whenPayload(cb) {
+  if (typeof cb !== "function") return;
+  const current = getPayload();
+  if (current) {
+    cb(current);
     return;
   }
-  if (!chartEl) {
-    console.warn('Chart container #charts-kpis not found, skipping chart render.');
-    return;
-  }
-  if (typeof Plotly === 'undefined' || typeof Plotly.newPlot !== 'function') {
-    console.warn('Plotly not available, skipping chart render.');
-    return;
-  }
-  const chartSource = payload.chart || (payload.analysis && payload.analysis.chart) || {};
-  if (!chartSource || typeof chartSource !== 'object') {
-    console.warn('Chart data missing from payload, skipping chart render.');
-    return;
-  }
-  const times = Array.isArray(chartSource.times)
-    ? chartSource.times
-    : Array.isArray(chartSource.t)
-    ? chartSource.t
-    : [];
-  const speedSeries = chartSource.speed || {};
-  const speedValues = Array.isArray(speedSeries.values)
-    ? speedSeries.values
-    : Array.isArray(speedSeries.y)
-    ? speedSeries.y
-    : [];
-  const pollutantSeries = Array.isArray(chartSource.pollutants) ? chartSource.pollutants : [];
-  if (!times.length && !speedValues.length && !pollutantSeries.length) {
-    console.warn('No time-series data found in payload, skipping chart render.');
-    return;
-  }
-  const chartHeight = Math.max(chartEl.clientHeight || 0, 280);
-  const baseTimes = times.length ? times : speedValues.map((_, index) => index);
-  const speedTrace = {
-    x: baseTimes,
-    y: speedValues,
-    name: speedSeries.label || 'Vehicle speed (m/s)',
-    yaxis: 'y1',
-    mode: 'lines',
-    line: { width: 2, color: '#38bdf8' },
+  const handler = () => {
+    window.removeEventListener("rde:payload-ready", handler);
+    const ready = getPayload();
+    if (ready) {
+      cb(ready);
+    }
   };
-  const pollutantTraces = pollutantSeries
-    .map((series, idx) => {
-      if (!series || typeof series !== 'object') {
-        return null;
-      }
-      const values = Array.isArray(series.values)
-        ? series.values
-        : Array.isArray(series.y)
-        ? series.y
-        : [];
-      const timestamps = Array.isArray(series.t) ? series.t : baseTimes;
-      return {
-        x: timestamps,
+  window.addEventListener("rde:payload-ready", handler);
+}
+
+function renderSpeedChart(payload) {
+  const el = document.getElementById("chart-speed");
+  if (!el) return;
+  if (!payload || typeof payload !== "object") return;
+  if (typeof Plotly === "undefined" || typeof Plotly.newPlot !== "function") return;
+
+  const chart = (payload.analysis && payload.analysis.chart) || payload.chart || {};
+  const times = Array.isArray(chart.times) ? chart.times : null;
+  const speedBlock = chart.speed || {};
+  const series = Array.isArray(speedBlock.values)
+    ? speedBlock.values
+    : Array.isArray(speedBlock.y)
+    ? speedBlock.y
+    : [];
+  if (!Array.isArray(series) || !series.some((value) => value != null)) return;
+
+  const traceTimes = Array.isArray(times) && times.length === series.length
+    ? times
+    : series.map((_, index) => index);
+
+  const trace = {
+    x: traceTimes,
+    y: series,
+    name: "Vehicle speed (m/s)",
+    mode: "lines",
+  };
+
+  Plotly.newPlot(
+    el,
+    [trace],
+    {
+      margin: { t: 16, r: 8, b: 36, l: 48 },
+      xaxis: { title: "Time" },
+      yaxis: { title: "m/s" },
+    },
+    { displaylogo: false, responsive: true },
+  );
+}
+
+function renderLineChart(elId, times, values, name, ytitle) {
+  if (!elId) return;
+  const el = document.getElementById(elId);
+  if (!el) return;
+  if (!Array.isArray(values) || !values.some((value) => value != null)) return;
+  if (typeof Plotly === "undefined" || typeof Plotly.newPlot !== "function") return;
+
+  const traceTimes = Array.isArray(times) && times.length === values.length
+    ? times
+    : values.map((_, index) => index);
+
+  Plotly.newPlot(
+    el,
+    [
+      {
+        x: traceTimes,
         y: values,
-        name: series.label || series.name || series.key || `Series ${idx + 1}`,
-        yaxis: 'y2',
-        mode: 'lines',
-        line: { width: 1.5 },
-      };
+        name,
+        mode: "lines",
+      },
+    ],
+    {
+      margin: { t: 16, r: 8, b: 36, l: 48 },
+      xaxis: { title: "Time" },
+      yaxis: { title: ytitle },
+    },
+    { displaylogo: false, responsive: true },
+  );
+}
+
+function renderEmissionCharts(payload) {
+  if (!payload || typeof payload !== "object") return;
+  const chart = (payload.analysis && payload.analysis.chart) || payload.chart || {};
+  const pollutants = Array.isArray(chart.pollutants) ? chart.pollutants : [];
+  const baseTimes =
+    (pollutants[0] && Array.isArray(pollutants[0].t) && pollutants[0].t) || chart.times || null;
+
+  const findSeries = (key) => {
+    const entry = pollutants.find((item) => item && item.key === key);
+    if (!entry || typeof entry !== "object") return [];
+    if (Array.isArray(entry.y)) return entry.y;
+    if (Array.isArray(entry.values)) return entry.values;
+    return [];
+  };
+
+  renderLineChart("chart-nox", baseTimes, findSeries("NOx"), "NOx", "mg/s");
+  renderLineChart("chart-pn", baseTimes, findSeries("PN"), "PN", "1/s");
+  renderLineChart("chart-pm", baseTimes, findSeries("PM"), "PM", "mg/s");
+}
+
+function renderMap(payload) {
+  const el = document.getElementById("drive-map");
+  if (!el) return;
+  if (!payload || typeof payload !== "object") return;
+  if (typeof L === "undefined" || typeof L.map !== "function") return;
+
+  const mapPayload = (payload.analysis && payload.analysis.map) || payload.map || {};
+  const points = Array.isArray(mapPayload.points) ? mapPayload.points : [];
+  if (!points.length) return;
+
+  if (el.__leafletInstance) {
+    el.__leafletInstance.remove();
+    el.__leafletInstance = null;
+  }
+
+  const map = L.map(el, { zoomControl: true });
+  el.__leafletInstance = map;
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19 }).addTo(map);
+
+  const latlngs = points
+    .map((point) => {
+      if (!point || typeof point !== "object") return null;
+      const lat = Number(point.lat);
+      const lon = Number(point.lon);
+      if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+      return [lat, lon];
     })
     .filter(Boolean);
-  const traces = [];
-  if (speedValues.length || baseTimes.length) {
-    traces.push(speedTrace);
-  }
-  traces.push(...pollutantTraces);
-  const layout = {
-    height: chartHeight,
-    margin: { t: 24, r: 24, b: 40, l: 48 },
-    paper_bgcolor: 'rgba(0,0,0,0)',
-    plot_bgcolor: 'rgba(0,0,0,0)',
-    font: { color: '#cbd5e1' },
-    xaxis: {
-      title: 'Time',
-      showgrid: false,
-      zeroline: false,
-      color: '#cbd5e1',
-    },
-    yaxis: {
-      title: speedSeries.unit ? `${speedSeries.unit}` : 'Speed (m/s)',
-      zeroline: false,
-      gridcolor: 'rgba(148, 163, 184, 0.25)',
-      color: '#cbd5e1',
-    },
-    yaxis2: {
-      title: 'Emission rate',
-      overlaying: 'y',
-      side: 'right',
-      zeroline: false,
-      gridcolor: 'rgba(148, 163, 184, 0.15)',
-      color: '#cbd5e1',
-    },
-    legend: {
-      orientation: 'h',
-      y: -0.25,
-      font: { size: 10, color: '#cbd5e1' },
-    },
-  };
-  const config = {
-    displaylogo: false,
-    responsive: true,
-    modeBarButtonsToRemove: ['lasso2d', 'select2d'],
-  };
-  Plotly.newPlot(chartEl, traces, layout, config);
+
+  if (!latlngs.length) return;
+
+  const polyline = L.polyline(latlngs, { weight: 3 }).addTo(map);
+  map.fitBounds(polyline.getBounds(), { padding: [16, 16] });
 }
 
-function renderMapFromPayload(payload, mapEl) {
-  if (!payload || typeof payload !== 'object') {
-    console.warn('Analysis payload missing, skipping map render.');
-    return;
-  }
-  if (!mapEl) {
-    console.warn('Map container #drive-map not found, skipping map render.');
-    return;
-  }
-  if (typeof L === 'undefined' || typeof L.map !== 'function') {
-    console.warn('Leaflet not available, skipping map render.');
-    return;
-  }
-  const mapSource = payload.map || (payload.analysis && payload.analysis.map) || {};
-  if (!mapSource || typeof mapSource !== 'object') {
-    console.warn('Map data missing from payload, skipping map render.');
-    return;
-  }
+function parseNumeric(value) {
+  if (value == null) return null;
+  const match = String(value).match(/[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?/);
+  if (!match) return null;
+  const parsed = Number(match[0]);
+  return Number.isFinite(parsed) ? parsed : null;
+}
 
-  const points = Array.isArray(mapSource.points) ? mapSource.points : [];
-  const bounds = Array.isArray(mapSource.bounds) ? mapSource.bounds : null;
-  const center = mapSource.center || null;
-
-  if (mapEl.__leafletInstance) {
-    mapEl.__leafletInstance.remove();
-    mapEl.__leafletInstance = null;
+function findPollutantSeries(payload, key) {
+  const chart = (payload.analysis && payload.analysis.chart) || payload.chart || {};
+  const pollutants = Array.isArray(chart.pollutants) ? chart.pollutants : [];
+  const entry = pollutants.find((item) => item && item.key === key);
+  if (!entry || typeof entry !== "object") {
+    return { values: [], times: null };
   }
+  const values = Array.isArray(entry.y)
+    ? entry.y
+    : Array.isArray(entry.values)
+    ? entry.values
+    : [];
+  const times = Array.isArray(entry.t) ? entry.t : chart.times || null;
+  return { values, times };
+}
 
-  try {
-    const map = L.map(mapEl, { zoomControl: true, scrollWheelZoom: false });
-    mapEl.__leafletInstance = map;
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 19,
-      attribution: '© OpenStreetMap contributors',
-    }).addTo(map);
+function getSpeedSeries(payload) {
+  const chart = (payload.analysis && payload.analysis.chart) || payload.chart || {};
+  const speed = chart.speed || {};
+  const values = Array.isArray(speed.values)
+    ? speed.values
+    : Array.isArray(speed.y)
+    ? speed.y
+    : [];
+  const times = Array.isArray(chart.times) ? chart.times : Array.isArray(speed.t) ? speed.t : null;
+  return { values, times };
+}
 
-    const latLngs = points
-      .map((point) => {
-        if (!point || typeof point !== 'object') {
-          return null;
-        }
-        const { lat, lon } = point;
-        const latitude = Number(lat);
-        const longitude = Number(lon);
-        if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
-          return [latitude, longitude];
-        }
-        return null;
-      })
-      .filter(Boolean);
-
-    if (latLngs.length) {
-      const route = L.polyline(latLngs, { color: '#38bdf8', weight: 3 }).addTo(map);
-      if (bounds && bounds.length === 2) {
-        map.fitBounds(bounds, { padding: [16, 16] });
-      } else {
-        map.fitBounds(route.getBounds(), { padding: [16, 16] });
-      }
-      L.circleMarker(latLngs[0], {
-        radius: 5,
-        color: '#22c55e',
-        fillColor: '#22c55e',
-        fillOpacity: 1,
-      }).addTo(map);
-      L.circleMarker(latLngs[latLngs.length - 1], {
-        radius: 5,
-        color: '#ef4444',
-        fillColor: '#ef4444',
-        fillOpacity: 1,
-      }).addTo(map);
-    } else if (center && Number.isFinite(center.lat) && Number.isFinite(center.lon)) {
-      map.setView([center.lat, center.lon], 14);
-    } else {
-      console.warn('No map geometry found, skipping map render.');
+function parseTotalDistanceKm(payload) {
+  const analysis = payload && payload.analysis;
+  const metrics = analysis && Array.isArray(analysis.metrics) ? analysis.metrics : [];
+  for (const metric of metrics) {
+    if (!metric || typeof metric !== "object") continue;
+    const label = String(metric.label || "").toLowerCase();
+    if (label.includes("total distance")) {
+      const parsed = parseNumeric(metric.value);
+      if (parsed !== null) return parsed;
     }
-  } catch (error) {
-    console.warn('map render failed:', error);
   }
+
+  if (analysis && analysis.overall) {
+    const overallDistance =
+      parseNumeric(analysis.overall.total_distance_km) ||
+      parseNumeric(analysis.overall.total_distance);
+    if (overallDistance !== null) return overallDistance;
+  }
+
+  const bins = analysis && Array.isArray(analysis.bins) ? analysis.bins : [];
+  if (bins.length) {
+    let sum = 0;
+    let found = false;
+    bins.forEach((bin) => {
+      if (!bin || typeof bin !== "object") return;
+      const distance = parseNumeric(bin.distance);
+      if (distance !== null) {
+        sum += distance;
+        found = true;
+      }
+    });
+    if (found) return sum;
+  }
+
+  return null;
 }
 
-function renderAnalysisVisuals(payload) {
-  if (!payload) {
-    console.warn('No analysis payload found, skipping chart and map render.');
-    return;
+function extractKpiValue(payload, key) {
+  const kpis = payload && payload.analysis && payload.analysis.kpis;
+  if (!kpis) return null;
+  const entry = kpis[key];
+  if (entry == null) return null;
+  if (typeof entry === "number") {
+    return Number.isFinite(entry) ? entry : null;
   }
-  const chartEl = document.getElementById('charts-kpis');
-  const mapEl = document.getElementById('drive-map');
-
-  if (!chartEl) {
-    console.warn('Chart container #charts-kpis not found, skipping chart render.');
-  } else {
-    renderChartFromPayload(payload, chartEl);
+  if (typeof entry === "object") {
+    if (entry.total && entry.total.value != null) {
+      const parsed = Number(entry.total.value);
+      return Number.isFinite(parsed) ? parsed : null;
+    }
+    if (entry.value != null) {
+      const parsed = Number(entry.value);
+      return Number.isFinite(parsed) ? parsed : null;
+    }
   }
-
-  if (!mapEl) {
-    console.warn('Map container #drive-map not found, skipping map render.');
-  } else {
-    renderMapFromPayload(payload, mapEl);
-  }
+  return null;
 }
 
-function domReady(callback) {
-  if (document.readyState === 'complete' || document.readyState === 'interactive') {
-    window.setTimeout(callback, 0);
-    return;
-  }
-  document.addEventListener('DOMContentLoaded', callback, { once: true });
+function formatKpiValue(value, unit) {
+  if (!Number.isFinite(value)) return "n/a";
+  const abs = Math.abs(value);
+  const formatted = abs >= 1000 ? value.toExponential(3) : value.toFixed(3);
+  return unit ? `${formatted} ${unit}` : formatted;
 }
+
+function updateKpiNodes(key, text) {
+  if (!key) return;
+  const nodes = document.querySelectorAll(`[data-kpi="${key}"]`);
+  nodes.forEach((node) => {
+    node.textContent = text;
+  });
+}
+
+function computeAndInjectKPIs(payload) {
+  if (!payload || typeof payload !== "object") return;
+
+  let distanceKm = parseTotalDistanceKm(payload);
+  if (!(Number.isFinite(distanceKm) && distanceKm > 0)) {
+    const { values } = getSpeedSeries(payload);
+    if (Array.isArray(values) && values.length) {
+      const sumSpeed = values.reduce((sum, value) => sum + (Number(value) || 0), 0);
+      const estimated = sumSpeed / 1000;
+      if (estimated > 0) {
+        distanceKm = estimated;
+      }
+    }
+  }
+
+  const definitions = [
+    { pollutantKey: "NOx", kpiKey: "NOx_mg_per_km", unit: "mg/km" },
+    { pollutantKey: "PN", kpiKey: "PN_1_per_km", unit: "1/km" },
+  ];
+
+  definitions.forEach((def) => {
+    let numeric = extractKpiValue(payload, def.kpiKey);
+
+    if (!Number.isFinite(numeric) && Number.isFinite(distanceKm) && distanceKm > 0) {
+      const { values } = findPollutantSeries(payload, def.pollutantKey);
+      if (Array.isArray(values) && values.length) {
+        const total = values.reduce((sum, value) => sum + (Number(value) || 0), 0);
+        const derived = total / distanceKm;
+        if (Number.isFinite(derived)) {
+          numeric = derived;
+        }
+      }
+    }
+
+    if (Number.isFinite(numeric)) {
+      updateKpiNodes(def.kpiKey, formatKpiValue(numeric, def.unit));
+    }
+  });
+}
+
+function renderAll(payload) {
+  if (!payload || typeof payload !== "object") return;
+  renderSpeedChart(payload);
+  renderEmissionCharts(payload);
+  renderMap(payload);
+  computeAndInjectKPIs(payload);
+}
+

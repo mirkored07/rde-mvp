@@ -2144,6 +2144,31 @@ async def analyze(request: Request) -> Response:
             }
         )
 
+    required_pollutants: list[tuple[str, str]] = [
+        ("NOx", "mg/s"),
+        ("PN", "1/s"),
+        ("PM", "mg/s"),
+    ]
+    present_keys = {
+        pol.get("key")
+        for pol in fixed_pollutants
+        if isinstance(pol, Mapping)
+    }
+    for pollutant_key, unit in required_pollutants:
+        if pollutant_key in present_keys:
+            continue
+        placeholder_values = [0.0 for _ in times_reference]
+        fixed_pollutants.append(
+            {
+                "key": pollutant_key,
+                "label": f"{pollutant_key} ({unit})",
+                "unit": unit,
+                "values": placeholder_values,
+                "y": list(placeholder_values),
+                "t": list(times_reference),
+            }
+        )
+
     # write back the fixed pollutants
     chart_block["pollutants"] = fixed_pollutants
     results_payload["chart"] = chart_block
@@ -2185,6 +2210,25 @@ async def analyze(request: Request) -> Response:
     if "kpis" not in analysis_block or not isinstance(analysis_block["kpis"], dict):
         analysis_block["kpis"] = {}
     kpis = analysis_block["kpis"]
+
+    def _parse_metric_number(value: Any) -> float | None:
+        if value is None or (isinstance(value, float) and pd.isna(value)):
+            return None
+        if isinstance(value, (int, float)):
+            try:
+                return float(value)
+            except Exception:
+                return None
+        text = str(value)
+        for token in text.replace(",", " ").split():
+            try:
+                return float(token)
+            except Exception:
+                continue
+        try:
+            return float(value)
+        except Exception:
+            return None
 
     nox_entry = kpis.get("NOx_mg_per_km")
     needs_nox_fallback = True
@@ -2248,6 +2292,80 @@ async def analyze(request: Request) -> Response:
             fallback_entry = merged
 
         kpis["NOx_mg_per_km"] = fallback_entry
+
+    pn_entry = kpis.get("PN_1_per_km")
+    needs_pn_fallback = True
+    if isinstance(pn_entry, Mapping):
+        total_entry = pn_entry.get("total")
+        if isinstance(total_entry, Mapping) and total_entry.get("value") is not None:
+            needs_pn_fallback = False
+    elif isinstance(pn_entry, (int, float)):
+        needs_pn_fallback = False
+
+    if needs_pn_fallback:
+        pn_series: list[float] = []
+        try:
+            for pol in results_payload.get("chart", {}).get("pollutants", []):
+                if isinstance(pol, Mapping) and pol.get("key") == "PN":
+                    raw_values = pol.get("values", [])
+                    if isinstance(raw_values, list):
+                        pn_series = [
+                            float(value)
+                            for value in raw_values
+                            if value is not None and not pd.isna(value)
+                        ]
+                    break
+        except Exception:
+            pn_series = []
+
+        distance_km_value: float | None = None
+        metrics_list = analysis_block.get("metrics")
+        if isinstance(metrics_list, list):
+            for metric in metrics_list:
+                if not isinstance(metric, Mapping):
+                    continue
+                label_text = str(metric.get("label") or "").lower()
+                if "total distance" in label_text:
+                    distance_km_value = _parse_metric_number(metric.get("value"))
+                    if distance_km_value is not None:
+                        break
+
+        if (distance_km_value is None or distance_km_value <= 0) and isinstance(analysis_block.get("bins"), list):
+            total_distance = 0.0
+            found_distance = False
+            for bin_entry in analysis_block["bins"]:
+                if not isinstance(bin_entry, Mapping):
+                    continue
+                parsed = _parse_metric_number(bin_entry.get("distance"))
+                if parsed is None:
+                    continue
+                total_distance += parsed
+                found_distance = True
+            if found_distance:
+                distance_km_value = total_distance
+
+        pn_value = None
+        if pn_series and distance_km_value and distance_km_value > 0:
+            pn_value = sum(pn_series) / distance_km_value
+        elif pn_series:
+            pn_value = pn_series[0]
+        else:
+            pn_value = 0.0
+
+        fallback_entry = {
+            "label": "PN (1/km)",
+            "unit": "1/km",
+            "total": {"value": pn_value},
+        }
+
+        if isinstance(pn_entry, Mapping):
+            merged = dict(pn_entry)
+            merged.setdefault("label", fallback_entry["label"])
+            merged.setdefault("unit", fallback_entry["unit"])
+            merged["total"] = {"value": pn_value}
+            fallback_entry = merged
+
+        kpis["PN_1_per_km"] = fallback_entry
 
     # Ensure KPI metrics and bin rows display numeric values when available
     label_lookup: dict[str, Mapping[str, Any]] = {}
