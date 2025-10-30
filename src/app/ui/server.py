@@ -2663,17 +2663,27 @@ async def analyze(request: Request) -> Response:
 
     if not isinstance(results_payload, dict):
         results_payload = dict(results_payload or {})
-    visuals = results_payload.get("visual")
-    if not isinstance(visuals, dict):
-        visuals = dict(visuals) if isinstance(visuals, Mapping) else {}
-    if visuals.get("map") is None:
-        visuals["map"] = {
-            "center": {"lat": 48.2082, "lon": 16.3738, "zoom": 8},
-            "latlngs": [],
-        }
-    if visuals.get("chart") is None:
-        visuals["chart"] = {"series": []}
-    results_payload["visual"] = visuals
+
+    results_payload = results_payload or {}
+
+    visual_raw = results_payload.get("visual")
+    visual = dict(visual_raw) if isinstance(visual_raw, Mapping) else {}
+    visual.setdefault(
+        "map",
+        {"center": {"lat": 48.2082, "lon": 16.3738, "zoom": 8}, "latlngs": []},
+    )
+    visual.setdefault("chart", {"series": []})
+    results_payload["visual"] = visual
+
+    if (
+        results_payload.get("kpi_numbers") is None
+        and results_payload.get("kpis") is None
+    ):
+        results_payload["kpi_numbers"] = [
+            {"label": "Trips", "value": 0},
+            {"label": "Distance [km]", "value": 0},
+            {"label": "Avg Speed [km/h]", "value": 0},
+        ]
 
     visual_shapes = _build_visual_shapes(results_payload)
     results_payload["visual"] = visual_shapes

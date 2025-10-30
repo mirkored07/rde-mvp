@@ -45,48 +45,51 @@ function initializeResults(root) {
 function renderAnalysisVisuals(payload) {
   const result = payload && typeof payload === 'object' ? payload : getResultPayload();
   populateExportForms(result);
-  renderMapFromPayload(result);
   if (!result) {
     console.info('RDE: analysis payload unavailable; skipping charts and map.');
-    return;
-  }
-
-  const chartsOk = renderChartsFromPayload(result);
-  const kpiOk = injectKpisFromPayload(result);
-
-  if (!chartsOk) {
-    console.warn('RDE: chart render skipped or partial');
-  }
-
-  if (!kpiOk) {
-    console.info('RDE: KPI injection skipped; nothing to update.');
   }
 }
 
 ;(() => {
-  // Avoid duplicate wiring across hot reloads
   if (window.__rdeAppWired__) return;
   window.__rdeAppWired__ = true;
 
-  function safeInit() {
+  function initFromPayload() {
     try {
-      // Your existing init that draws charts/map from window.__RDE_RESULT__
-      if (typeof renderAnalysisVisuals === 'function') {
-        renderAnalysisVisuals(window.__RDE_RESULT__);
+      const p = window.__RDE_RESULT__;
+      renderMapFromPayload(p);
+      const chartsOk = renderChartsFromPayload(p);
+      const kpiOk = renderKpisFromPayload(p);
+      if (!chartsOk) {
+        console.warn('RDE: chart render skipped or partial');
       }
-    } catch (e) {
-      console.warn(e);
+      if (!kpiOk) {
+        console.info('RDE: KPI injection skipped; nothing to update.');
+      }
+      if (typeof renderAnalysisVisuals === 'function') {
+        renderAnalysisVisuals(p);
+      }
+    } catch (error) {
+      console.warn('Map render failed:', error);
+      return false;
     }
+    return true;
   }
 
-  // Required by tests: register map event hooks
-  window.addEventListener('rde:payload-ready', safeInit);
+  window.__rdeInitFromPayload__ = initFromPayload;
 
-  // Also run once after DOM is ready (in case payload is already present)
+  window.addEventListener('rde:payload-ready', () => {
+    initFromPayload();
+  });
+
+  const run = () => {
+    initFromPayload();
+  };
+
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', safeInit);
+    document.addEventListener('DOMContentLoaded', run);
   } else {
-    safeInit();
+    run();
   }
 })();
 
@@ -726,7 +729,9 @@ function renderAnalysisVisuals(payload) {
   document.addEventListener("htmx:afterSwap", (event) => {
     if (event.target && event.target.id === "analysis-results") {
       initializeResults(event.target);
-      renderAnalysisVisuals(window.__RDE_RESULT__);
+      if (typeof window.__rdeInitFromPayload__ === "function") {
+        window.__rdeInitFromPayload__();
+      }
     }
   });
 })();
@@ -858,6 +863,28 @@ function injectKpisFromPayload(payload) {
   return updated;
 }
 
+function renderKpisFromPayload(payload) {
+  const host = document.getElementById('charts-kpis');
+  if (!host) return false;
+
+  const source = payload && typeof payload === 'object' ? payload : window.__RDE_RESULT__;
+  if (!source || typeof source !== 'object') return false;
+
+  const hasKpiNumbers = Array.isArray(source.kpi_numbers) ? source.kpi_numbers.length > 0 : Boolean(source.kpi_numbers);
+  const hasKpis = source.kpis && typeof source.kpis === 'object' && Object.keys(source.kpis).length > 0;
+  if (!hasKpiNumbers && !hasKpis) {
+    return false;
+  }
+
+  host.setAttribute('data-kpis-present', '1');
+
+  if (typeof injectKpisFromPayload === 'function') {
+    return Boolean(injectKpisFromPayload(source));
+  }
+
+  return true;
+}
+
 function renderChartsFromPayload(payload) {
   if (!payload || typeof payload !== "object") return false;
   if (typeof Plotly === "undefined" || typeof Plotly.newPlot !== "function") {
@@ -865,8 +892,22 @@ function renderChartsFromPayload(payload) {
     return false;
   }
 
+  const host = document.getElementById('charts-kpis');
+  if (!host) return false;
+
+  const ensureChartElement = (id) => {
+    let el = document.getElementById(id);
+    if (!el) {
+      el = document.createElement('div');
+      el.id = id;
+      el.className = 'rde-chart';
+      host.appendChild(el);
+    }
+    return el;
+  };
+
   const { values: speedValuesRaw, times: speedTimes } = getSpeedSeries(payload);
-  const speedEl = document.getElementById("chart-speed");
+  const speedEl = ensureChartElement('chart-speed');
 
   const sanitizeSeries = (values) => {
     if (!Array.isArray(values)) return [];
@@ -921,7 +962,7 @@ function renderChartsFromPayload(payload) {
   ];
 
   pollutantCharts.forEach(({ key, elementId, label, unit, color }) => {
-    const target = document.getElementById(elementId);
+    const target = ensureChartElement(elementId);
     if (!target) return;
     const series = findPollutantSeries(payload, key);
     const values = sanitizeSeries(series.values);
