@@ -986,20 +986,55 @@ def _build_visual_shapes(results_payload: Mapping[str, Any] | None) -> dict[str,
                     continue
                 coords.append([lat_f, lon_f])
 
-    if not coords:
-        coords = [[0.0, 0.0]]
+    latlngs = [{"lat": lat, "lon": lon} for lat, lon in coords]
+
+    if latlngs:
+        latitudes = [entry["lat"] for entry in latlngs]
+        longitudes = [entry["lon"] for entry in latlngs]
+        min_lat = min(latitudes)
+        max_lat = max(latitudes)
+        min_lon = min(longitudes)
+        max_lon = max(longitudes)
+        center = {
+            "lat": sum(latitudes) / len(latitudes),
+            "lon": sum(longitudes) / len(longitudes),
+            "zoom": 13,
+        }
+        bounds = [[min_lat, min_lon], [max_lat, max_lon]]
+    else:
+        center = {"lat": 48.2082, "lon": 16.3738, "zoom": 12}
+        bounds = None
+
+    times_series = list(time_seconds[:target_len]) if target_len else list(time_seconds)
+
+    chart_series = [
+        {"name": "speed_mps", "x": times_series, "y": list(speed_values)},
+        {"name": "NOx", "x": times_series, "y": list(series_nox)},
+        {"name": "PN", "x": times_series, "y": list(series_pn)},
+        {"name": "PM", "x": times_series, "y": list(series_pm)},
+    ]
+
+    visual_map = {
+        "latlngs": latlngs,
+        "center": center,
+        "coords": coords,
+    }
+    if bounds:
+        visual_map["bounds"] = bounds
 
     return {
         "chart": {
-            "time_s": time_seconds[:target_len] if target_len else time_seconds,
-            "series": {
-                "speed_mps": speed_values,
-                "nox": series_nox,
-                "pn": series_pn,
-                "pm": series_pm,
+            "times": times_series,
+            "time_s": times_series,
+            "series": chart_series,
+            "series_map": {
+                "speed_mps": list(speed_values),
+                "nox": list(series_nox),
+                "pn": list(series_pn),
+                "pm": list(series_pm),
             },
         },
-        "map": {"coords": coords},
+        "map": visual_map,
     }
 
 

@@ -2,6 +2,53 @@
   window.__rde = window.__rde || {};
   const R = window.__rde;
   R.map = R.map || { instance: null, wired: false };
+
+  function tryInitMapOnceReady() {
+    // call your existing safeInit/tryInit logic here
+    if (typeof window.safeInitMap === "function") window.safeInitMap();
+    else if (typeof window.tryInitMapOnceReady === "function") window.tryInitMapOnceReady();
+  }
+
+  if (!R.map.wired) {
+    R.map.wired = true;
+
+    // Required by tests: register rde:payload-ready hook
+    window.addEventListener("rde:payload-ready", () => {
+      try {
+        if (R.map.instance && R.map.instance.invalidateSize) {
+          R.map.instance.invalidateSize();
+        }
+        tryInitMapOnceReady();
+      } catch (e) {
+        console.warn(e);
+      }
+    });
+
+    // Initial DOM load
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", tryInitMapOnceReady);
+    } else {
+      tryInitMapOnceReady();
+    }
+
+    // HTMX swaps (no-op if htmx not present)
+    if (window.htmx) {
+      document.body.addEventListener("htmx:afterSwap", tryInitMapOnceReady, { passive: true });
+      document.body.addEventListener(
+        "htmx:beforeSwap",
+        () => {
+          destroyMap();
+        },
+        { passive: true },
+      );
+    }
+
+    window.addEventListener("resize", () => {
+      if (R.map.instance && typeof R.map.instance.invalidateSize === "function") {
+        R.map.instance.invalidateSize();
+      }
+    });
+  }
 })();
 
 (function () {
@@ -665,6 +712,9 @@
   function safeInit() {
     const payload = getResultPayload();
     populateExportForms(payload);
+    if (getMapContainer()) {
+      safeInitMap(window.__RDE_RESULT__ || payload);
+    }
     if (!payload) {
       console.info("RDE: analysis payload unavailable; skipping charts and map.");
       return;
@@ -681,7 +731,6 @@
       console.info("RDE: KPI injection skipped; nothing to update.");
     }
 
-    safeInitMap(payload);
   }
 
   function handleDomReady() {
@@ -944,94 +993,166 @@ function getMapContainer() {
   return document.getElementById("drive-map");
 }
 
-function getAnalysisPayload() {
-  return window.__RDE_RESULT__ && window.__RDE_RESULT__.visual ? window.__RDE_RESULT__.visual : null;
+function resolveVisualPayload(payload) {
+  const source = payload && typeof payload === "object" ? payload : window.__RDE_RESULT__;
+  if (!source || typeof source !== "object") return null;
+
+  const direct = source.visual;
+  if (direct && typeof direct === "object") {
+    return direct;
+  }
+
+  const analysis = source.analysis;
+  if (analysis && typeof analysis === "object") {
+    if (analysis.visual && typeof analysis.visual === "object") {
+      return analysis.visual;
+    }
+    const chart = analysis.chart && typeof analysis.chart === "object" ? analysis.chart : null;
+    const map = analysis.map && typeof analysis.map === "object" ? analysis.map : null;
+    if (chart || map) {
+      return { chart: chart || {}, map: map || {} };
+    }
+  }
+
+  const chart = source.chart && typeof source.chart === "object" ? source.chart : null;
+  const map = source.map && typeof source.map === "object" ? source.map : null;
+  if (chart || map) {
+    return { chart: chart || {}, map: map || {} };
+  }
+
+  return null;
 }
 
 function destroyMap() {
   const R = window.__rde;
   if (!R || !R.map) return;
-  if (R.map.instance && typeof R.map.instance.remove === "function") {
+  const instance = R.map.instance;
+  if (instance && typeof instance.remove === "function") {
     try {
-      R.map.instance.remove();
-    } catch (_) {}
+      instance.remove();
+    } catch (error) {
+      console.warn(error);
+    }
   }
   R.map.instance = null;
 }
 
-function renderLeafletFromPayload(visual) {
-  const R = window.__rde;
-  const el = getMapContainer();
-  if (!el) throw new Error("drive-map container not found");
-  if (!visual) throw new Error("visual payload missing");
-  if (typeof L === "undefined") throw new Error("Leaflet is not available");
+function renderLeafletFromPayload(container, mapData) {
+  const coordinates = Array.isArray(mapData.latlngs)
+    ? mapData.latlngs
+        .map((entry) => {
+          if (!entry || typeof entry !== "object") return null;
+          const lat = Number(entry.lat);
+          const lon = Number(entry.lon ?? entry.lng);
+          if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+          return [lat, lon];
+        })
+        .filter(Boolean)
+    : [];
 
   destroyMap();
 
-  const map = L.map(el, { attributionControl: false, zoomControl: true });
-  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19 }).addTo(map);
+  try {
+    const map = L.map(container, { attributionControl: false, zoomControl: true });
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19 }).addTo(map);
 
-  if (visual.map && Array.isArray(visual.map.latlngs) && visual.map.latlngs.length) {
-    const latlngs = visual.map.latlngs.map(({ lat, lon }) => [lat, lon]);
-    const line = L.polyline(latlngs, { weight: 3, opacity: 0.9 });
-    line.addTo(map);
-    map.fitBounds(line.getBounds(), { padding: [18, 18] });
-  } else if (visual.map && visual.map.center) {
-    const c = visual.map.center;
-    map.setView([c.lat, c.lon], c.zoom || 12);
-  } else {
-    map.setView([48.2082, 16.3738], 11);
+    const bounds = Array.isArray(mapData.bounds) ? mapData.bounds : null;
+    if (bounds && bounds.length === 2) {
+      const [[south, west], [north, east]] = bounds.map((entry) => [Number(entry[0]), Number(entry[1])]);
+      if ([south, west, north, east].every((value) => Number.isFinite(value))) {
+        map.fitBounds([
+          [south, west],
+          [north, east],
+        ]);
+      }
+    }
+
+    if (coordinates.length) {
+      const line = L.polyline(coordinates, { weight: 3, opacity: 0.9 });
+      line.addTo(map);
+      if (!map.getBounds().isValid()) {
+        map.fitBounds(line.getBounds(), { padding: [18, 18] });
+      }
+    } else {
+      const center = mapData.center && typeof mapData.center === "object" ? mapData.center : {};
+      const lat = Number(center.lat);
+      const lon = Number(center.lon ?? center.lng);
+      const zoom = Number(center.zoom);
+      const fallbackLat = Number.isFinite(lat) ? lat : 48.2082;
+      const fallbackLon = Number.isFinite(lon) ? lon : 16.3738;
+      const fallbackZoom = Number.isFinite(zoom) ? zoom : 12;
+      map.setView([fallbackLat, fallbackLon], fallbackZoom);
+    }
+
+    window.__rde.map.instance = map;
+    setTimeout(() => map.invalidateSize(), 0);
+    return true;
+  } catch (error) {
+    console.warn("Map render failed:", error);
+    return false;
+  }
+}
+
+function safeInitMap(payload) {
+  const R = window.__rde || (window.__rde = {});
+  R.map = R.map || { instance: null, wired: false };
+  const warnings = R.map.warnings || (R.map.warnings = {});
+  const warn = (key, message) => {
+    if (warnings[key]) return;
+    warnings[key] = true;
+    console.warn(message);
+  };
+
+  const container = getMapContainer();
+  if (!container) {
+    warn("container", "RDE: map container not found; skipping map render.");
+    return false;
   }
 
-  R.map.instance = map;
-  setTimeout(() => map.invalidateSize(), 0);
+  const visual = resolveVisualPayload(payload);
+  if (!visual || typeof visual !== "object") {
+    warn("visual", "RDE: map payload unavailable; skipping map render.");
+    return false;
+  }
+
+  const mapData = visual.map && typeof visual.map === "object" ? visual.map : null;
+  if (!mapData) {
+    warn("map", "RDE: map payload unavailable; skipping map render.");
+    return false;
+  }
+
+  const hasLatLngs = Array.isArray(mapData.latlngs) && mapData.latlngs.length > 0;
+  const hasCenter = mapData.center && typeof mapData.center === "object";
+  if (!hasLatLngs && !hasCenter) {
+    warn("data", "RDE: map payload unavailable; skipping map render.");
+    return false;
+  }
+
+  if (typeof L === "undefined" || typeof L.map !== "function") {
+    warn("leaflet", "RDE: Leaflet unavailable; skipping map render.");
+    return false;
+  }
+
+  const success = renderLeafletFromPayload(container, mapData);
+  if (success) {
+    R.map.warnings = {};
+  }
+  return success;
 }
 
 function tryInitMapOnceReady(deadlineMs = 3000) {
   const start = Date.now();
-  const tick = () => {
-    const el = getMapContainer();
-    const visual = getAnalysisPayload();
-    if (el && el.offsetWidth && el.offsetHeight && visual) {
-      try {
-        renderLeafletFromPayload(visual);
-      } catch (error) {
-        console.warn("Map render failed:", error);
+  const attempt = () => {
+    const container = getMapContainer();
+    if (container && container.offsetWidth && container.offsetHeight) {
+      if (safeInitMap(window.__RDE_RESULT__)) {
+        return;
       }
-      return;
     }
     if (Date.now() - start < deadlineMs) {
-      requestAnimationFrame(tick);
-    } else if (!visual) {
-      console.warn("RDE: analysis payload unavailable; skipping charts and map.");
+      requestAnimationFrame(attempt);
     }
   };
-  tick();
+  attempt();
 }
-
-(function wireLifecycle() {
-  const R = window.__rde;
-  if (R.map.wired) return;
-  R.map.wired = true;
-
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", () => tryInitMapOnceReady());
-  } else {
-    tryInitMapOnceReady();
-  }
-
-  document.addEventListener("rde:payload-ready", () => tryInitMapOnceReady());
-
-  if (window.htmx) {
-    document.body.addEventListener("htmx:beforeSwap", () => destroyMap(), { passive: true });
-    document.body.addEventListener("htmx:afterSwap", () => tryInitMapOnceReady(), { passive: true });
-  }
-
-  window.addEventListener("resize", () => {
-    const map = R.map.instance;
-    if (map && typeof map.invalidateSize === "function") {
-      map.invalidateSize();
-    }
-  });
-})();
 
