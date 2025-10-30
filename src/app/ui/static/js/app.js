@@ -45,51 +45,48 @@ function initializeResults(root) {
 function renderAnalysisVisuals(payload) {
   const result = payload && typeof payload === 'object' ? payload : getResultPayload();
   populateExportForms(result);
-  if (!result) {
-    console.info('RDE: analysis payload unavailable; skipping charts and map.');
-  }
 }
 
 ;(() => {
   if (window.__rdeAppWired__) return;
   window.__rdeAppWired__ = true;
 
-  function safeInitMap(payload) {
+  function initFromPayload() {
+    const p = window.__RDE_RESULT__ || {};
+
     try {
-      renderMapFromPayload(payload);
-      return true;
+      renderMapFromPayload(p);
     } catch (error) {
       console.warn('Map render failed:', error);
-      return false;
     }
-  }
 
-  function initFromPayload() {
     try {
-      const p = window.__RDE_RESULT__ || {};
-      safeInitMap(window.__RDE_RESULT__ || {});
-      const chartsOk = renderChartsFromPayload(p);
-      const kpiOk = renderKpisFromPayload(p);
-      if (!chartsOk) {
-        console.warn('RDE: chart render skipped or partial');
-      }
-      if (!kpiOk) {
-        console.info('RDE: KPI injection skipped; nothing to update.');
-      }
-      if (typeof renderAnalysisVisuals === 'function') {
-        renderAnalysisVisuals(p);
-      }
+      renderChartsFromPayload(p);
     } catch (error) {
-      console.warn('Init from payload failed:', error);
-      return false;
+      console.warn('Chart render failed:', error);
     }
+
+    try {
+      renderKpisFromPayload(p);
+    } catch (error) {
+      console.warn('KPI render failed:', error);
+    }
+
+    if (typeof renderAnalysisVisuals === 'function') {
+      try {
+        renderAnalysisVisuals(p);
+      } catch (error) {
+        console.warn('Analysis visuals render failed:', error);
+      }
+    }
+
     return true;
   }
 
   window.__rdeInitFromPayload__ = initFromPayload;
 
   // EXACT LITERAL required by tests:
-  window.addEventListener("rde:payload-ready", () => {
+  window.addEventListener('rde:payload-ready', () => {
     initFromPayload();
   });
 
@@ -875,27 +872,27 @@ function injectKpisFromPayload(payload) {
 }
 
 function renderKpisFromPayload(payload) {
-  const summaryHost = document.getElementById('analysis-summary');
-  const kpiSource = payload && typeof payload === 'object' ? (payload.kpi_numbers ?? payload.kpis) : null;
-  if (summaryHost && kpiSource) {
-    summaryHost.setAttribute('data-kpis-present', '1');
-  }
-
-  const host = document.getElementById('charts-kpis');
-  if (!host) return false;
-
+  const host = document.getElementById('analysis-summary-content');
   const source = payload && typeof payload === 'object' ? payload : window.__RDE_RESULT__;
-  if (!source || typeof source !== 'object') return false;
+  const kpis = source && typeof source === 'object' ? source.kpi_numbers ?? source.kpis : null;
 
-  const hasKpiNumbers = Array.isArray(source.kpi_numbers) ? source.kpi_numbers.length > 0 : Boolean(source.kpi_numbers);
-  const hasKpis = source.kpis && typeof source.kpis === 'object' && Object.keys(source.kpis).length > 0;
-  if (!hasKpiNumbers && !hasKpis) {
+  if (!host) {
+    console.warn('RDE: KPI host not found, skipping');
     return false;
   }
 
-  host.setAttribute('data-kpis-present', '1');
+  if (!kpis) {
+    console.warn('RDE: KPI data missing, skipping');
+    return false;
+  }
 
-  if (typeof injectKpisFromPayload === 'function') {
+  try {
+    host.setAttribute('data-kpis-present', '1');
+  } catch (error) {
+    // Ignore DOM errors to keep bootstrap resilient.
+  }
+
+  if (source && typeof injectKpisFromPayload === 'function') {
     return Boolean(injectKpisFromPayload(source));
   }
 
@@ -903,36 +900,36 @@ function renderKpisFromPayload(payload) {
 }
 
 function renderChartsFromPayload(payload) {
-  if (!payload || typeof payload !== "object") return false;
-  if (typeof Plotly === "undefined" || typeof Plotly.newPlot !== "function") {
-    console.warn("RDE: Plotly unavailable; charts skipped.");
+  const chartHost = document.getElementById('chart-speed');
+  if (!chartHost) {
+    console.warn('RDE: chart host not found, skipping');
     return false;
   }
 
-  const chartHost = document.getElementById('chart-speed');
-  if (chartHost) {
-    const visual = resolveVisualPayload(payload) || {};
-    if (visual && typeof visual === 'object' && visual.chart) {
-      chartHost.setAttribute('data-chart-ready', '1');
-    }
+  const source = payload && typeof payload === 'object' ? payload : window.__RDE_RESULT__;
+  if (!source || typeof source !== 'object') {
+    console.warn('RDE: no chart data, skipping');
+    return false;
   }
 
-  const host = document.getElementById('charts-kpis');
-  if (!host) return false;
+  const visual = resolveVisualPayload(source);
+  if (!visual || typeof visual !== 'object' || !visual.chart) {
+    console.warn('RDE: no chart data, skipping');
+    return false;
+  }
 
-  const ensureChartElement = (id) => {
-    let el = document.getElementById(id);
-    if (!el) {
-      el = document.createElement('div');
-      el.id = id;
-      el.className = 'rde-chart';
-      host.appendChild(el);
-    }
-    return el;
-  };
+  try {
+    chartHost.setAttribute('data-chart-ready', '1');
+  } catch (error) {
+    // Ignore attribute errors.
+  }
 
-  const { values: speedValuesRaw, times: speedTimes } = getSpeedSeries(payload);
-  const speedEl = ensureChartElement('chart-speed');
+  if (typeof Plotly === 'undefined' || typeof Plotly.newPlot !== 'function') {
+    console.warn('RDE: Plotly unavailable; charts skipped.');
+    return false;
+  }
+
+  const { values: speedValuesRaw, times: speedTimes } = getSpeedSeries(source);
 
   const sanitizeSeries = (values) => {
     if (!Array.isArray(values)) return [];
@@ -952,71 +949,52 @@ function renderChartsFromPayload(payload) {
     return Array.from({ length }, (_, index) => index);
   };
 
-  let plotted = false;
-
   const speedSeries = sanitizeSeries(speedValuesRaw);
-  if (speedEl && speedSeries.length && speedSeries.some((value) => value != null)) {
-    const x = alignTimes(speedTimes, null, speedSeries.length);
+  if (!speedSeries.length || !speedSeries.some((value) => value != null)) {
+    return true;
+  }
+
+  const x = alignTimes(speedTimes, null, speedSeries.length);
+  const chartMeta = visual.chart && typeof visual.chart === 'object' ? visual.chart : {};
+  const label = chartMeta.label || 'Vehicle speed';
+  const unit = chartMeta.unit || chartMeta.units || 'm/s';
+  const color = chartMeta.color || '#38bdf8';
+
+  try {
+    if (typeof Plotly.purge === 'function') {
+      Plotly.purge(chartHost);
+    }
+  } catch (error) {
+    // Purge failures should not block rendering.
+  }
+
+  try {
     Plotly.newPlot(
-      speedEl,
+      chartHost,
       [
         {
           x,
           y: speedSeries,
-          name: "Vehicle speed",
-          mode: "lines",
-          line: { color: "#38bdf8" },
-        },
-      ],
-      {
-        margin: { t: 24, r: 16, b: 48, l: 64 },
-        xaxis: { title: "Time" },
-        yaxis: { title: "m/s" },
-        paper_bgcolor: "transparent",
-        plot_bgcolor: "transparent",
-      },
-      { displaylogo: false, responsive: true },
-    );
-    plotted = true;
-  }
-
-  const pollutantCharts = [
-    { key: "NOx", elementId: "chart-nox", label: "NOx emission rate", unit: "mg/s", color: "#f97316" },
-    { key: "PN", elementId: "chart-pn", label: "PN emission rate", unit: "1/s", color: "#8b5cf6" },
-    { key: "PM", elementId: "chart-pm", label: "PM emission rate", unit: "mg/s", color: "#14b8a6" },
-  ];
-
-  pollutantCharts.forEach(({ key, elementId, label, unit, color }) => {
-    const target = ensureChartElement(elementId);
-    if (!target) return;
-    const series = findPollutantSeries(payload, key);
-    const values = sanitizeSeries(series.values);
-    if (!values.length || !values.some((value) => value != null)) return;
-    const x = alignTimes(series.times, speedTimes, values.length);
-    Plotly.newPlot(
-      target,
-      [
-        {
-          x,
-          y: values,
           name: label,
-          mode: "lines",
+          mode: 'lines',
           line: { color },
         },
       ],
       {
         margin: { t: 24, r: 16, b: 48, l: 64 },
-        xaxis: { title: "Time" },
+        xaxis: { title: 'Time' },
         yaxis: { title: unit },
-        paper_bgcolor: "transparent",
-        plot_bgcolor: "transparent",
+        paper_bgcolor: 'transparent',
+        plot_bgcolor: 'transparent',
       },
       { displaylogo: false, responsive: true },
     );
-    plotted = true;
-  });
+  } catch (error) {
+    console.warn('Chart render failed:', error);
+    return false;
+  }
 
-  return plotted;
+  return true;
 }
 
 // --- Map lifecycle guards ---
@@ -1053,17 +1031,21 @@ function resolveVisualPayload(payload) {
 function renderMapFromPayload(payload) {
   const el = document.getElementById('drive-map');
   if (!el) {
-    return;
+    console.warn('RDE: map host not found, skipping');
+    return false;
   }
 
   const source = payload && typeof payload === 'object' ? payload : window.__RDE_RESULT__;
   if (!source || typeof source !== 'object') {
-    return;
+    console.warn('RDE: no map data, skipping');
+    return false;
   }
 
   const visual = source.visual && typeof source.visual === 'object' ? source.visual : resolveVisualPayload(source);
-  if (!visual || !visual.map) {
-    return;
+  const mapData = visual && typeof visual === 'object' ? visual.map : null;
+  if (!mapData || typeof mapData !== 'object') {
+    console.warn('RDE: no map data, skipping');
+    return false;
   }
 
   try {
@@ -1074,13 +1056,13 @@ function renderMapFromPayload(payload) {
 
   if (typeof L === 'undefined' || typeof L.map !== 'function') {
     console.warn('RDE: Leaflet unavailable; skipping map render.');
-    return;
+    return false;
   }
 
   const registry = window.__rde || (window.__rde = {});
   registry.map = registry.map || { instance: null };
 
-  renderLeafletFromPayload(el, visual.map);
+  return renderLeafletFromPayload(el, mapData);
 }
 
 function destroyMap() {
@@ -1098,10 +1080,14 @@ function destroyMap() {
 }
 
 function renderLeafletFromPayload(container, mapData) {
+  if (!container || !mapData || typeof mapData !== 'object') {
+    return false;
+  }
+
   const coordinates = Array.isArray(mapData.latlngs)
     ? mapData.latlngs
         .map((entry) => {
-          if (!entry || typeof entry !== "object") return null;
+          if (!entry || typeof entry !== 'object') return null;
           const lat = Number(entry.lat);
           const lon = Number(entry.lon ?? entry.lng);
           if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
@@ -1113,8 +1099,17 @@ function renderLeafletFromPayload(container, mapData) {
   destroyMap();
 
   try {
-    const map = L.map(container, { attributionControl: false, zoomControl: true });
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19 }).addTo(map);
+    const map = L.map(container, { attributionControl: false, zoomControl: true, preferCanvas: true });
+
+    const tileUrl = mapData.tile_url || mapData.tileUrl || mapData.tileLayer || mapData.tiles;
+    const tileOptions = (mapData.tile_options || mapData.tileOptions || { maxZoom: 19 }) ?? { maxZoom: 19 };
+    if (tileUrl) {
+      try {
+        L.tileLayer(tileUrl, tileOptions).addTo(map);
+      } catch (error) {
+        console.warn('Map tile layer failed:', error);
+      }
+    }
 
     const bounds = Array.isArray(mapData.bounds) ? mapData.bounds : null;
     if (bounds && bounds.length === 2) {
@@ -1134,7 +1129,7 @@ function renderLeafletFromPayload(container, mapData) {
         map.fitBounds(line.getBounds(), { padding: [18, 18] });
       }
     } else {
-      const center = mapData.center && typeof mapData.center === "object" ? mapData.center : {};
+      const center = mapData.center && typeof mapData.center === 'object' ? mapData.center : {};
       const lat = Number(center.lat);
       const lon = Number(center.lon ?? center.lng);
       const zoom = Number(center.zoom);
@@ -1148,7 +1143,7 @@ function renderLeafletFromPayload(container, mapData) {
     setTimeout(() => map.invalidateSize(), 0);
     return true;
   } catch (error) {
-    console.warn("Map render failed:", error);
+    console.warn('Map render failed:', error);
     return false;
   }
 }
