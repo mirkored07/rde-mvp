@@ -129,7 +129,7 @@ def test_analysis_endpoint_returns_results() -> None:
     assert resp.status_code == 200
     html = resp.text
     assert "window.__RDE_RESULT__" in html
-    assert "window.dispatchEvent(new Event('rde:payload-ready'))" in html
+    assert "document.dispatchEvent(new Event('rde:payload-ready'))" in html
     assert 'id="charts-kpis"' in html
     assert 'id="chart-speed"' in html
     assert 'id="drive-map"' in html
