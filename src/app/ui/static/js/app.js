@@ -1,3 +1,8 @@
+// Singleton slots – do NOT use `let/const` twice across reloads
+window.__leafletMap = window.__leafletMap || null;
+window.__leafletTile = window.__leafletTile || null;
+window.__rdeMapInitScheduled = window.__rdeMapInitScheduled || false;
+
 (function () {
   const THEME_KEY = "rde-theme";
   const MAPPING_STORAGE_KEY = "rde-mapping-state";
@@ -657,7 +662,7 @@
   }
 
   function safeInit() {
-    const payload = getPayload();
+    const payload = getResultPayload();
     populateExportForms(payload);
     if (!payload) {
       console.info("RDE: analysis payload unavailable; skipping charts and map.");
@@ -711,7 +716,7 @@
   });
 })();
 
-function getPayload() {
+function getResultPayload() {
   const payload = window.__RDE_RESULT__;
   if (!payload || typeof payload !== "object") {
     return null;
@@ -934,70 +939,38 @@ function renderChartsFromPayload(payload) {
 }
 
 // --- Map lifecycle guards ---
-function ensureMapState() {
-  window.__rde = window.__rde || {};
-  window.__rde.map = window.__rde.map || {
-    instance: null,
-    initted: false,
-    _waiting: false,
-    _waitId: null,
-    _warnedNoPayload: false,
-    _resizeTimer: null,
-    latestPayload: null,
-  };
-  return window.__rde.map;
+function getPayload() {
+  return typeof window !== "undefined" &&
+    window.__RDE_RESULT__ &&
+    window.__RDE_RESULT__.visual &&
+    window.__RDE_RESULT__.visual.map
+    ? window.__RDE_RESULT__
+    : null;
 }
 
-function getDriveMapEl() {
-  return document.getElementById("drive-map");
+function getMapContainer() {
+  return document.getElementById("drive-map") || null;
 }
 
-function destroyMap() {
-  const state = ensureMapState();
-  if (state._waitId) {
-    window.clearTimeout(state._waitId);
-    state._waitId = null;
-    state._waiting = false;
+function containerIsVisible(el) {
+  if (!el) return false;
+  const r = el.getBoundingClientRect();
+  return r.width > 0 && r.height > 0;
+}
+
+function destroyLeaflet() {
+  if (window.__leafletMap && typeof window.__leafletMap.remove === "function") {
+    try {
+      window.__leafletMap.remove();
+    } catch (_) {}
   }
-  if (state.instance && typeof state.instance.remove === "function") {
-    state.instance.remove();
-  }
-  state.instance = null;
-  state.initted = false;
+  window.__leafletMap = null;
+  window.__leafletTile = null;
 }
 
-function normalizeLatLngs(mapData) {
-  if (!mapData || typeof mapData !== "object") return [];
-  const source = Array.isArray(mapData.latlngs)
-    ? mapData.latlngs
-    : Array.isArray(mapData.points)
-    ? mapData.points
-    : Array.isArray(mapData.track)
-    ? mapData.track
-    : Array.isArray(mapData.gps)
-    ? mapData.gps
-    : [];
-
-  return source
-    .map((point) => {
-      if (!point || typeof point !== "object") return null;
-      const lat = parseNumeric(point.lat ?? point.latitude);
-      const lon = parseNumeric(point.lon ?? point.lng ?? point.longitude);
-      if (lat == null || lon == null) {
-        return null;
-      }
-      return [lat, lon];
-    })
-    .filter(Boolean);
-}
-
-function extractMapPayload(input) {
-  if (!input || typeof input !== "object") return null;
-  if (Array.isArray(input.latlngs) || Array.isArray(input.points) || Array.isArray(input.track) || Array.isArray(input.gps) || input.center) {
-    return input;
-  }
-  if (input.visual && input.visual.map) {
-    return input.visual.map;
+function renderLeafletFromPayload(payload) {
+  if (typeof window === "undefined" || typeof window.L === "undefined") {
+    throw new Error("Leaflet is not available");
   }
   if (input.analysis && input.analysis.map) {
     return input.analysis.map;
@@ -1008,72 +981,41 @@ function extractMapPayload(input) {
   return null;
 }
 
-function renderLeafletFromPayload(mapData) {
-  const el = getDriveMapEl();
+  const mapData = payload?.visual?.map;
+  const coords = Array.isArray(mapData?.coords)
+    ? mapData.coords
+        .map((pair) => (Array.isArray(pair) && pair.length >= 2 ? [Number(pair[0]), Number(pair[1])] : null))
+        .filter((pair) => pair && Number.isFinite(pair[0]) && Number.isFinite(pair[1]))
+    : [];
+
+  const el = getMapContainer();
   if (!el) {
-    throw new Error("drive-map container not found");
-  }
-  if (typeof window.L === "undefined" || typeof window.L.map !== "function") {
-    throw new Error("Leaflet is not available");
+    throw new Error("Map container not found");
   }
 
-  destroyMap();
-  el.innerHTML = "";
-
-  const map = window.L.map(el, { attributionControl: false, zoomControl: true });
-
-  window.L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    maxZoom: 19,
-  }).addTo(map);
-
-  const latlngs = normalizeLatLngs(mapData);
-  if (latlngs.length) {
-    const route = window.L.polyline(latlngs, { weight: 3, opacity: 0.9 }).addTo(map);
-    try {
-      map.fitBounds(route.getBounds(), { padding: [20, 20] });
-    } catch (error) {
-      map.setView(latlngs[0], mapData?.zoom ?? 14);
-    }
-  } else if (mapData && mapData.center) {
-    const lat = parseNumeric(mapData.center.lat ?? mapData.center.latitude);
-    const lon = parseNumeric(mapData.center.lon ?? mapData.center.lng ?? mapData.center.longitude);
-    const zoom = parseNumeric(mapData.center.zoom);
-    if (lat != null && lon != null) {
-      map.setView([lat, lon], Number.isFinite(zoom) ? zoom : 11);
-    } else {
-      map.setView([48.2082, 16.3738], 11);
-    }
-  } else {
-    map.setView([48.2082, 16.3738], 11);
+  if (!window.__leafletMap) {
+    window.__leafletMap = window.L.map(el, { zoomControl: true });
+    window.__leafletTile = window.L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19,
+      attribution: "&copy; OpenStreetMap",
+    }).addTo(window.__leafletMap);
+  } else if (window.__leafletMap._container !== el) {
+    destroyLeaflet();
+    window.__leafletMap = window.L.map(el, { zoomControl: true });
+    window.__leafletTile = window.L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19,
+      attribution: "&copy; OpenStreetMap",
+    }).addTo(window.__leafletMap);
   }
 
-  const state = ensureMapState();
-  state.instance = map;
-  state.initted = true;
-
-  window.requestAnimationFrame(() => map.invalidateSize());
-  window.setTimeout(() => map.invalidateSize(), 0);
-
-  return map;
-}
-
-function renderMapFromPayload(mapData) {
-  try {
-    renderLeafletFromPayload(mapData);
-  } catch (error) {
-    console.warn("Map render failed:", error);
-  }
-}
-
-function isResultPayloadReady() {
-  const result = window.__RDE_RESULT__;
-  return Boolean(result && result.visual && result.visual.map);
-}
-
-function scheduleInitWhenReady() {
-  const state = ensureMapState();
-  if (state._waiting) {
-    return;
+  if (window.__leafletMap && typeof window.__leafletMap.eachLayer === "function") {
+    window.__leafletMap.eachLayer((layer) => {
+      if (layer && layer !== window.__leafletTile) {
+        try {
+          window.__leafletMap.removeLayer(layer);
+        } catch (_) {}
+      }
+    });
   }
   const start = Date.now();
   state._waiting = true;
@@ -1093,64 +1035,53 @@ function scheduleInitWhenReady() {
       return;
     }
 
-    if (Date.now() - start >= 3000) {
-      state._waiting = false;
-      state._waitId = null;
-      if (!payloadReady && !state._warnedNoPayload) {
-        console.warn("RDE: map payload unavailable; skipping map render.");
-        state._warnedNoPayload = true;
-      }
-      return;
-    }
+  if (coords.length >= 2) {
+    const latlngs = coords.map(([lat, lon]) => window.L.latLng(lat, lon));
+    window.L.polyline(latlngs, { weight: 3, opacity: 0.8 }).addTo(window.__leafletMap);
+    window.__leafletMap.fitBounds(window.L.latLngBounds(latlngs), { padding: [20, 20] });
+  } else if (coords.length === 1) {
+    window.__leafletMap.setView([coords[0][0], coords[0][1]], 14);
+  } else {
+    window.__leafletMap.setView([47.0707, 15.4395], 11);
+  }
 
-    state._waitId = window.setTimeout(poll, 150);
-  };
-
-  poll();
+  setTimeout(() => {
+    try {
+      window.__leafletMap.invalidateSize();
+    } catch (_) {}
+  }, 0);
 }
 
-function safeInitMap(payload) {
-  const state = ensureMapState();
-  const extracted = extractMapPayload(payload);
-  if (extracted) {
-    state.latestPayload = extracted;
-    state._warnedNoPayload = false;
+function renderMapFromPayload(payload) {
+  try {
+    renderLeafletFromPayload(payload);
+    return true;
+  } catch (err) {
+    console.warn("Map render failed:", err);
+    return false;
   }
   scheduleInitWhenReady();
 }
 
-function wireHtmxLifecycle() {
-  const state = ensureMapState();
-  if (!window.htmx || state._htmxWired) {
-    return;
-  }
-  state._htmxWired = true;
-  const body = document.body;
-  if (!body) {
-    state._htmxWired = false;
-    return;
-  }
-  const handlerOptions = { passive: true };
-  body.addEventListener(
-    "htmx:beforeSwap",
-    () => {
-      destroyMap();
-    },
-    handlerOptions,
-  );
-  body.addEventListener(
-    "htmx:afterSwap",
-    () => {
-      safeInitMap();
-    },
-    handlerOptions,
-  );
-}
+function tryInitMapOnceReady() {
+  const el = getMapContainer();
+  const payload = getPayload();
 
-function wireResizeListener() {
-  const state = ensureMapState();
-  if (state._resizeWired) {
+  if (!el || !containerIsVisible(el) || !payload) {
+    if (!window.__rdeMapInitScheduled) {
+      window.__rdeMapInitScheduled = true;
+      requestAnimationFrame(() => {
+        window.__rdeMapInitScheduled = false;
+        tryInitMapOnceReady();
+      });
+    }
     return;
+  }
+
+  try {
+    renderLeafletFromPayload(payload);
+  } catch (err) {
+    console.warn("Map render failed:", err);
   }
   state._resizeWired = true;
   window.addEventListener("resize", () => {
@@ -1166,17 +1097,39 @@ function wireResizeListener() {
   });
 }
 
+function safeInitMap() {
+  tryInitMapOnceReady();
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  safeInitMap(window.__RDE_RESULT__);
+});
+
 window.addEventListener("rde:payload-ready", () => {
   safeInitMap(window.__RDE_RESULT__);
 });
 
-document.addEventListener("DOMContentLoaded", () => {
-  wireHtmxLifecycle();
-  wireResizeListener();
-  if (getDriveMapEl()) {
-    safeInitMap(window.__RDE_RESULT__);
-  }
+document.addEventListener("htmx:afterSwap", (event) => {
+  safeInitMap(window.__RDE_RESULT__);
 });
+
+function bindHtmxLifecycle() {
+  if (!document.body) {
+    return;
+  }
+  document.body.addEventListener("htmx:beforeSwap", () => {
+    destroyLeaflet();
+  });
+  document.body.addEventListener("htmx:afterSwap", () => {
+    tryInitMapOnceReady();
+  });
+}
+
+if (document.body) {
+  bindHtmxLifecycle();
+} else {
+  document.addEventListener("DOMContentLoaded", bindHtmxLifecycle, { once: true });
+}
 
 if (document.readyState !== "loading") {
   wireHtmxLifecycle();
