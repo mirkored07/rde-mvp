@@ -437,10 +437,9 @@
 <link rel="stylesheet" href="/static/leaflet/leaflet.css" />
 
 {% if results_payload %}
-<script>window.__RDE_RESULT__ = {{ results_payload | tojson | safe }}; window.dispatchEvent(new Event('rde:payload-ready'));</script>
+<script>window.__RDE_RESULT__={{ results_payload | tojson | safe }};window.dispatchEvent(new Event('rde:payload-ready'));</script>
 {% else %}
-<script>window.__RDE_RESULT__ = null;</script>
+<script>window.__RDE_RESULT__=null;</script>
 {% endif %}
-
 <script src="/static/js/app.js"></script>
 
