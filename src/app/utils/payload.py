@@ -13,14 +13,18 @@ def ensure_results_payload_defaults(payload: Mapping[str, Any] | None) -> dict[s
     if payload is None:
         p: dict[str, Any] = {}
     elif isinstance(payload, dict):
-        p = payload
+        p = dict(payload)
     else:
         p = dict(payload)
 
     # visual defaults
-    visual = p.get("visual") or {}
-    if not isinstance(visual, dict):
-        visual = dict(visual) if isinstance(visual, Mapping) else {}
+    visual_raw = p.get("visual") or {}
+    if isinstance(visual_raw, dict):
+        visual = dict(visual_raw)
+    elif isinstance(visual_raw, Mapping):
+        visual = dict(visual_raw)
+    else:
+        visual = {}
     visual.setdefault(
         "map",
         {"center": {"lat": 48.2082, "lon": 16.3738, "zoom": 8}, "latlngs": []},
@@ -29,14 +33,21 @@ def ensure_results_payload_defaults(payload: Mapping[str, Any] | None) -> dict[s
     p["visual"] = visual
 
     # KPI defaults (support both keys but ensure kpi_numbers is present)
-    if p.get("kpi_numbers") is None and p.get("kpis") is not None:
-        p["kpi_numbers"] = p["kpis"]
+    kpi_numbers = p.get("kpi_numbers")
+    if kpi_numbers is None and p.get("kpis") is not None:
+        kpi_numbers = p["kpis"]
 
-    if p.get("kpi_numbers") is None:
-        p["kpi_numbers"] = [
+    if kpi_numbers is None:
+        kpi_numbers_list: list[dict[str, Any]] = [
             {"label": "Trips", "value": 0},
             {"label": "Distance [km]", "value": 0},
             {"label": "Avg Speed [km/h]", "value": 0},
         ]
+    elif isinstance(kpi_numbers, list):
+        kpi_numbers_list = [dict(item) if isinstance(item, Mapping) else item for item in kpi_numbers]
+    else:
+        kpi_numbers_list = [kpi_numbers]
+
+    p["kpi_numbers"] = kpi_numbers_list
 
     return p
