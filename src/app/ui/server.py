@@ -2661,6 +2661,20 @@ async def analyze(request: Request) -> Response:
                     kpi_values[_normalize_kpi_key(key)] = numeric_value
     # === END CI NORMALIZATION & KPI FALLBACKS ===
 
+    if not isinstance(results_payload, dict):
+        results_payload = dict(results_payload or {})
+    visuals = results_payload.get("visual")
+    if not isinstance(visuals, dict):
+        visuals = dict(visuals) if isinstance(visuals, Mapping) else {}
+    if visuals.get("map") is None:
+        visuals["map"] = {
+            "center": {"lat": 48.2082, "lon": 16.3738, "zoom": 8},
+            "latlngs": [],
+        }
+    if visuals.get("chart") is None:
+        visuals["chart"] = {"series": []}
+    results_payload["visual"] = visuals
+
     visual_shapes = _build_visual_shapes(results_payload)
     results_payload["visual"] = visual_shapes
     analysis_block["visual"] = visual_shapes

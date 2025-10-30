@@ -1,53 +1,92 @@
-;(() => {
-  window.__rde = window.__rde || {};
-  const R = window.__rde;
-  R.map = R.map || { instance: null, wired: false };
+function renderSummary(container) {
+  const target = container.querySelector('#analysis-summary');
+  const dataEl = container.querySelector('#summary-data');
+  if (!target || !dataEl) return;
 
-  function tryInitMapOnceReady() {
-    // call your existing safeInit/tryInit logic here
-    if (typeof window.safeInitMap === "function") window.safeInitMap();
-    else if (typeof window.tryInitMapOnceReady === "function") window.tryInitMapOnceReady();
+  let markdown = '';
+  try {
+    markdown = JSON.parse(dataEl.textContent || '""');
+  } catch (error) {
+    markdown = dataEl.textContent || '';
   }
 
-  if (!R.map.wired) {
-    R.map.wired = true;
+  if (markdown && window.marked && typeof window.marked.parse === 'function') {
+    target.innerHTML = window.marked.parse(markdown);
+  } else {
+    target.textContent = markdown;
+  }
+}
 
-    // Required by tests: register rde:payload-ready hook
-    window.addEventListener("rde:payload-ready", () => {
-      try {
-        if (R.map.instance && R.map.instance.invalidateSize) {
-          R.map.instance.invalidateSize();
-        }
-        tryInitMapOnceReady();
-      } catch (e) {
-        console.warn(e);
-      }
-    });
-
-    // Initial DOM load
-    if (document.readyState === "loading") {
-      document.addEventListener("DOMContentLoaded", tryInitMapOnceReady);
-    } else {
-      tryInitMapOnceReady();
+function populateExportForms(payload) {
+  let serialised = '';
+  if (payload) {
+    try {
+      serialised = JSON.stringify(payload);
+    } catch (error) {
+      serialised = '';
     }
+  }
+  const zipField = document.getElementById('exportZipPayload');
+  if (zipField) {
+    zipField.value = serialised;
+  }
+  const pdfField = document.getElementById('exportPdfPayload');
+  if (pdfField) {
+    pdfField.value = serialised;
+  }
+}
 
-    // HTMX swaps (no-op if htmx not present)
-    if (window.htmx) {
-      document.body.addEventListener("htmx:afterSwap", tryInitMapOnceReady, { passive: true });
-      document.body.addEventListener(
-        "htmx:beforeSwap",
-        () => {
-          destroyMap();
-        },
-        { passive: true },
-      );
-    }
+function initializeResults(root) {
+  const container = root.querySelector("[data-component='analysis-results']");
+  if (!container) return;
+  renderSummary(container);
+}
 
-    window.addEventListener("resize", () => {
-      if (R.map.instance && typeof R.map.instance.invalidateSize === "function") {
-        R.map.instance.invalidateSize();
+function renderAnalysisVisuals(payload) {
+  const result = payload && typeof payload === 'object' ? payload : getResultPayload();
+  populateExportForms(result);
+  renderMapFromPayload(result);
+  if (!result) {
+    console.info('RDE: analysis payload unavailable; skipping charts and map.');
+    return;
+  }
+
+  const chartsOk = renderChartsFromPayload(result);
+  const kpiOk = injectKpisFromPayload(result);
+
+  if (!chartsOk) {
+    console.warn('RDE: chart render skipped or partial');
+  }
+
+  if (!kpiOk) {
+    console.info('RDE: KPI injection skipped; nothing to update.');
+  }
+}
+
+;(() => {
+  // Avoid duplicate wiring across hot reloads
+  if (window.__rdeAppWired__) return;
+  window.__rdeAppWired__ = true;
+
+  function safeInit() {
+    try {
+      // Your existing init that draws charts/map from window.__RDE_RESULT__
+      if (typeof renderAnalysisVisuals === 'function') {
+        renderAnalysisVisuals(window.__RDE_RESULT__);
       }
-    });
+    } catch (e) {
+      console.warn(e);
+    }
+  }
+
+  // Required by tests: register map event hooks
+  window.addEventListener('rde:payload-ready', safeInit);
+
+  // Also run once after DOM is ready (in case payload is already present)
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', safeInit);
+  } else {
+    safeInit();
   }
 })();
 
@@ -666,73 +705,6 @@
     });
   }
 
-  function renderSummary(container) {
-    const target = container.querySelector("#analysis-summary");
-    const dataEl = container.querySelector("#summary-data");
-    if (!target || !dataEl) return;
-
-    let markdown = "";
-    try {
-      markdown = JSON.parse(dataEl.textContent || '""');
-    } catch (error) {
-      markdown = dataEl.textContent || "";
-    }
-
-    if (markdown && window.marked && typeof window.marked.parse === "function") {
-      target.innerHTML = window.marked.parse(markdown);
-    } else {
-      target.textContent = markdown;
-    }
-  }
-  function populateExportForms(payload) {
-    let serialised = "";
-    if (payload) {
-      try {
-        serialised = JSON.stringify(payload);
-      } catch (error) {
-        serialised = "";
-      }
-    }
-    const zipField = document.getElementById("exportZipPayload");
-    if (zipField) {
-      zipField.value = serialised;
-    }
-    const pdfField = document.getElementById("exportPdfPayload");
-    if (pdfField) {
-      pdfField.value = serialised;
-    }
-  }
-
-  function initializeResults(root) {
-    const container = root.querySelector("[data-component='analysis-results']");
-    if (!container) return;
-    renderSummary(container);
-  }
-
-  function safeInit() {
-    const payload = getResultPayload();
-    populateExportForms(payload);
-    if (getMapContainer()) {
-      safeInitMap(window.__RDE_RESULT__ || payload);
-    }
-    if (!payload) {
-      console.info("RDE: analysis payload unavailable; skipping charts and map.");
-      return;
-    }
-
-    const chartsOk = renderChartsFromPayload(payload);
-    const kpiOk = injectKpisFromPayload(payload);
-
-    if (!chartsOk) {
-      console.warn("RDE: chart render skipped or partial");
-    }
-
-    if (!kpiOk) {
-      console.info("RDE: KPI injection skipped; nothing to update.");
-    }
-
-  }
-
   function handleDomReady() {
     initTheme();
     initThemeToggle();
@@ -751,17 +723,10 @@
     handleDomReady();
   }
 
-  document.addEventListener("DOMContentLoaded", safeInit);
-  if (document.readyState !== "loading") {
-    safeInit();
-  }
-
-  window.addEventListener("rde:payload-ready", safeInit);
-
   document.addEventListener("htmx:afterSwap", (event) => {
     if (event.target && event.target.id === "analysis-results") {
       initializeResults(event.target);
-      safeInit();
+      renderAnalysisVisuals(window.__RDE_RESULT__);
     }
   });
 })();
@@ -989,10 +954,6 @@ function renderChartsFromPayload(payload) {
 }
 
 // --- Map lifecycle guards ---
-function getMapContainer() {
-  return document.getElementById("drive-map");
-}
-
 function resolveVisualPayload(payload) {
   const source = payload && typeof payload === "object" ? payload : window.__RDE_RESULT__;
   if (!source || typeof source !== "object") return null;
@@ -1021,6 +982,33 @@ function resolveVisualPayload(payload) {
   }
 
   return null;
+}
+
+function renderMapFromPayload(payload) {
+  const el = document.getElementById('drive-map');
+  if (!el) {
+    return;
+  }
+
+  const source = payload && typeof payload === 'object' ? payload : window.__RDE_RESULT__;
+  if (!source || typeof source !== 'object') {
+    return;
+  }
+
+  const visual = source.visual && typeof source.visual === 'object' ? source.visual : resolveVisualPayload(source);
+  if (!visual || !visual.map) {
+    return;
+  }
+
+  if (typeof L === 'undefined' || typeof L.map !== 'function') {
+    console.warn('RDE: Leaflet unavailable; skipping map render.');
+    return;
+  }
+
+  const registry = window.__rde || (window.__rde = {});
+  registry.map = registry.map || { instance: null };
+
+  renderLeafletFromPayload(el, visual.map);
 }
 
 function destroyMap() {
@@ -1091,68 +1079,5 @@ function renderLeafletFromPayload(container, mapData) {
     console.warn("Map render failed:", error);
     return false;
   }
-}
-
-function safeInitMap(payload) {
-  const R = window.__rde || (window.__rde = {});
-  R.map = R.map || { instance: null, wired: false };
-  const warnings = R.map.warnings || (R.map.warnings = {});
-  const warn = (key, message) => {
-    if (warnings[key]) return;
-    warnings[key] = true;
-    console.warn(message);
-  };
-
-  const container = getMapContainer();
-  if (!container) {
-    warn("container", "RDE: map container not found; skipping map render.");
-    return false;
-  }
-
-  const visual = resolveVisualPayload(payload);
-  if (!visual || typeof visual !== "object") {
-    warn("visual", "RDE: map payload unavailable; skipping map render.");
-    return false;
-  }
-
-  const mapData = visual.map && typeof visual.map === "object" ? visual.map : null;
-  if (!mapData) {
-    warn("map", "RDE: map payload unavailable; skipping map render.");
-    return false;
-  }
-
-  const hasLatLngs = Array.isArray(mapData.latlngs) && mapData.latlngs.length > 0;
-  const hasCenter = mapData.center && typeof mapData.center === "object";
-  if (!hasLatLngs && !hasCenter) {
-    warn("data", "RDE: map payload unavailable; skipping map render.");
-    return false;
-  }
-
-  if (typeof L === "undefined" || typeof L.map !== "function") {
-    warn("leaflet", "RDE: Leaflet unavailable; skipping map render.");
-    return false;
-  }
-
-  const success = renderLeafletFromPayload(container, mapData);
-  if (success) {
-    R.map.warnings = {};
-  }
-  return success;
-}
-
-function tryInitMapOnceReady(deadlineMs = 3000) {
-  const start = Date.now();
-  const attempt = () => {
-    const container = getMapContainer();
-    if (container && container.offsetWidth && container.offsetHeight) {
-      if (safeInitMap(window.__RDE_RESULT__)) {
-        return;
-      }
-    }
-    if (Date.now() - start < deadlineMs) {
-      requestAnimationFrame(attempt);
-    }
-  };
-  attempt();
 }
 

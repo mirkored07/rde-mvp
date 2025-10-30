@@ -244,6 +244,7 @@
     </section>
     {% endif %}
 
+    <!-- Charts container expected by tests -->
     <section id="charts-kpis" class="rounded-3xl border border-slate-200/70 bg-slate-900/5 p-6 shadow-card dark:border-slate-700/70 dark:bg-slate-900/40">
       <h3 class="text-sm font-semibold uppercase tracking-[0.3em] text-slate-500 dark:text-slate-300">Charts &amp; KPIs</h3>
       <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">Interactive time series.</p>
@@ -259,6 +260,7 @@
     <section id="drive-map-card" class="rounded-3xl border border-slate-200/70 bg-slate-900/5 p-6 shadow-card dark:border-slate-700/70 dark:bg-slate-900/40">
       <h3 class="text-sm font-semibold uppercase tracking-[0.3em] text-slate-500 dark:text-slate-300">Drive map</h3>
       <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">Leaflet trace of the fused GPS route.</p>
+      <!-- Map container expected by app.js -->
       <div
         id="drive-map"
         class="mt-4 w-full overflow-hidden rounded-2xl border border-slate-200/70 bg-white/70 shadow-inner dark:border-slate-700/70 dark:bg-slate-900/60"
@@ -503,11 +505,23 @@
 
 <script src="/static/leaflet/leaflet.js"></script>
 
-<!-- Inject analysis payload BEFORE app bundle -->
-<script>
-  window.__RDE_RESULT__ = {{ results_payload | tojson | safe }};
-  document.dispatchEvent(new Event('rde:payload-ready'));
-</script>
+{# --- Payload injected BEFORE app bundle --- #}
+{% if results_payload %}
+  <script id="rde-payload" type="application/json">
+    {{ results_payload | tojson | safe }}
+  </script>
+  <script>
+    window.__RDE_RESULT__ = JSON.parse(
+      document.getElementById('rde-payload').textContent
+    );
+    window.dispatchEvent(new Event('rde:payload-ready'));
+  </script>
+{% else %}
+  <script>
+    window.__RDE_RESULT__ = null;
+    window.dispatchEvent(new Event('rde:payload-ready'));
+  </script>
+{% endif %}
 <!-- App bundle must come after payload -->
 <script src="/static/js/app.js"></script>
 
