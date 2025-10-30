@@ -831,6 +831,153 @@ def _prepare_map_payload(derived: pd.DataFrame) -> dict[str, Any]:
     return {"points": points, "bounds": bounds, "center": center}
 
 
+def _build_visual_shapes(results_payload: Mapping[str, Any] | None) -> dict[str, Any]:
+    payload = dict(results_payload) if isinstance(results_payload, Mapping) else {}
+
+    analysis_block = _ensure_dict(payload.get("analysis")) or {}
+    chart_block = _ensure_dict(analysis_block.get("chart")) or _ensure_dict(payload.get("chart")) or {}
+    map_block = _ensure_dict(analysis_block.get("map")) or _ensure_dict(payload.get("map")) or {}
+
+    def _as_list(values: Any) -> list[Any]:
+        if values is None:
+            return []
+        if isinstance(values, list):
+            return list(values)
+        if isinstance(values, tuple):
+            return list(values)
+        if hasattr(values, "tolist"):
+            try:
+                return list(values.tolist())  # type: ignore[call-arg]
+            except Exception:  # pragma: no cover - defensive fallback
+                return [values]
+        return [values]
+
+    def _normalise_numeric(values: Any) -> list[float]:
+        numbers: list[float] = []
+        for item in _as_list(values):
+            try:
+                number = float(item)
+            except (TypeError, ValueError):
+                number = 0.0
+            else:
+                if pd.isna(number):
+                    number = 0.0
+            numbers.append(float(number))
+        return numbers
+
+    times_raw = _as_list(chart_block.get("time_s") or chart_block.get("times"))
+    time_seconds: list[float] = []
+    baseline: pd.Timestamp | None = None
+    for entry in times_raw:
+        try:
+            timestamp = pd.Timestamp(entry)
+        except Exception:
+            try:
+                value = float(entry) if entry is not None else None
+            except (TypeError, ValueError):
+                continue
+            else:
+                if value is None or pd.isna(value):
+                    continue
+                time_seconds.append(float(value))
+                continue
+        if baseline is None:
+            baseline = timestamp
+        delta = (timestamp - baseline).total_seconds()
+        time_seconds.append(float(delta))
+
+    pollutants_block = chart_block.get("pollutants")
+    pollutant_map: dict[str, Mapping[str, Any]] = {}
+    if isinstance(pollutants_block, list):
+        for entry in pollutants_block:
+            if not isinstance(entry, Mapping):
+                continue
+            key = entry.get("key")
+            if key is None:
+                continue
+            pollutant_map[str(key).upper()] = entry
+
+    def _series_for(key: str) -> list[float]:
+        entry = pollutant_map.get(key.upper())
+        if entry is None:
+            return []
+        values = entry.get("values")
+        if not values:
+            values = entry.get("y")
+        return _normalise_numeric(values)
+
+    speed_block = chart_block.get("speed")
+    if isinstance(speed_block, Mapping):
+        speed_values = _normalise_numeric(speed_block.get("values"))
+    else:
+        speed_values = _normalise_numeric([])
+
+    series_nox = _series_for("NOX")
+    series_pn = _series_for("PN")
+    series_pm = _series_for("PM")
+
+    target_len = max(len(time_seconds), len(speed_values), len(series_nox), len(series_pn), len(series_pm))
+
+    if target_len and not time_seconds:
+        time_seconds = [float(index) for index in range(target_len)]
+
+    if target_len and len(time_seconds) < target_len:
+        if len(time_seconds) >= 2:
+            step = time_seconds[-1] - time_seconds[-2]
+            if step <= 0:
+                step = 1.0
+        else:
+            step = 1.0
+        last = time_seconds[-1] if time_seconds else 0.0
+        while len(time_seconds) < target_len:
+            last += step
+            time_seconds.append(float(last))
+
+    def _pad(values: list[float]) -> list[float]:
+        if not target_len:
+            return []
+        trimmed = list(values[:target_len])
+        if len(trimmed) < target_len:
+            trimmed.extend([0.0] * (target_len - len(trimmed)))
+        return trimmed
+
+    speed_values = _pad(speed_values)
+    series_nox = _pad(series_nox)
+    series_pn = _pad(series_pn)
+    series_pm = _pad(series_pm)
+
+    coords: list[list[float]] = []
+    points_source = map_block.get("points")
+    if not isinstance(points_source, list):
+        points_source = []
+    for point in points_source:
+        if not isinstance(point, Mapping):
+            continue
+        lat = point.get("lat")
+        lon = point.get("lon")
+        try:
+            lat_f = float(lat)
+            lon_f = float(lon)
+        except (TypeError, ValueError):
+            continue
+        if pd.isna(lat_f) or pd.isna(lon_f):
+            continue
+        coords.append([lat_f, lon_f])
+
+    return {
+        "chart": {
+            "time_s": time_seconds[:target_len] if target_len else time_seconds,
+            "series": {
+                "speed_mps": speed_values,
+                "nox": series_nox,
+                "pn": series_pn,
+                "pm": series_pm,
+            },
+        },
+        "map": {"coords": coords},
+    }
+
+
 def _format_metric(label: str, value: float | None, suffix: str) -> dict[str, str]:
     if value is None or pd.isna(value):
         display = "n/a"
@@ -2453,6 +2600,10 @@ async def analyze(request: Request) -> Response:
                         continue
                     kpi_values[_normalize_kpi_key(key)] = numeric_value
     # === END CI NORMALIZATION & KPI FALLBACKS ===
+
+    visual_shapes = _build_visual_shapes(results_payload)
+    results_payload["visual"] = visual_shapes
+    analysis_block["visual"] = visual_shapes
 
     context = _base_template_context(
         request,
