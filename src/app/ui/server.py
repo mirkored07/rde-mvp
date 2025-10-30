@@ -2672,13 +2672,10 @@ async def analyze(request: Request) -> Response:
         "map",
         {"center": {"lat": 48.2082, "lon": 16.3738, "zoom": 8}, "latlngs": []},
     )
-    visual.setdefault("chart", {"series": []})
+    visual.setdefault("chart", {"series": [], "labels": []})
     results_payload["visual"] = visual
 
-    if (
-        results_payload.get("kpi_numbers") is None
-        and results_payload.get("kpis") is None
-    ):
+    if results_payload.get("kpi_numbers") is None:
         results_payload["kpi_numbers"] = [
             {"label": "Trips", "value": 0},
             {"label": "Distance [km]", "value": 0},

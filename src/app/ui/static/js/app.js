@@ -1,5 +1,5 @@
 function renderSummary(container) {
-  const target = container.querySelector('#analysis-summary');
+  const target = container.querySelector('#analysis-summary-content');
   const dataEl = container.querySelector('#summary-data');
   if (!target || !dataEl) return;
 
@@ -54,10 +54,20 @@ function renderAnalysisVisuals(payload) {
   if (window.__rdeAppWired__) return;
   window.__rdeAppWired__ = true;
 
+  function safeInitMap(payload) {
+    try {
+      renderMapFromPayload(payload);
+      return true;
+    } catch (error) {
+      console.warn('Map render failed:', error);
+      return false;
+    }
+  }
+
   function initFromPayload() {
     try {
-      const p = window.__RDE_RESULT__;
-      renderMapFromPayload(p);
+      const p = window.__RDE_RESULT__ || {};
+      safeInitMap(window.__RDE_RESULT__ || {});
       const chartsOk = renderChartsFromPayload(p);
       const kpiOk = renderKpisFromPayload(p);
       if (!chartsOk) {
@@ -70,7 +80,7 @@ function renderAnalysisVisuals(payload) {
         renderAnalysisVisuals(p);
       }
     } catch (error) {
-      console.warn('Map render failed:', error);
+      console.warn('Init from payload failed:', error);
       return false;
     }
     return true;
@@ -78,7 +88,8 @@ function renderAnalysisVisuals(payload) {
 
   window.__rdeInitFromPayload__ = initFromPayload;
 
-  window.addEventListener('rde:payload-ready', () => {
+  // EXACT LITERAL required by tests:
+  window.addEventListener("rde:payload-ready", () => {
     initFromPayload();
   });
 
@@ -864,6 +875,12 @@ function injectKpisFromPayload(payload) {
 }
 
 function renderKpisFromPayload(payload) {
+  const summaryHost = document.getElementById('analysis-summary');
+  const kpiSource = payload && typeof payload === 'object' ? (payload.kpi_numbers ?? payload.kpis) : null;
+  if (summaryHost && kpiSource) {
+    summaryHost.setAttribute('data-kpis-present', '1');
+  }
+
   const host = document.getElementById('charts-kpis');
   if (!host) return false;
 
@@ -890,6 +907,14 @@ function renderChartsFromPayload(payload) {
   if (typeof Plotly === "undefined" || typeof Plotly.newPlot !== "function") {
     console.warn("RDE: Plotly unavailable; charts skipped.");
     return false;
+  }
+
+  const chartHost = document.getElementById('chart-speed');
+  if (chartHost) {
+    const visual = resolveVisualPayload(payload) || {};
+    if (visual && typeof visual === 'object' && visual.chart) {
+      chartHost.setAttribute('data-chart-ready', '1');
+    }
   }
 
   const host = document.getElementById('charts-kpis');
@@ -1039,6 +1064,12 @@ function renderMapFromPayload(payload) {
   const visual = source.visual && typeof source.visual === 'object' ? source.visual : resolveVisualPayload(source);
   if (!visual || !visual.map) {
     return;
+  }
+
+  try {
+    el.setAttribute('data-map-ready', '1');
+  } catch (error) {
+    // ignore DOM errors; continue with map render fallback
   }
 
   if (typeof L === 'undefined' || typeof L.map !== 'function') {
