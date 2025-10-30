@@ -123,3 +123,22 @@ html.dark .chart-toggle.is-active {
 [data-theme-icon] {
   transition: opacity 0.2s ease;
 }
+
+#chart-speed,
+#drive-map {
+  width: 100% !important;
+  height: 360px !important;
+}
+
+.chart-card {
+  width: 100%;
+  max-width: none;
+  min-width: 0;
+}
+
+.chart-card canvas,
+.chart-card .plotly,
+.chart-card svg {
+  width: 100% !important;
+  height: 360px !important;
+}

@@ -244,15 +244,29 @@
     </section>
     {% endif %}
 
-    <section class="rounded-3xl border border-slate-200/70 bg-slate-900/5 p-6 shadow-card dark:border-slate-700/70 dark:bg-slate-900/40">
-      <h3 class="text-sm font-semibold uppercase tracking-[0.3em] text-slate-500 dark:text-slate-300">Charts &amp; KPIs</h3>
-      <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">Interactive time series.</p>
-      <p class="mt-4 text-xs text-slate-500 dark:text-slate-400">Rendered on the client after the payload event fires.</p>
-    </section>
-
-    <section class="rounded-3xl border border-slate-200/70 bg-slate-900/5 p-6 shadow-card dark:border-slate-700/70 dark:bg-slate-900/40">
-      <h3 class="text-sm font-semibold uppercase tracking-[0.3em] text-slate-500 dark:text-slate-300">Drive map</h3>
-      <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">Leaflet trace rendered when the payload is ready.</p>
+    <section class="rounded-3xl border border-slate-200/70 bg-slate-900/5 p-6 shadow-card dark:border-slate-700/70 dark:bg-slate-900/40 w-full max-w-none">
+      <div class="flex flex-col gap-8 lg:flex-row">
+        <div class="flex-1 min-w-0 w-full">
+          <div class="flex flex-col gap-3">
+            <h3 class="text-sm font-semibold uppercase tracking-[0.3em] text-slate-500 dark:text-slate-300">Charts &amp; KPIs</h3>
+            <p class="text-xs text-slate-500 dark:text-slate-400">Interactive time series rendered after the payload event fires.</p>
+            <div class="chart-card w-full min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-white/90 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900/60">
+              <div id="charts-kpis" class="w-full">
+                <div id="chart-speed" class="w-full" style="height: 360px; width: 100%;"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="flex-1 min-w-0 w-full">
+          <div class="flex flex-col gap-3">
+            <h3 class="text-sm font-semibold uppercase tracking-[0.3em] text-slate-500 dark:text-slate-300">Drive map</h3>
+            <p class="text-xs text-slate-500 dark:text-slate-400">Leaflet trace rendered when the payload is ready.</p>
+            <div class="chart-card w-full min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-white/90 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900/60">
+              <div id="drive-map" class="w-full" style="height: 360px; width: 100%;"></div>
+            </div>
+          </div>
+        </div>
+      </div>
     </section>
 
     <div>
@@ -492,24 +506,15 @@
 
 <script src="/static/leaflet/leaflet.js"></script>
 
-<section class="relative overflow-hidden rounded-3xl border border-slate-200/70 bg-white/95 shadow-card backdrop-blur">
-  <div id="analysis-summary">
-    <section id="charts-kpis"></section>
-    <div id="chart-speed" style="height: 360px; width: 100%;"></div>
-  </div>
+<script id="rde-payload" type="application/json">
+  {{ results_payload | tojson | safe }}
+</script>
+<script>
+  window.__RDE_RESULT__={{ results_payload | tojson | safe }};
+  window.dispatchEvent(new Event('rde:payload-ready'));
+  document.dispatchEvent(new Event('rde:payload-ready'));
+</script>
 
-  <div id="drive-map" style="height: 360px; width: 100%;"></div>
-
-  <script id="rde-payload" type="application/json">
-    {{ results_payload | tojson | safe }}
-  </script>
-  <script>
-    window.__RDE_RESULT__={{ results_payload | tojson | safe }};
-    window.dispatchEvent(new Event('rde:payload-ready'));
-    document.dispatchEvent(new Event('rde:payload-ready'));
-  </script>
-
-  <!-- App bundle must come after payload -->
-  <script src="/static/js/app.js"></script>
-</section>
+<!-- App bundle must come after payload -->
+<script src="/static/js/app.js"></script>
 
