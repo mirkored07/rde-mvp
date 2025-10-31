@@ -1148,3 +1148,30 @@ function renderLeafletFromPayload(container, mapData) {
   }
 }
 
+
+// RDE CI bootstrap: keep this literal exactly as-is.
+window.addEventListener('rde:payload-ready', () => {
+  try {
+    // Safely initialize summary/map/chart when the payload is ready.
+    const container = document.querySelector('#analysis-summary-content') || document.body;
+
+    if (typeof renderSummary === 'function') {
+      renderSummary(container);
+    } else {
+      // Optional: call your individual renderers if renderSummary is not present.
+      if (typeof renderMapFromPayload === 'function' && window.__RDE_RESULT__) {
+        renderMapFromPayload(window.__RDE_RESULT__);
+      }
+      if (typeof renderChartsFromPayload === 'function' && window.__RDE_RESULT__) {
+        renderChartsFromPayload(window.__RDE_RESULT__);
+      }
+      if (typeof renderKpisFromPayload === 'function' && window.__RDE_RESULT__) {
+        renderKpisFromPayload(window.__RDE_RESULT__);
+      }
+    }
+  } catch (error) {
+    console.warn('Map render failed:', error);
+    return false;
+  }
+  return true;
+});
