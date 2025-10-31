@@ -380,10 +380,25 @@ def test_samples_zip_download() -> None:
         assert "nox_mg_s" in pems_csv
 
 
-def test_export_zip_contains_diagnostics() -> None:
-    payload = _post_analysis()
+def test_export_zip_stream_download() -> None:
+    response = client.get("/export_zip")
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/zip"
+    assert (
+        response.headers["content-disposition"]
+        == 'attachment; filename="rde_export.zip"'
+    )
 
-    response = client.post("/export_zip", json={"results": payload})
+    with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+        assert archive.namelist() == [
+            "ecu_demo.csv",
+            "gps_demo.csv",
+            "pems_demo.csv",
+        ]
+
+
+def test_export_zip_legacy_json_mode() -> None:
+    response = client.get("/export_zip", params={"download": 0})
     assert response.status_code == 200
 
     body = response.json()
@@ -395,13 +410,12 @@ def test_export_zip_contains_diagnostics() -> None:
     assert archive_info["media_type"] == "application/zip"
 
     archive_bytes = base64.b64decode(archive_info["content_base64"])
-    buffer = io.BytesIO(archive_bytes)
-    with zipfile.ZipFile(buffer) as archive:
-        names = set(archive.namelist())
-        assert "index.html" in names
-        assert "diagnostics.json" in names
-        diagnostics_payload = json.loads(archive.read("diagnostics.json").decode("utf-8"))
-        assert "summary" in diagnostics_payload
+    with zipfile.ZipFile(io.BytesIO(archive_bytes)) as archive:
+        assert archive.namelist() == [
+            "ecu_demo.csv",
+            "gps_demo.csv",
+            "pems_demo.csv",
+        ]
 
     diagnostics_messages = results.get("diagnostics", [])
     assert any("Download ZIP" in entry for entry in diagnostics_messages)

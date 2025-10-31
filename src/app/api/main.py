@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
+from src.app.ui.routes import export_router
 from src.app.ui.server import router as ui_router
 
 app = FastAPI(title="RDE MVP")
@@ -29,6 +30,9 @@ def favicon() -> Response:
 
 # Register UI routes (landing page, analysis workflow).
 app.include_router(ui_router)
+
+# Lightweight export utilities.
+app.include_router(export_router)
 
 
 # Expose static assets (CSS/JS) used by the Tailwind/HTMX UI.
