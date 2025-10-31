@@ -1,0 +1,61 @@
+id: eu7_ld
+name: "EU7 Light-Duty"
+version: 1
+
+units:
+  speed: "km/h"
+  distance: "km"
+  time: "s"
+  mass_per_km: "mg/km"
+  pn_per_km: "#/km"
+
+limits:
+  nox_mg_per_km: <TODO_EU7_NOX>
+  pn_per_km: <TODO_EU7_PN>
+  co_mg_per_km: <TODO_EU7_CO>
+  thc_mg_per_km: <TODO_EU7_THC>
+  nh3_mg_per_km: <TODO_EU7_NH3>
+
+zero_span:
+  pn_zero_max_per_cm3: 5000
+  nox_zero_max_ppm: 5
+
+trip_composition:
+  urban_min_km: <TODO_URBAN_MIN_KM>
+  expressway_min_km: <TODO_EXPRESSWAY_MIN_KM>
+  share_urban_percent_range: [<TODO_SHARE_URBAN_MIN>, <TODO_SHARE_URBAN_MAX>]
+  share_expressway_percent_range: [<TODO_SHARE_EXPRESSWAY_MIN>, <TODO_SHARE_EXPRESSWAY_MAX>]
+  duration_minutes_range: [<TODO_DURATION_MIN>, <TODO_DURATION_MAX>]
+  start_urban: true
+
+dynamics:
+  urban_avg_speed_range_kmh: [<TODO_URBAN_SPEED_MIN>, <TODO_URBAN_SPEED_MAX>]
+  stop_time_share_urban_percent_range: [<TODO_STOP_SHARE_MIN>, <TODO_STOP_SHARE_MAX>]
+  va_pos95_limits:
+    urban: <TODO_VA95_URBAN>
+    expressway: <TODO_VA95_EXPRESSWAY>
+  rpa_min:
+    urban: <TODO_RPA_URBAN>
+    expressway: <TODO_RPA_EXPRESSWAY>
+  maw:
+    low_speed_tolerance_percent: <TODO_MAW_LOW_TOL>
+    high_speed_tolerance_percent: <TODO_MAW_HIGH_TOL>
+    min_valid_low_speed_windows_percent: 50
+    min_valid_high_speed_windows_percent: 50
+
+gps:
+  max_loss_s: <TODO_GPS_MAX_LOSS>
+  total_loss_s: <TODO_GPS_TOTAL_LOSS>
+  max_distance_dev_percent: <TODO_GPS_DISTANCE_DEV>
+
+corrections:
+  extc:
+    enabled: true
+    factor: <TODO_EXTC_FACTOR>
+  rf:
+    enabled: false
+  cf:
+    enabled: false
+  ki:
+    enabled: true
+    zero_floor_negative_results: true
