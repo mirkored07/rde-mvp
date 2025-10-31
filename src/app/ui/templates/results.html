@@ -1,522 +1,148 @@
-{% set diag_level_classes = {
-    'pass': 'bg-emerald-500/15 text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-200',
-    'warn': 'bg-amber-500/20 text-amber-600 dark:bg-amber-500/25 dark:text-amber-200',
-    'fail': 'bg-rose-500/15 text-rose-600 dark:bg-rose-500/20 dark:text-rose-200'
-} %}
+{% set payload = results_payload or {} %}
+{% set sections = payload.sections or [] %}
+{% set final_block = payload.final %}
+{% set meta = payload.meta or {} %}
+{% set final_status = final_block.pass if final_block else None %}
 
-{% if has_errors %}
-<div class="rounded-3xl border border-rose-200/70 bg-rose-50/70 p-6 text-rose-700 shadow-inner dark:border-rose-500/40 dark:bg-rose-500/10 dark:text-rose-100">
-  <h3 class="text-lg font-semibold">We couldn't analyze your files</h3>
-  <ul class="mt-3 list-disc space-y-2 pl-5 text-sm">
-    {% for message in errors %}
-    <li>{{ message }}</li>
-    {% endfor %}
-  </ul>
-</div>
-{% elif not has_results %}
-<div class="rounded-3xl border border-dashed border-slate-300 bg-white/60 p-10 text-center text-slate-500 shadow-inner dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-400">
-  <p class="text-lg font-medium">Upload your telemetry files to see KPIs, interactive charts, and a live map of the route.</p>
-</div>
-{% else %}
-<section class="relative overflow-hidden rounded-3xl border border-slate-200/70 bg-white/95 shadow-card backdrop-blur dark:border-slate-800/70 dark:bg-slate-900/80" data-component="analysis-results">
-
-  <!-- Compatibility probe for legacy tests -->
-  <div
-    id="rde-payload-probe"
-    data-results-payload="true"
-    class="hidden"
-  ></div>
-
-  <main class="mx-auto w-full max-w-5xl space-y-8 px-4 py-8">
-    <div class="rounded-3xl border border-slate-200 bg-white/90 p-6 shadow-sm dark:border-slate-700 dark:bg-slate-900/70">
-      <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-        <div>
-          <p class="text-xs font-semibold uppercase tracking-[0.4em] text-slate-500 dark:text-slate-400">Regulation verdict</p>
-          <span class="mt-3 inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold {{ regulation.status_class }}">
-            <span class="relative flex h-2.5 w-2.5">
-              <span class="absolute inline-flex h-full w-full animate-ping rounded-full {{ regulation.ping_class }}"></span>
-              <span class="relative inline-flex h-2.5 w-2.5 rounded-full {{ regulation.dot_class }}"></span>
-            </span>
-            {{ regulation.label }}
-          </span>
-          {% if regulation.pack_title %}
-          <p class="mt-3 text-sm text-slate-500 dark:text-slate-400">
-            Pack:
-            <span class="font-semibold text-slate-900 dark:text-white">{{ regulation.pack_title }}</span>
-            {% if regulation.version %}
-            <span class="ml-2 inline-flex items-center rounded-full bg-slate-500/10 px-2 py-0.5 text-xs font-semibold text-slate-600 dark:bg-slate-700/60 dark:text-slate-200">v{{ regulation.version }}</span>
-            {% endif %}
-          </p>
-          {% endif %}
-          {% if regulation.legal_source %}
-          <p class="text-xs text-slate-500 dark:text-slate-400">Legal source: {{ regulation.legal_source }}</p>
-          {% endif %}
-          {% if regulation.pack_id and regulation.pack_id != regulation.pack_title %}
-          <p class="text-xs text-slate-400 dark:text-slate-500">Identifier: <code>{{ regulation.pack_id }}</code></p>
-          {% endif %}
-        </div>
-        <dl class="grid gap-4 sm:grid-cols-2 lg:gap-6">
-          {% set mandatory_total = regulation.counts.mandatory_total %}
-          {% set optional_total = regulation.counts.optional_total %}
-          <div class="rounded-2xl border border-slate-200 bg-white/80 px-5 py-4 text-center shadow-sm dark:border-slate-700 dark:bg-slate-900/70">
-            <dt class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400 dark:text-slate-500">Mandatory rules</dt>
-            <dd class="mt-2 text-lg font-semibold text-slate-900 dark:text-white">{% if mandatory_total %}{{ regulation.counts.mandatory_passed }}/{{ mandatory_total }}{% else %}0{% endif %}</dd>
-            <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">{% if mandatory_total %}All must pass{% else %}Not configured{% endif %}</p>
-          </div>
-          <div class="rounded-2xl border border-slate-200 bg-white/80 px-5 py-4 text-center shadow-sm dark:border-slate-700 dark:bg-slate-900/70">
-            <dt class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400 dark:text-slate-500">Optional rules</dt>
-            <dd class="mt-2 text-lg font-semibold text-slate-900 dark:text-white">{% if optional_total %}{{ regulation.counts.optional_passed }}/{{ optional_total }}{% else %}0{% endif %}</dd>
-            <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">{% if optional_total %}Informational{% else %}Not configured{% endif %}</p>
-          </div>
-        </dl>
+<section class="mx-auto flex w-full max-w-5xl flex-col gap-8 px-4 py-10">
+  <header class="flex flex-col gap-4 border-b border-slate-200 pb-6 dark:border-slate-700">
+    <div class="flex flex-col gap-3 sm:flex-row sm:items-baseline sm:justify-between">
+      <h1 class="text-2xl font-semibold text-slate-900 dark:text-white">
+        EU7 Light-Duty Compliance Report
+        {% if meta.legislation %}
+        <span class="ml-2 text-xs px-2 py-0.5 rounded bg-sky-600/20 text-sky-300">
+          {{ meta.legislation }}
+        </span>
+        {% endif %}
+      </h1>
+      <div class="flex items-center gap-2 text-sm">
+        <span class="font-semibold text-slate-500 dark:text-slate-300">Overall result:</span>
+        {% if final_block is none %}
+        <span class="rounded-full bg-amber-500/20 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-amber-700 dark:bg-amber-500/20 dark:text-amber-200">Pending limits</span>
+        {% elif final_status %}
+        <span class="rounded-full bg-emerald-500/20 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-200">Pass</span>
+        {% else %}
+        <span class="rounded-full bg-rose-500/20 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-rose-700 dark:bg-rose-500/20 dark:text-rose-200">Fail</span>
+        {% endif %}
       </div>
     </div>
+    <p class="max-w-3xl text-sm text-slate-500 dark:text-slate-400">
+      Automated evaluation of the EU7 Light-Duty Real Driving Emissions (RDE) criteria covering zero/span checks, trip composition, dynamics, GPS validity, and pollutant-specific emission limits.
+    </p>
+  </header>
 
-    {% set diagnostics_checks = diagnostics.checks %}
-    {% if diagnostics_checks %}
-    <div class="rounded-3xl border border-slate-200/70 bg-white/95 p-6 shadow-card dark:border-slate-800/70 dark:bg-slate-900/80">
-      <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-        <div>
-          <p class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-500 dark:text-slate-400">Data diagnostics</p>
-          <p class="mt-2 max-w-xl text-sm text-slate-500 dark:text-slate-400">Automated checks covering sampling cadence, gaps, GPS jumps, and speed spikes.</p>
-        </div>
-        <div class="flex flex-wrap items-center gap-2">
-          {% set diag_summary = diagnostics.summary %}
-          {% for level in ['pass', 'warn', 'fail'] %}
-          {% set level_class = diag_level_classes.get(level, 'bg-slate-500/15 text-slate-600 dark:bg-slate-700/60 dark:text-slate-300') %}
-          <span class="inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-semibold {{ level_class }}">
-            <span class="h-2 w-2 rounded-full bg-current"></span>{{ level.upper() }}: {{ diag_summary.get(level, 0) | int }}
-          </span>
-          {% endfor %}
-        </div>
+  <div class="rounded-2xl border border-slate-200 bg-white/80 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900/60">
+    <h2 class="text-sm font-semibold uppercase tracking-[0.3em] text-slate-500 dark:text-slate-300">Summary</h2>
+    <div id="analysis-summary-content" class="prose prose-sm mt-3 max-w-none prose-slate dark:prose-invert"></div>
+  </div>
+
+  <section class="grid gap-6">
+    {% for section in sections %}
+    {% set criteria = section.criteria or [] %}
+    <article class="rounded-2xl border border-slate-200 bg-white/80 p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900/60">
+      <div class="flex items-center justify-between gap-4">
+        <h3 class="text-lg font-semibold text-slate-900 dark:text-white">{{ section.title }}</h3>
+        <span class="text-xs uppercase tracking-[0.3em] text-slate-400 dark:text-slate-500">Criterion overview</span>
       </div>
-      <ul class="mt-6 space-y-3">
-        {% for entry in diagnostics_checks %}
-        {% set level = (entry.get('level') or 'warn') | string | lower %}
-        {% set level_class = diag_level_classes.get(level, 'bg-slate-500/15 text-slate-600 dark:bg-slate-700/60 dark:text-slate-300') %}
-        <li class="rounded-2xl border border-slate-200 bg-white/85 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900/70">
-          <div class="flex items-start justify-between gap-4">
-            <div>
-              {% if entry.get('subject') %}
-              <p class="text-[11px] font-semibold uppercase tracking-[0.3em] text-slate-400 dark:text-slate-500">{{ entry.subject}}</p>
-              {% endif %}
-              <p class="text-sm font-semibold text-slate-900 dark:text-white">{{ entry.title }}</p>
-            </div>
-            <span class="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold {{ level_class }}">{{ (entry.get('level') or 'warn') | string | upper }}</span>
-          </div>
-          <p class="mt-2 text-sm text-slate-600 dark:text-slate-300">{{ entry.details }}</p>
-          {% if entry.count %}
-          <p class="mt-2 text-xs text-slate-500 dark:text-slate-400">Occurrences: {{ entry.count }}</p>
-          {% endif %}
-        </li>
-        {% endfor %}
-      </ul>
-      {% if diagnostics.repaired %}
-      <div class="mt-4 rounded-2xl border border-dashed border-slate-200 bg-white/80 p-4 text-xs text-slate-500 dark:border-slate-700 dark:bg-slate-900/60 dark:text-slate-400">
-        <p class="font-semibold uppercase tracking-[0.3em] text-slate-400 dark:text-slate-500">Repaired spans</p>
-        <ul class="mt-2 list-disc space-y-1 pl-4">
-          {% for span_text in diagnostics.repaired %}
-          <li>{{ span_text }}</li>
-          {% endfor %}
-        </ul>
+      {% if criteria %}
+      <div class="mt-4 overflow-x-auto">
+        <table class="min-w-full divide-y divide-slate-200 text-sm dark:divide-slate-700">
+          <thead class="bg-slate-100 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:bg-slate-800/80 dark:text-slate-300">
+            <tr>
+              <th scope="col" class="px-4 py-3 text-left">Ref</th>
+              <th scope="col" class="px-4 py-3 text-left">Criterion</th>
+              <th scope="col" class="px-4 py-3 text-left">Condition</th>
+              <th scope="col" class="px-4 py-3 text-left">Value</th>
+              <th scope="col" class="px-4 py-3 text-left">Unit</th>
+              <th scope="col" class="px-4 py-3 text-left">Result</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-100 dark:divide-slate-800">
+            {% for row in criteria %}
+            {% set row_pass = row.pass %}
+            <tr class="bg-white/60 text-slate-700 dark:bg-slate-900/60 dark:text-slate-200">
+              <td class="px-4 py-3 font-semibold text-slate-500 dark:text-slate-400">{{ row.ref }}</td>
+              <td class="px-4 py-3 font-medium text-slate-900 dark:text-white">{{ row.criterion }}</td>
+              <td class="px-4 py-3 text-slate-600 dark:text-slate-300">{{ row.condition }}</td>
+              <td class="px-4 py-3">{{ row.value }}</td>
+              <td class="px-4 py-3">{{ row.unit }}</td>
+              <td class="px-4 py-3">
+                {% if row_pass %}
+                <span class="inline-flex rounded-full bg-emerald-500/15 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-200">Pass</span>
+                {% else %}
+                <span class="inline-flex rounded-full bg-rose-500/15 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-rose-700 dark:bg-rose-500/20 dark:text-rose-200">Fail</span>
+                {% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
       </div>
+      {% else %}
+      <p class="mt-3 text-sm text-slate-500 dark:text-slate-400">No criteria available for this section.</p>
       {% endif %}
+    </article>
+    {% endfor %}
+  </section>
+
+  <section class="rounded-2xl border border-slate-200 bg-white/80 p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900/60">
+    <h3 class="text-lg font-semibold text-slate-900 dark:text-white">Final Conformity</h3>
+    {% if final_block and final_block.pollutants %}
+    <p class="mt-2 text-sm text-slate-500 dark:text-slate-400">Overall result computed from the emissions criteria.</p>
+    <div class="mt-4 overflow-x-auto">
+      <table class="min-w-full divide-y divide-slate-200 text-sm dark:divide-slate-700">
+        <thead class="bg-slate-100 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:bg-slate-800/80 dark:text-slate-300">
+          <tr>
+            <th scope="col" class="px-4 py-3 text-left">Pollutant</th>
+            <th scope="col" class="px-4 py-3 text-left">Condition</th>
+            <th scope="col" class="px-4 py-3 text-left">Value</th>
+            <th scope="col" class="px-4 py-3 text-left">Unit</th>
+            <th scope="col" class="px-4 py-3 text-left">Result</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-100 dark:divide-slate-800">
+          {% for pollutant in final_block.pollutants %}
+          <tr class="bg-white/60 text-slate-700 dark:bg-slate-900/60 dark:text-slate-200">
+            <td class="px-4 py-3 font-medium text-slate-900 dark:text-white">{{ pollutant.criterion }}</td>
+            <td class="px-4 py-3 text-slate-600 dark:text-slate-300">{{ pollutant.condition }}</td>
+            <td class="px-4 py-3">{{ pollutant.value }}</td>
+            <td class="px-4 py-3">{{ pollutant.unit }}</td>
+            <td class="px-4 py-3">
+              {% if pollutant.pass %}
+              <span class="inline-flex rounded-full bg-emerald-500/15 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-200">Pass</span>
+              {% else %}
+              <span class="inline-flex rounded-full bg-rose-500/15 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-rose-700 dark:bg-rose-500/20 dark:text-rose-200">Fail</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
     </div>
     {% else %}
-    <div class="rounded-3xl border border-dashed border-slate-300 bg-white/60 p-6 text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-400">
-      No diagnostics were produced for this dataset.
-    </div>
+    <p class="mt-2 text-sm text-slate-500 dark:text-slate-400">Emission limits not fully configured; final verdict pending.</p>
     {% endif %}
+  </section>
 
-    {% set analysis_status = analysis.status %}
-    {% set analysis_ok = analysis_status.ok if analysis_status else False %}
-    {% set analysis_label = analysis_status.label if analysis_status else 'n/a' %}
-    {% set analysis_badge = badge_pass if analysis_ok else badge_fail %}
-    <div class="rounded-3xl border border-slate-700/70 bg-slate-900/40 p-6 shadow-card">
-      <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <p class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400 dark:text-slate-500">Analysis validity</p>
-          <p class="mt-2 text-sm text-slate-400 dark:text-slate-300">Derived metrics from fused telemetry streams.</p>
-        </div>
-        <span class="inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold {{ analysis_badge }}">{{ analysis_label }}</span>
+  <section class="grid gap-6 lg:grid-cols-2">
+    <div class="rounded-2xl border border-slate-200 bg-white/80 p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900/60">
+      <h3 class="text-sm font-semibold uppercase tracking-[0.3em] text-slate-500 dark:text-slate-300">Charts &amp; KPIs</h3>
+      <div class="mt-4" id="charts-kpis">
+        <div id="chart-speed" class="w-full" style="height: 320px; width: 100%;"></div>
       </div>
-      <dl class="mt-6 grid gap-4 sm:grid-cols-2">
-        {% set analysis_kpis = analysis.kpis or {} %}
-        {% for metric in analysis.metrics or [] %}
-        {% set metric_label = metric.label | string | lower %}
-        {% set metric_attr = None %}
-        {% if 'nox' in metric_label and 'km' in metric_label %}
-          {% set metric_attr = 'NOx_mg_per_km' %}
-        {% elif 'pn' in metric_label and 'km' in metric_label %}
-          {% set metric_attr = 'PN_1_per_km' %}
-        {% endif %}
-        <div class="rounded-xl border border-slate-700/70 bg-slate-900/60 p-4">
-          <dt class="text-[11px] font-semibold uppercase tracking-[0.3em] text-slate-400">{{ metric.label }}</dt>
-          {% set metric_value = metric.value %}
-          {% if metric_attr and (metric_value is none or metric_value == 'n/a') %}
-            {% set metric_entry = analysis_kpis.get(metric_attr) %}
-            {% if metric_entry %}
-              {% set total_entry = metric_entry.get('total') %}
-              {% if total_entry and total_entry.get('value') is not none %}
-                {% set metric_value = '%.3f' % (total_entry.get('value') | float) %}
-                {% if metric_entry.get('unit') %}
-                  {% set metric_value = metric_value + ' ' + metric_entry.get('unit') %}
-                {% endif %}
-              {% elif metric_entry.get('value') is not none %}
-                {% set metric_value = '%.3f' % (metric_entry.get('value') | float) %}
-                {% if metric_entry.get('unit') %}
-                  {% set metric_value = metric_value + ' ' + metric_entry.get('unit') %}
-                {% endif %}
-              {% endif %}
-            {% endif %}
-          {% endif %}
-          {% if metric_value is none %}
-            {% set metric_value = 'n/a' %}
-          {% endif %}
-          <dd class="mt-2 text-lg font-semibold text-white"{% if metric_attr %} data-kpi="{{ metric_attr }}" data-kpi-scope="total"{% endif %}>{{ metric_value }}</dd>
-        </div>
-        {% else %}
-        <div class="rounded-xl border border-dashed border-slate-700/70 bg-slate-900/30 p-4 text-sm text-slate-400">No metrics available.</div>
-        {% endfor %}
-      </dl>
     </div>
-
-    {% set kpi_entries = analysis.kpis or {} %}
-    {% if kpi_entries %}
-    <section id="analysis-kpis" class="rounded-3xl border border-slate-200/70 bg-white/95 p-6 shadow-card dark:border-slate-700/70 dark:bg-slate-900/60">
-      <h3 class="text-sm font-semibold uppercase tracking-[0.3em] text-slate-500 dark:text-slate-300">Key performance indicators</h3>
-      <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">Server-rendered KPI totals for automated checks.</p>
-      <div class="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {% for key, entry in kpi_entries.items() %}
-        {% if entry is mapping %}
-        {% set label = entry.get('label') or key %}
-        {% set unit = entry.get('unit') if entry.get('unit') is string else None %}
-        {% set total_block = entry.get('total') if entry.get('total') is mapping else None %}
-        {% set total_value = None %}
-        {% if total_block and total_block.get('value') is not none %}
-          {% set total_value = total_block.get('value') %}
-        {% elif entry.get('value') is not none %}
-          {% set total_value = entry.get('value') %}
-        {% endif %}
-        {% if total_value is not none %}
-          {% set formatted_total = '%.3f' % (total_value | float) %}
-          {% if unit %}
-            {% set formatted_total = formatted_total + ' ' + unit %}
-          {% endif %}
-        {% else %}
-          {% set formatted_total = None %}
-        {% endif %}
-        {% set scope_values = namespace(items=[]) %}
-        {% for scope, scope_entry in entry.items() %}
-          {% if scope not in ['label', 'unit', 'total', 'value'] %}
-            {% if scope_entry is mapping and scope_entry.get('value') is not none %}
-              {% set scope_value = scope_entry.get('value') %}
-              {% set formatted_scope = '%.3f' % (scope_value | float) %}
-              {% if unit %}
-                {% set formatted_scope = formatted_scope + ' ' + unit %}
-              {% endif %}
-              {% set _ = scope_values.items.append((scope, formatted_scope)) %}
-            {% elif scope_entry is number %}
-              {% set formatted_scope = '%.3f' % (scope_entry | float) %}
-              {% if unit %}
-                {% set formatted_scope = formatted_scope + ' ' + unit %}
-              {% endif %}
-              {% set _ = scope_values.items.append((scope, formatted_scope)) %}
-            {% endif %}
-          {% endif %}
-        {% endfor %}
-        <div class="rounded-2xl border border-slate-200 bg-white/80 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900/60">
-          <h4 class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-500 dark:text-slate-300">{{ label }}</h4>
-          {% if formatted_total %}
-          <p class="mt-2 text-lg font-semibold text-slate-900 dark:text-white" data-kpi="{{ key | string }}" data-kpi-scope="total">{{ formatted_total }}</p>
-          {% endif %}
-          {% if scope_values.items %}
-          <ul class="mt-3 space-y-1 text-xs text-slate-500 dark:text-slate-400">
-            {% for scope, formatted_scope in scope_values.items %}
-            <li data-kpi="{{ key | string }}" data-kpi-scope="{{ scope }}"><span class="font-medium text-slate-600 dark:text-slate-200">{{ scope | replace('_', ' ') | title }}:</span> {{ formatted_scope }}</li>
-            {% endfor %}
-          </ul>
-          {% endif %}
-        </div>
-        {% endif %}
-        {% endfor %}
-      </div>
-    </section>
-    {% endif %}
-
-    <section class="rounded-3xl border border-slate-200/70 bg-slate-900/5 p-6 shadow-card dark:border-slate-700/70 dark:bg-slate-900/40 w-full max-w-none">
-      <div class="flex flex-col gap-8 lg:flex-row">
-        <div class="flex-1 min-w-0 w-full">
-          <div class="flex flex-col gap-3">
-            <h3 class="text-sm font-semibold uppercase tracking-[0.3em] text-slate-500 dark:text-slate-300">Charts &amp; KPIs</h3>
-            <p class="text-xs text-slate-500 dark:text-slate-400">Interactive time series rendered after the payload event fires.</p>
-            <div class="chart-card w-full min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-white/90 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900/60">
-              <div id="charts-kpis" class="w-full">
-                <div id="chart-speed" class="w-full" style="height: 360px; width: 100%;"></div>
-              </div>
-            </div>
-          </div>
-        </div>
-        <div class="flex-1 min-w-0 w-full">
-          <div class="flex flex-col gap-3">
-            <h3 class="text-sm font-semibold uppercase tracking-[0.3em] text-slate-500 dark:text-slate-300">Drive map</h3>
-            <p class="text-xs text-slate-500 dark:text-slate-400">Leaflet trace rendered when the payload is ready.</p>
-            <div class="chart-card w-full min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-white/90 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900/60">
-              <div id="drive-map" class="w-full" style="height: 360px; width: 100%;"></div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <div>
-      <h3 class="text-lg font-semibold text-slate-900 dark:text-white">Rule evidence</h3>
-      <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">Thresholds are demo placeholders and do not represent legal advice.</p>
-      {% if evidence %}
-      <div class="mt-6 overflow-hidden rounded-2xl border border-slate-200 bg-white/80 shadow-sm dark:border-slate-700 dark:bg-slate-900/70">
-        <table class="min-w-full divide-y divide-slate-200 dark:divide-slate-700">
-          <thead class="bg-slate-50/70 text-xs font-semibold uppercase tracking-[0.3em] text-slate-500 dark:bg-slate-900/60 dark:text-slate-400">
-            <tr>
-              <th scope="col" class="px-4 py-3 text-left">Rule</th>
-              <th scope="col" class="px-4 py-3 text-left">Requirement</th>
-              <th scope="col" class="px-4 py-3 text-left">Observed</th>
-              <th scope="col" class="px-4 py-3 text-left">Status</th>
-            </tr>
-          </thead>
-          <tbody class="divide-y divide-slate-200 bg-white/80 text-sm text-slate-600 dark:divide-slate-800 dark:bg-slate-900/60 dark:text-slate-300">
-            {% for entry in evidence %}
-            {% set status_class = badge_pass if entry.passed else badge_fail %}
-            {% set mandatory_badge = 'bg-amber-500/20 text-amber-600 dark:bg-amber-500/25 dark:text-amber-200' if entry.mandatory else 'bg-slate-500/15 text-slate-600 dark:bg-slate-700/60 dark:text-slate-300' %}
-            {% set metric_path = entry.metric or '' %}
-            {% set kpi_attr = None %}
-            {% if 'NOx_mg_per_km' in metric_path %}
-              {% set kpi_attr = 'NOx_mg_per_km' %}
-            {% elif 'PN_1_per_km' in metric_path %}
-              {% set kpi_attr = 'PN_1_per_km' %}
-            {% endif %}
-            <tr>
-              <td class="px-4 py-4 align-top">
-                <div class="font-semibold text-slate-900 dark:text-white">
-                  {{ entry.title }}
-                  {% if entry.scope %}
-                  <span class="ml-2 inline-flex items-center rounded-full bg-slate-500/15 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wider text-slate-600 dark:bg-slate-700/60 dark:text-slate-300">{{ entry.scope }}</span>
-                  {% endif %}
-                </div>
-                {% set citation_parts = [] %}
-                {% if entry.legal_source %}
-                {% set _ = citation_parts.append(entry.legal_source) %}
-                {% endif %}
-                {% if entry.article %}
-                {% set _ = citation_parts.append(entry.article) %}
-                {% endif %}
-                {% if citation_parts %}
-                <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">{{ citation_parts | join(' · ') }}</div>
-                {% endif %}
-                {% if entry.metric %}
-                <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">Metric: <code>{{ entry.metric }}</code></div>
-                {% endif %}
-                {% for note in entry.notes or [] %}
-                <p class="mt-2 text-xs italic text-slate-500 dark:text-slate-400">{{ note }}</p>
-                {% endfor %}
-              </td>
-              <td class="px-4 py-4 align-top">
-                <div class="font-semibold text-slate-900 dark:text-white">{{ entry.requirement }}</div>
-              </td>
-              <td class="px-4 py-4 align-top">
-                <div class="font-semibold text-slate-900 dark:text-white"{% if kpi_attr %} data-kpi="{{ kpi_attr }}"{% endif %}>{{ entry.observed }}</div>
-                {% if entry.context %}
-                <ul class="mt-2 space-y-1 text-xs text-slate-500 dark:text-slate-400">
-                  {% for item in entry.context %}
-                  <li><span class="font-medium text-slate-900 dark:text-white">{{ item.label }}:</span> {{ item.value }}</li>
-                  {% endfor %}
-                </ul>
-                {% endif %}
-                {% if entry.detail %}
-                <p class="mt-2 text-xs text-amber-600 dark:text-amber-300">{{ entry.detail }}</p>
-                {% endif %}
-              </td>
-              <td class="px-4 py-4 align-top">
-                <div class="flex flex-col gap-2">
-                  <span class="inline-flex items-center justify-center rounded-full px-2.5 py-0.5 text-xs font-semibold {{ status_class }}">{{ 'Pass' if entry.passed else 'Fail' }}</span>
-                  <span class="inline-flex items-center justify-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold {{ mandatory_badge }}">{{ 'Mandatory' if entry.mandatory else 'Optional' }}</span>
-                </div>
-              </td>
-            </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-      {% else %}
-      <div class="mt-6 rounded-2xl border border-dashed border-slate-300 bg-slate-100/60 p-6 text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-400">
-        No regulation evidence available.
-      </div>
-      {% endif %}
+    <div class="rounded-2xl border border-slate-200 bg-white/80 p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900/60">
+      <h3 class="text-sm font-semibold uppercase tracking-[0.3em] text-slate-500 dark:text-slate-300">Route map</h3>
+      <div id="drive-map" class="mt-4 h-80 w-full rounded-xl border border-slate-200 bg-slate-100 dark:border-slate-700 dark:bg-slate-800"></div>
     </div>
-
-    <div class="rounded-3xl border border-slate-700/70 bg-slate-900/40 p-6 shadow-card">
-      <p class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400 dark:text-slate-500">Summary</p>
-      <div id="analysis-summary-content" class="prose prose-sm mt-3 max-w-none prose-slate dark:prose-invert"></div>
-      <script id="summary-data" type="application/json">{{ analysis.summary_md | tojson }}</script>
-    </div>
-
-    <div class="rounded-3xl border border-slate-700/70 bg-slate-900/40 p-6 shadow-card">
-      <p class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400 dark:text-slate-500">Speed bin coverage</p>
-      {% if analysis.bins %}
-      <div class="mt-4 overflow-hidden rounded-xl border border-slate-700/70 bg-slate-900/60">
-        <table class="min-w-full divide-y divide-slate-800 text-sm text-slate-300">
-          <thead class="bg-slate-900/70 text-[11px] font-semibold uppercase tracking-[0.3em] text-slate-400">
-            <tr>
-              <th scope="col" class="px-4 py-3 text-left">Speed bin</th>
-              <th scope="col" class="px-4 py-3 text-left">Time (s)</th>
-              <th scope="col" class="px-4 py-3 text-left">Distance (km)</th>
-              <th scope="col" class="px-4 py-3 text-left">Status</th>
-            </tr>
-          </thead>
-          <tbody class="divide-y divide-slate-800/60">
-            {% for bin in analysis.bins %}
-            {% set bin_badge = badge_pass if bin.valid else badge_fail %}
-            <tr>
-              <td class="px-4 py-3 font-semibold text-white">{{ bin.name }}</td>
-              <td class="px-4 py-3">{{ bin.time or 'n/a' }}</td>
-              <td class="px-4 py-3">{{ bin.distance or 'n/a' }}</td>
-              <td class="px-4 py-3">
-                <span class="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold {{ bin_badge }}">{{ 'Pass' if bin.valid else 'Fail' }}</span>
-              </td>
-            </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-      {% else %}
-      <p class="mt-3 text-sm text-slate-400">Configure speed bins in <code>data/rules/demo_rules.json</code> to populate coverage.</p>
-      {% endif %}
-    </div>
-
-    <div class="rounded-3xl border border-slate-700/70 bg-slate-900/40 p-6 shadow-card">
-      <p class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400 dark:text-slate-500">Speed bins &amp; KPIs</p>
-      {% set kpi_entries = analysis.kpis or {} %}
-      {% if analysis.bins %}
-      <div class="mt-4 overflow-hidden rounded-xl border border-slate-700/70 bg-slate-900/60">
-        <table class="min-w-full divide-y divide-slate-800 text-sm text-slate-300">
-          <thead class="bg-slate-900/70 text-[11px] font-semibold uppercase tracking-[0.3em] text-slate-400">
-            <tr>
-              <th scope="col" class="px-4 py-3 text-left">Speed bin</th>
-              <th scope="col" class="px-4 py-3 text-left">KPIs</th>
-            </tr>
-          </thead>
-          <tbody class="divide-y divide-slate-800/60">
-            {% for bin in analysis.bins %}
-            <tr>
-              <td class="px-4 py-4 align-top">
-                <div class="flex items-center gap-2">
-                  <span class="font-semibold text-white">{{ bin.name }}</span>
-                  {% set bin_badge = badge_pass if bin.valid else badge_fail %}
-                  <span class="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold {{ bin_badge }}">{{ 'Pass' if bin.valid else 'Fail' }}</span>
-                </div>
-                <dl class="mt-3 grid gap-2 text-xs text-slate-400 sm:grid-cols-2">
-                  <div>
-                    <dt class="uppercase tracking-[0.3em]">Time</dt>
-                    <dd class="mt-1 font-medium text-slate-200">{{ bin.time or 'n/a' }}</dd>
-                  </div>
-                  <div>
-                    <dt class="uppercase tracking-[0.3em]">Distance</dt>
-                    <dd class="mt-1 font-medium text-slate-200">{{ bin.distance or 'n/a' }}</dd>
-                  </div>
-                </dl>
-              </td>
-              <td class="px-4 py-4">
-                {% set rows = [] %}
-                {% if kpi_entries %}
-                  {% for key, info in kpi_entries.items() %}
-                    {% if info and info.get('label') %}
-                      {% set label = info.get('label') %}
-                    {% else %}
-                      {% set label = key %}
-                    {% endif %}
-                    {% set unit = info.get('unit') if info else None %}
-                    {% set scope_entry = info.get(bin.name) if info else None %}
-                    {% set scope_value = None %}
-                    {% if scope_entry and scope_entry.get('value') is not none %}
-                      {% set scope_value = scope_entry.get('value') %}
-                    {% elif bin.kpis and bin.kpis.get(key) is not none %}
-                      {% set scope_value = bin.kpis.get(key) %}
-                    {% endif %}
-                    {% if scope_value is not none %}
-                      {% set formatted = '%.3f' % (scope_value | float) %}
-                      {% if unit %}
-                        {% set formatted = formatted + ' ' + unit %}
-                      {% endif %}
-                      {% set rows = rows + [{'name': label, 'value': formatted, 'key': key}] %}
-                    {% endif %}
-                  {% endfor %}
-                {% endif %}
-                {% if rows %}
-                <ul class="space-y-1 text-sm">
-                  {% for entry in rows %}
-                  {% set entry_label = entry.name | string | lower %}
-                  {% set entry_attr = entry.key %}
-                  <li data-kpi="{{ entry_attr }}" data-kpi-scope="{{ bin.name }}"><span class="font-medium text-white">{{ entry.name }}:</span> {{ entry.value }}</li>
-                  {% endfor %}
-                </ul>
-                {% else %}
-                <p class="text-sm text-slate-400">No KPIs configured for this bin.</p>
-                {% endif %}
-              </td>
-            </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-      {% else %}
-      <p class="mt-3 text-sm text-slate-400">Configure speed bins and KPIs in <code>data/rules/demo_rules.json</code> to populate KPIs.</p>
-      {% endif %}
-    </div>
-
-    {% if include_export_controls %}
-    <section class="rounded-3xl border border-slate-200/70 bg-slate-900/5 p-6 shadow-card dark:border-slate-700/70 dark:bg-slate-900/40">
-      <h3 class="text-sm font-semibold uppercase tracking-[0.3em] text-slate-500 dark:text-slate-300">Export report</h3>
-      <p class="mt-2 text-xs text-slate-500 dark:text-slate-400">Download offline copies of this analysis.</p>
-      <div class="mt-4 flex flex-wrap gap-3">
-        <a
-          href="/export_zip"
-          id="exportZipLink"
-          class="inline-flex items-center rounded-md bg-emerald-600 px-3 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-400 focus:ring-offset-2"
-          role="button"
-        >
-          <span class="mr-2 inline-block h-2 w-2 rounded-full bg-emerald-300"></span>
-          Download ZIP
-        </a>
-        <form method="post" action="/export_pdf" id="exportPdfForm" class="inline-block">
-          <input type="hidden" name="results" id="exportPdfPayload" />
-          <button type="submit" class="inline-flex items-center rounded-md bg-slate-700 px-3 py-2 text-xs font-semibold text-slate-200 shadow-sm transition hover:bg-slate-600 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-40" disabled title="PDF export coming soon">
-            <span class="mr-2 inline-block h-2 w-2 rounded-full bg-slate-400"></span>
-            Download PDF
-          </button>
-        </form>
-      </div>
-    </section>
-    {% endif %}
-  </main>
-
+  </section>
 </section>
 
-{% endif %}
-
-<link rel="stylesheet" href="/static/leaflet/leaflet.css">
-
-<script src="/static/js/plotly.min.js"></script>
-
-<script src="/static/leaflet/leaflet.js"></script>
-
-<script id="rde-payload" type="application/json">
-  {{ results_payload | tojson | safe }}
-</script>
+<script id="rde-payload" type="application/json">{{ payload | tojson }}</script>
 <script>
-  window.__RDE_RESULT__={{ results_payload | tojson | safe }};
+  window.__RDE_RESULT__ = {{ payload | tojson | safe }};
   window.dispatchEvent(new Event('rde:payload-ready'));
   document.dispatchEvent(new Event('rde:payload-ready'));
 </script>
-
 <!-- App bundle must come after payload -->
 <script src="/static/js/app.js"></script>
-

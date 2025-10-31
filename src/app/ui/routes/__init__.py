@@ -1,5 +1,8 @@
 """Reusable UI route modules."""
 
-from .export import router as export_router
+from __future__ import annotations
 
-__all__ = ["export_router"]
+from .export import router as export_router
+from .export_pdf import router as export_pdf_router
+
+__all__ = ["export_router", "export_pdf_router"]

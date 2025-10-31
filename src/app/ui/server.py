@@ -16,7 +16,7 @@ import zipfile
 from typing import Any, Dict, List
 
 import pandas as pd
-from fastapi import APIRouter, HTTPException, Query, Request, status
+from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response, StreamingResponse
 from fastapi.templating import Jinja2Templates
 
@@ -43,7 +43,7 @@ from src.app.utils.mappings import (
     slugify_profile_name,
 )
 from src.app.utils.payload import ensure_results_payload_defaults
-from src.app.rules import build_results_payload as build_rules_results_payload
+from src.app.rules.engine import evaluate_eu7_ld
 from src.app.ui.responses import (
     make_results_payload as legacy_make_results_payload,
     respond_success as legacy_respond_success,
@@ -127,47 +127,16 @@ def _count_section_results(payload: Mapping[str, Any]) -> tuple[int, int]:
 
 
 @router.get("/results", include_in_schema=False)
-def get_results(legislation: str = Query("demo")) -> Dict[str, Any]:
-    """Serve regulation results payloads for the SPA preview."""
+def get_results(request: Request) -> Response:
+    """Render the EU7 Light-Duty report preview."""
 
-    if legislation.lower() != "eu7_ld":
-        return stable_success_response(
-            rule_evidence="Rule evidence: Regulation verdict: FAIL under EU7 (Demo)",
-            mapping_applied=False,
-        )
+    payload = evaluate_eu7_ld(raw_inputs={})
+    accept = (request.headers.get("accept") or "").lower()
+    if "application/json" in accept:
+        return legacy_respond_success(payload)
 
-    report_payload = build_rules_results_payload("eu7_ld")
-    base_payload = build_base_results_payload(
-        rule_evidence="Rule evidence: EU7-LD automated report",
-        mapping_applied=False,
-        diagnostics=[],
-        errors=[],
-        extra_meta={"legislation": "eu7_ld"},
-    )
-    base_payload.update(report_payload)
-
-    pass_count, fail_count = _count_section_results(base_payload)
-    final_block = base_payload.get("final") if isinstance(base_payload, Mapping) else {}
-    fail_total = fail_count
-    if isinstance(final_block, Mapping) and not final_block.get("pass"):
-        fail_total = max(1, fail_total)
-    summary_block = {
-        "pass": pass_count,
-        "warn": 0,
-        "fail": fail_total,
-        "repaired_spans": [],
-    }
-    base_payload["summary"] = summary_block
-    if isinstance(final_block, Mapping):
-        base_payload["regulation"] = {
-            "label": "PASS" if final_block.get("pass") else "FAIL",
-            "ok": bool(final_block.get("pass")),
-            "pack_id": "eu7_ld",
-            "pack_title": base_payload.get("name") or "EU7-LD",
-            "version": base_payload.get("version"),
-        }
-
-    return wrap_http(base_payload, http_status=200)
+    context = {"request": request, "results_payload": payload}
+    return templates.TemplateResponse(request, "results.html", context)
 
 
 def _ensure_dict(value: Any | None) -> dict[str, Any] | None:
@@ -2758,7 +2727,7 @@ async def analyze(request: Request) -> Response:
     if request.headers.get("HX-Request"):
         return templates.TemplateResponse(
             request,
-            "results.html",
+            "results_legacy.html",
             context,
             status_code=status.HTTP_200_OK,
         )
@@ -2772,7 +2741,7 @@ async def analyze(request: Request) -> Response:
 
     return templates.TemplateResponse(
         request,
-        "results.html",
+        "results_legacy.html",
         context,
         status_code=status.HTTP_200_OK,
     )
