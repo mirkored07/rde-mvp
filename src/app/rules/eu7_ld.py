@@ -86,7 +86,9 @@ def _safe_percent(part: float | None, total: float | None) -> float | None:
     return (part / total) * 100.0
 
 
-def compute_zero_span(data: Mapping[str, Any], spec: Mapping[str, Any]) -> list[dict[str, Any]]:
+def compute_zero_span(data: Mapping[str, Any], spec: Mapping[str, Any]) -> dict[str, Any]:
+    """Return the zero/span block covering pre/post checks."""
+
     zero_limits = deepcopy(spec.get("zero_span", {}))
     zero_data = data.get("zero_span", {}) if isinstance(data.get("zero_span"), Mapping) else {}
 
@@ -105,10 +107,11 @@ def compute_zero_span(data: Mapping[str, Any], spec: Mapping[str, Any]) -> list[
                 "pass": bool(passed),
             }
         )
-    return rows
+
+    return {"title": "Pre/Post Checks (Zero/Span)", "criteria": rows}
 
 
-def compute_trip_composition(data: Mapping[str, Any], spec: Mapping[str, Any]) -> list[dict[str, Any]]:
+def compute_trip_composition(data: Mapping[str, Any], spec: Mapping[str, Any]) -> dict[str, Any]:
     trip_spec = spec.get("trip_composition", {})
     trip_data = data.get("trip", {}) if isinstance(data.get("trip"), Mapping) else {}
 
@@ -219,10 +222,10 @@ def compute_trip_composition(data: Mapping[str, Any], spec: Mapping[str, Any]) -
         }
     )
 
-    return rows
+    return {"title": "Trip Composition & Timing", "criteria": rows}
 
 
-def compute_dynamics(data: Mapping[str, Any], spec: Mapping[str, Any]) -> list[dict[str, Any]]:
+def compute_dynamics(data: Mapping[str, Any], spec: Mapping[str, Any]) -> dict[str, Any]:
     dynamics_spec = spec.get("dynamics", {})
     dynamics_data = data.get("dynamics", {}) if isinstance(data.get("dynamics"), Mapping) else {}
     rows: list[dict[str, Any]] = []
@@ -370,10 +373,10 @@ def compute_dynamics(data: Mapping[str, Any], spec: Mapping[str, Any]) -> list[d
         }
     )
 
-    return rows
+    return {"title": "Dynamics / MAW metrics", "criteria": rows}
 
 
-def compute_gps_validity(data: Mapping[str, Any], spec: Mapping[str, Any]) -> list[dict[str, Any]]:
+def compute_gps_validity(data: Mapping[str, Any], spec: Mapping[str, Any]) -> dict[str, Any]:
     gps_spec = spec.get("gps", {})
     gps_data = data.get("gps", {}) if isinstance(data.get("gps"), Mapping) else {}
     rows: list[dict[str, Any]] = []
@@ -427,7 +430,7 @@ def compute_gps_validity(data: Mapping[str, Any], spec: Mapping[str, Any]) -> li
         }
     )
 
-    return rows
+    return {"title": "GPS/Altitude validity", "criteria": rows}
 
 
 def _pollutant_label(key: str) -> str:
@@ -508,11 +511,20 @@ def compute_emissions_summary(data: Mapping[str, Any], spec: Mapping[str, Any]) 
         else:
             correction_notes.append(f"{key.upper()} applied")
 
-    return {"criteria": rows, "pollutants": pollutants, "corrections": correction_notes}
+    return {
+        "title": "Emissions Summary",
+        "criteria": rows,
+        "pollutants": pollutants,
+        "corrections": correction_notes,
+    }
 
 
 def compute_final_conformity(emissions: Mapping[str, Any], spec: Mapping[str, Any]) -> dict[str, Any]:
-    pollutant_entries = emissions.get("pollutants", []) if isinstance(emissions, Mapping) else []
+    """Return the overall conformity block derived from pollutant results."""
+
+    pollutant_entries = (
+        emissions.get("pollutants", []) if isinstance(emissions, Mapping) else []
+    )
     notes = list(emissions.get("corrections", [])) if isinstance(emissions, Mapping) else []
 
     all_pass = True
@@ -528,11 +540,26 @@ def compute_final_conformity(emissions: Mapping[str, Any], spec: Mapping[str, An
     if missing_limits:
         notes.append("Missing limit for: " + ", ".join(sorted(missing_limits)))
 
+    passed = bool(all_pass) and not missing_limits
+
+    summary_row = {
+        "ref": _REF_TAG,
+        "criterion": "Overall EU7-LD verdict",
+        "condition": "All regulated pollutants within EU7 limits",
+        "value": "PASS" if passed else "FAIL",
+        "unit": "",
+        "pass": passed,
+    }
+
     return {
-        "pass": bool(all_pass) and not missing_limits,
-        "pollutants": [dict(entry) for entry in pollutant_entries if isinstance(entry, Mapping)],
+        "title": "Final Conformity (overall PASS/FAIL)",
+        "criteria": [summary_row],
+        "pass": passed,
+        "pollutants": [
+            dict(entry) for entry in pollutant_entries if isinstance(entry, Mapping)
+        ],
         "notes": notes,
-        "label": "PASS" if all_pass and not missing_limits else "FAIL",
+        "label": "PASS" if passed else "FAIL",
         "spec": {
             "id": spec.get("id"),
             "name": spec.get("name"),
@@ -589,32 +616,43 @@ def _visual_block(data: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def build_report(data: Mapping[str, Any], spec: Mapping[str, Any]) -> dict[str, Any]:
-    zero_span_rows = compute_zero_span(data, spec)
-    trip_rows = compute_trip_composition(data, spec)
-    dynamics_rows = compute_dynamics(data, spec)
-    gps_rows = compute_gps_validity(data, spec)
-    emissions_info = compute_emissions_summary(data, spec)
-    final_summary = compute_final_conformity(emissions_info, spec)
+    """Assemble the EU7-LD payload from raw harmonised inputs."""
+
+    zero_span_block = compute_zero_span(data, spec)
+    trip_block = compute_trip_composition(data, spec)
+    dynamics_block = compute_dynamics(data, spec)
+    gps_block = compute_gps_validity(data, spec)
+    emissions_block = compute_emissions_summary(data, spec)
+    final_block = compute_final_conformity(emissions_block, spec)
 
     columns = data.get("columns") if isinstance(data.get("columns"), list) else None
     values = data.get("values") if isinstance(data.get("values"), list) else None
     if columns is None or values is None:
         columns, values = _default_table()
 
+    sections = [
+        zero_span_block,
+        trip_block,
+        dynamics_block,
+        gps_block,
+        emissions_block,
+        final_block,
+    ]
+
     payload = {
         "id": spec.get("id"),
         "name": spec.get("name"),
         "version": spec.get("version"),
+        "meta": {"legislation": spec.get("name") or "EU7 Light-Duty"},
         "kpi_numbers": _compute_kpis(data, spec),
-        "sections": [
-            {"title": "Pre/Post Checks (Zero/Span)", "criteria": zero_span_rows},
-            {"title": "Trip Composition & Timing", "criteria": trip_rows},
-            {"title": "Dynamics & MAW", "criteria": dynamics_rows},
-            {"title": "GPS/Altitude Validity", "criteria": gps_rows},
-            {"title": "Emissions Summary", "criteria": emissions_info.get("criteria", [])},
-        ],
-        "emissions": emissions_info,
-        "final": final_summary,
+        "sections": sections,
+        "emissions": emissions_block,
+        "final": {
+            "pass": final_block.get("pass", False),
+            "pollutants": list(final_block.get("pollutants", [])),
+            "notes": list(final_block.get("notes", [])),
+            "label": final_block.get("label"),
+        },
         "visual": _visual_block(data),
         "columns": columns,
         "values": values,

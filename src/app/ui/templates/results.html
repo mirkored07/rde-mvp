@@ -269,6 +269,93 @@
       </div>
     </section>
 
+    {% set eu7_sections = results_payload.sections if results_payload.sections else [] %}
+    {% set eu7_meta = results_payload.meta if results_payload.meta is mapping else {} %}
+    {% if eu7_sections %}
+    <section class="rounded-3xl border border-slate-200/70 bg-white/95 p-6 shadow-card dark:border-slate-700/70 dark:bg-slate-900/70">
+      <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+        <div>
+          <p class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-500 dark:text-slate-400">Legislative report</p>
+          <h3 class="mt-1 text-2xl font-semibold text-slate-900 dark:text-white">{{ eu7_meta.get('legislation') or 'EU7 Light-Duty' }}</h3>
+          <p class="mt-2 text-sm text-slate-500 dark:text-slate-400">Automated evaluation mirroring UN R168 layout with EU7-LD criteria.</p>
+        </div>
+        {% set final_block = results_payload.final if results_payload.final is mapping else {} %}
+        <div class="rounded-2xl border border-slate-200 bg-white/80 px-5 py-4 text-center shadow-sm dark:border-slate-700 dark:bg-slate-900/60">
+          {% set final_pass = final_block.get('pass') %}
+          {% set final_badge = badge_pass if final_pass else badge_fail %}
+          <p class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400 dark:text-slate-500">Overall result</p>
+          <span class="mt-2 inline-flex items-center rounded-full px-3 py-1 text-sm font-semibold {{ final_badge }}">{{ 'PASS' if final_pass else 'FAIL' }}</span>
+          {% if final_block.get('notes') %}
+          <ul class="mt-3 space-y-1 text-xs text-slate-500 dark:text-slate-400">
+            {% for note in final_block.get('notes') %}
+            <li>{{ note }}</li>
+            {% endfor %}
+          </ul>
+          {% endif %}
+        </div>
+      </div>
+      <div class="mt-6 space-y-6">
+        {% for section in eu7_sections %}
+        {% set criteria = section.get('criteria') if section is mapping else [] %}
+        <div class="rounded-2xl border border-slate-200 bg-white/80 p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900/60">
+          <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <h4 class="text-base font-semibold text-slate-900 dark:text-white">{{ section.get('title') or 'Section' }}</h4>
+            {% set section_notes = section.get('notes') %}
+            {% if section_notes %}
+            <div class="text-xs text-slate-500 dark:text-slate-400">
+              {% if section_notes is iterable and section_notes is not string %}
+              <ul class="list-disc space-y-1 pl-4">
+                {% for note in section_notes %}
+                <li>{{ note }}</li>
+                {% endfor %}
+              </ul>
+              {% else %}
+              <p>{{ section_notes }}</p>
+              {% endif %}
+            </div>
+            {% endif %}
+          </div>
+          {% if criteria %}
+          <div class="mt-4 overflow-hidden rounded-xl border border-slate-200 dark:border-slate-700">
+            <table class="min-w-full divide-y divide-slate-200 text-sm text-slate-600 dark:divide-slate-700 dark:text-slate-300">
+              <thead class="bg-slate-50/80 text-[11px] font-semibold uppercase tracking-[0.3em] text-slate-500 dark:bg-slate-800/70 dark:text-slate-400">
+                <tr>
+                  <th scope="col" class="px-4 py-3 text-left">Ref</th>
+                  <th scope="col" class="px-4 py-3 text-left">Criterion</th>
+                  <th scope="col" class="px-4 py-3 text-left">Condition</th>
+                  <th scope="col" class="px-4 py-3 text-left">Value</th>
+                  <th scope="col" class="px-4 py-3 text-left">Unit</th>
+                  <th scope="col" class="px-4 py-3 text-left">Result</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-slate-200/70 bg-white/80 dark:divide-slate-800 dark:bg-slate-900/60">
+                {% for row in criteria %}
+                {% set row_map = row if row is mapping else {} %}
+                {% set row_pass = row_map.get('pass') %}
+                {% set row_badge = badge_pass if row_pass else badge_fail %}
+                <tr>
+                  <td class="px-4 py-3 align-top font-medium text-slate-500 dark:text-slate-400">{{ row_map.get('ref') or '—' }}</td>
+                  <td class="px-4 py-3 align-top font-semibold text-slate-900 dark:text-white">{{ row_map.get('criterion') or '—' }}</td>
+                  <td class="px-4 py-3 align-top">{{ row_map.get('condition') or 'n/a' }}</td>
+                  <td class="px-4 py-3 align-top">{{ row_map.get('value') if row_map.get('value') is not none else 'n/a' }}</td>
+                  <td class="px-4 py-3 align-top">{{ row_map.get('unit') or '—' }}</td>
+                  <td class="px-4 py-3 align-top">
+                    <span class="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold {{ row_badge }}">{{ 'PASS' if row_pass else 'FAIL' }}</span>
+                  </td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          {% else %}
+          <p class="mt-3 text-sm text-slate-500 dark:text-slate-400">No criteria available.</p>
+          {% endif %}
+        </div>
+        {% endfor %}
+      </div>
+    </section>
+    {% endif %}
+
     <div>
       <h3 class="text-lg font-semibold text-slate-900 dark:text-white">Rule evidence</h3>
       <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">Thresholds are demo placeholders and do not represent legal advice.</p>

@@ -101,4 +101,92 @@ def build_results_payload(
     return ensure_results_payload_defaults(raw_payload)
 
 
-__all__ = ["build_results_payload", "load_spec", "render_report"]
+def evaluate_eu7_ld(raw_inputs: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    """Evaluate the EU7-LD report ensuring UI-friendly defaults."""
+
+    spec_mapping = deepcopy(dict(load_spec("eu7_ld")))
+    data = (
+        dict(raw_inputs)
+        if isinstance(raw_inputs, Mapping)
+        else eu7_ld.build_default_inputs(spec_mapping)
+    )
+
+    payload = eu7_ld.build_report(data, spec_mapping)
+
+    visual_block = payload.get("visual") if isinstance(payload.get("visual"), Mapping) else {}
+    map_block = visual_block.get("map") if isinstance(visual_block, Mapping) else {}
+    if not isinstance(map_block, Mapping):
+        map_block = {}
+    chart_block = (
+        visual_block.get("chart")
+        if isinstance(visual_block, Mapping)
+        else {}
+    )
+    if not isinstance(chart_block, Mapping):
+        chart_block = {}
+    payload["visual"] = {"map": dict(map_block), "chart": dict(chart_block)}
+
+    sections = payload.get("sections")
+    if not isinstance(sections, list):
+        sections = []
+    ordered_titles = [
+        "Pre/Post Checks (Zero/Span)",
+        "Trip Composition & Timing",
+        "Dynamics / MAW metrics",
+        "GPS/Altitude validity",
+        "Emissions Summary",
+        "Final Conformity (overall PASS/FAIL)",
+    ]
+    block_lookup = {
+        block.get("title"): block
+        for block in sections
+        if isinstance(block, Mapping)
+    }
+    ordered_sections: list[dict[str, Any]] = []
+    for title in ordered_titles:
+        block = block_lookup.get(title)
+        if isinstance(block, Mapping):
+            ordered_sections.append(dict(block))
+    for block in sections:
+        if not isinstance(block, Mapping):
+            continue
+        if block.get("title") in ordered_titles:
+            continue
+        ordered_sections.append(dict(block))
+    payload["sections"] = ordered_sections
+
+    if not isinstance(payload.get("kpi_numbers"), list):
+        payload["kpi_numbers"] = []
+
+    final_block = payload.get("final") if isinstance(payload.get("final"), Mapping) else {}
+    payload["final"] = {
+        "pass": bool(final_block.get("pass")),
+        "pollutants": list(final_block.get("pollutants", [])),
+        "notes": list(final_block.get("notes", [])),
+        "label": final_block.get("label") or ("PASS" if final_block.get("pass") else "FAIL"),
+    }
+
+    meta = dict(payload.get("meta") or {})
+    meta.setdefault("legislation", "EU7 Light-Duty")
+    payload["meta"] = meta
+
+    # Mirror top-level conveniences used by legacy UI helpers
+    payload["map"] = payload.get("visual", {}).get("map", {})
+    payload["chart"] = payload.get("visual", {}).get("chart", {})
+
+    normalised = ensure_results_payload_defaults(payload)
+    # restore fields that ensure_results_payload_defaults may normalise away
+    normalised["meta"] = payload.get("meta", {})
+    normalised["sections"] = payload.get("sections", [])
+    normalised["final"] = payload.get("final", {})
+    normalised["emissions"] = payload.get("emissions", {})
+    normalised["id"] = payload.get("id")
+    normalised["name"] = payload.get("name")
+    normalised["version"] = payload.get("version")
+    normalised["columns"] = payload.get("columns")
+    normalised["values"] = payload.get("values")
+
+    return normalised
+
+
+__all__ = ["build_results_payload", "load_spec", "render_report", "evaluate_eu7_ld"]
