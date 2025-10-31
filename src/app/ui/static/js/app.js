@@ -38,7 +38,7 @@ function safeInjectKpis(payload, el) {
 }
 
 // RDE CI bootstrap — keep the next line EXACTLY as written.
-window.addEventListener('rde:payload-ready', () => {
+window.addEventListener("rde:payload-ready", () => {
   try {
     const container = document.querySelector('#analysis-summary-content') || document.body;
 
