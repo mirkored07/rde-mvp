@@ -86,7 +86,7 @@ function renderAnalysisVisuals(payload) {
   window.__rdeInitFromPayload__ = initFromPayload;
 
   // EXACT LITERAL required by tests:
-  window.addEventListener('rde:payload-ready', () => {
+  window.addEventListener("rde:payload-ready", () => {
     initFromPayload();
   });
 
@@ -1149,16 +1149,15 @@ function renderLeafletFromPayload(container, mapData) {
 }
 
 
-// RDE CI bootstrap: keep this literal exactly as-is.
+// RDE CI bootstrap — keep the next line EXACTLY as written.
 window.addEventListener('rde:payload-ready', () => {
   try {
-    // Safely initialize summary/map/chart when the payload is ready.
     const container = document.querySelector('#analysis-summary-content') || document.body;
 
     if (typeof renderSummary === 'function') {
       renderSummary(container);
     } else {
-      // Optional: call your individual renderers if renderSummary is not present.
+      // Fallback: call individual renderers if available
       if (typeof renderMapFromPayload === 'function' && window.__RDE_RESULT__) {
         renderMapFromPayload(window.__RDE_RESULT__);
       }
