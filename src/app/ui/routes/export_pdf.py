@@ -1,35 +1,85 @@
 from __future__ import annotations
 
-import pathlib
+import io
+from typing import Any
 
-from fastapi import APIRouter, HTTPException
-from fastapi.responses import Response
-from fastapi.templating import Jinja2Templates
+from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
+from starlette.templating import Jinja2Templates
 
-from src.app.reporting.pdf import html_to_pdf_bytes
 from src.app.rules.engine import evaluate_eu7_ld
 
-router = APIRouter()
+try:  # pragma: no cover - import guard for optional dependency
+    from weasyprint import HTML  # type: ignore
+except Exception:  # pragma: no cover - handled at runtime
+    HTML = None
 
-_TEMPLATE_DIR = pathlib.Path(__file__).resolve().parents[2] / "templates"
-_templates = Jinja2Templates(directory=str(_TEMPLATE_DIR))
+
+router = APIRouter(include_in_schema=False)
+templates = Jinja2Templates(directory="src/app/ui/templates")
 
 
-@router.get("/export_pdf", include_in_schema=False)
-def export_pdf() -> Response:
-    """Generate a printable EU7 Light-Duty PDF report."""
+class ExportIn(BaseModel):
+    results_payload: dict[str, Any] | None = None
 
-    payload = evaluate_eu7_ld(raw_inputs={})
-    template = _templates.get_template("print_eu7.html")
-    html_document = template.render({"results_payload": payload})
 
+def _render_pdf(payload: dict[str, Any]) -> bytes:
+    if HTML is None:  # pragma: no cover - depends on optional dependency
+        raise HTTPException(
+            status_code=503,
+            detail="PDF export requires WeasyPrint. Install the 'pdf' extra.",
+        )
+
+    template = templates.get_template("print_eu7.html")
+    html = template.render(results_payload=payload)
+    return HTML(string=html, base_url="src/app/ui/templates").write_pdf()
+
+
+def _latest_payload_from_session(request: Request) -> dict[str, Any] | None:
     try:
-        pdf_bytes = html_to_pdf_bytes(html_document)
-    except RuntimeError as exc:  # pragma: no cover - depends on optional dependency
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        session_data = request.session  # type: ignore[attr-defined]
+    except RuntimeError:
+        return None
 
-    headers = {"Content-Disposition": 'attachment; filename="report_eu7_ld.pdf"'}
-    return Response(content=pdf_bytes, media_type="application/pdf", headers=headers)
+    payload = session_data.get("latest_results_payload") if session_data else None
+    if isinstance(payload, dict):
+        return payload
+    return None
+
+
+@router.post("/export_pdf")
+def export_pdf_post(body: ExportIn, request: Request) -> StreamingResponse:
+    payload = body.results_payload
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Results payload is required.")
+
+    response = StreamingResponse(
+        io.BytesIO(_render_pdf(payload)),
+        media_type="application/pdf",
+    )
+    response.headers["Content-Disposition"] = 'attachment; filename="report_eu7_ld.pdf"'
+
+    try:  # pragma: no cover - depends on session middleware
+        request.session["latest_results_payload"] = payload
+    except RuntimeError:
+        pass
+
+    return response
+
+
+@router.get("/export_pdf")
+def export_pdf_get(request: Request) -> StreamingResponse:
+    payload = _latest_payload_from_session(request)
+    if payload is None:
+        payload = evaluate_eu7_ld(raw_inputs={})
+
+    response = StreamingResponse(
+        io.BytesIO(_render_pdf(payload)),
+        media_type="application/pdf",
+    )
+    response.headers["Content-Disposition"] = 'attachment; filename="report_eu7_ld.pdf"'
+    return response
 
 
 __all__ = ["router"]

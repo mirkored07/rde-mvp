@@ -37,6 +37,30 @@ function safeInjectKpis(payload, el) {
   }
 }
 
+async function downloadCurrentPdf() {
+  try {
+    const res = await fetch('/export_pdf', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ results_payload: window.__RDE_RESULT__ })
+    });
+    if (!res.ok) {
+      throw new Error(`Request failed with status ${res.status}`);
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'report_eu7_ld.pdf';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  } catch (e) {
+    console.warn('PDF export failed:', e);
+  }
+}
+
 // RDE CI bootstrap — keep the next line EXACTLY as written.
 window.addEventListener("rde:payload-ready", () => {
   try {
@@ -176,6 +200,11 @@ function renderAnalysisVisuals(payload) {
   // EXACT LITERAL required by tests:
   window.addEventListener('rde:payload-ready', () => {
     initFromPayload();
+    const pdfBtn = document.getElementById('btn-export-pdf');
+    if (pdfBtn && !pdfBtn._bound) {
+      pdfBtn._bound = true;
+      pdfBtn.onclick = downloadCurrentPdf;
+    }
   });
 
   const run = () => {

@@ -162,6 +162,10 @@ def get_results(request: Request) -> Response:
     """Render the EU7 Light-Duty report preview."""
 
     payload = evaluate_eu7_ld(raw_inputs={})
+    try:  # pragma: no cover - session optional in some test environments
+        request.session["latest_results_payload"] = payload
+    except RuntimeError:
+        pass
     accept = (request.headers.get("accept") or "").lower()
     if "application/json" in accept:
         return legacy_respond_success(payload)
@@ -2747,6 +2751,11 @@ async def analyze(request: Request) -> Response:
     visual_shapes = _build_visual_shapes(results_payload)
     results_payload["visual"] = visual_shapes
     analysis_block["visual"] = visual_shapes
+
+    try:  # pragma: no cover - session middleware optional in some environments
+        request.session["latest_results_payload"] = results_payload
+    except RuntimeError:
+        pass
 
     context = _base_template_context(
         request,

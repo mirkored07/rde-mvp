@@ -7,11 +7,17 @@ import pathlib
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.sessions import SessionMiddleware
 
 from src.app.ui.routes import export_pdf_router, export_router
 from src.app.ui.server import router as ui_router
 
 app = FastAPI(title="RDE MVP")
+
+# Session storage is used to persist the most recent analysis payload so
+# export endpoints can render PDFs without requiring the frontend to resend
+# the data on every GET request.
+app.add_middleware(SessionMiddleware, secret_key="rde-mvp-session")
 
 
 @app.get("/health")
