@@ -9,6 +9,292 @@ from typing import Any
 _REF_TAG = "§ EU7-LD"
 
 
+def _crit(ref, criterion, condition, value, unit, passed: bool):
+    """Return a normalised criteria row dictionary."""
+
+    return {
+        "ref": ref,
+        "criterion": criterion,
+        "condition": condition,
+        "value": value,
+        "unit": unit,
+        "pass": bool(passed),
+    }
+
+
+def _format_le(limit: float | None, unit: str) -> str:
+    if limit is None:
+        return "Limit pending"
+    suffix = f" {unit}" if unit else ""
+    return f"≤ {limit:g}{suffix}"
+
+
+def _format_range(bounds: tuple[float | None, float | None], unit: str) -> str:
+    lower, upper = bounds
+    if lower is not None and upper is not None:
+        return f"{lower:g}–{upper:g} {unit}".strip()
+    if lower is not None:
+        return f"≥ {lower:g} {unit}".strip()
+    if upper is not None:
+        return f"≤ {upper:g} {unit}".strip()
+    return "Requirement pending"
+
+
+def _percent(part: float | None, total: float | None) -> float | None:
+    if part is None or total in (None, 0):
+        return None
+    return (part / total) * 100.0
+
+
+def _value_display(value: float | None, digits: int = 2) -> str:
+    if value is None:
+        return "n/a"
+    return f"{value:.{digits}f}"
+
+
+def _as_number(value: Any) -> float | None:
+    if isinstance(value, (int, float)):
+        return float(value)
+    return None
+
+
+def _range_tuple(entry: Any) -> tuple[float | None, float | None]:
+    if isinstance(entry, (list, tuple)) and len(entry) == 2:
+        lower = _as_number(entry[0])
+        upper = _as_number(entry[1])
+        return lower, upper
+    return None, None
+
+
+def compute_zero_span(data, spec):
+    zero_spec = spec.get("zero_span", {}) if isinstance(spec, Mapping) else {}
+    limit = zero_spec.get("pn_zero_max_per_cm3")
+    unit = "#/cm³"
+    measured_pre = _as_number(data.get("pn_zero_pre"))
+    measured_post = _as_number(data.get("pn_zero_post"))
+    rows = [
+        _crit(
+            "EU7-ZS-01",
+            "PN zero (pre-test)",
+            _format_le(limit, unit),
+            _value_display(measured_pre),
+            unit,
+            True if limit is None else (measured_pre is not None and measured_pre <= limit),
+        ),
+        _crit(
+            "EU7-ZS-02",
+            "PN zero (post-test)",
+            _format_le(limit, unit),
+            _value_display(measured_post),
+            unit,
+            True if limit is None else (measured_post is not None and measured_post <= limit),
+        ),
+    ]
+    return {"title": "Pre/Post Checks (Zero/Span)", "criteria": rows}
+
+
+def compute_trip_composition(data, spec):
+    trip_spec = spec.get("trip_composition", {}) if isinstance(spec, Mapping) else {}
+    unit = "km"
+    urban = _as_number(data.get("urban_km"))
+    expressway = _as_number(data.get("expressway_km"))
+    rural = _as_number(data.get("rural_km"))
+    total = _as_number(data.get("total_km"))
+    if total is None:
+        components = [v for v in (urban, expressway, rural) if isinstance(v, (int, float))]
+        total = sum(components) if components else None
+
+    duration_min = _as_number(data.get("duration_minutes"))
+    share_unit = "%"
+    urban_share = _percent(urban, total)
+    express_share = _percent(expressway, total)
+    urban_min = _as_number(trip_spec.get("urban_min_km"))
+    express_min = _as_number(trip_spec.get("expressway_min_km"))
+    urban_range = _range_tuple(trip_spec.get("share_urban_percent_range"))
+    express_range = _range_tuple(trip_spec.get("share_expressway_percent_range"))
+    duration_range = _range_tuple(trip_spec.get("duration_minutes_range"))
+
+    rows = [
+        _crit(
+            "EU7-TR-01",
+            "Urban distance",
+            _format_le(urban_min, unit).replace("≤", "≥"),
+            _value_display(urban),
+            unit,
+            urban is not None and urban_min is not None and urban >= urban_min,
+        ),
+        _crit(
+            "EU7-TR-02",
+            "Expressway distance",
+            _format_le(express_min, unit).replace("≤", "≥"),
+            _value_display(expressway),
+            unit,
+            expressway is not None and express_min is not None and expressway >= express_min,
+        ),
+        _crit(
+            "EU7-TR-03",
+            "Urban distance share",
+            _format_range(urban_range, share_unit),
+            _value_display(urban_share),
+            share_unit,
+            _in_range(urban_share, urban_range),
+        ),
+        _crit(
+            "EU7-TR-04",
+            "Expressway distance share",
+            _format_range(express_range, share_unit),
+            _value_display(express_share),
+            share_unit,
+            _in_range(express_share, express_range),
+        ),
+        _crit(
+            "EU7-TR-05",
+            "Trip duration",
+            _format_range(duration_range, "min"),
+            _value_display(duration_min),
+            "min",
+            _in_range(duration_min, duration_range),
+        ),
+    ]
+
+    start_urban_required = bool(trip_spec.get("start_urban"))
+    started_in_urban = bool(data.get("start_urban", True))
+    rows.append(
+        _crit(
+            "EU7-TR-06",
+            "Trip started in urban operation",
+            "Must start in urban operation" if start_urban_required else "Optional",
+            "Yes" if started_in_urban else "No",
+            "",
+            (not start_urban_required) or started_in_urban,
+        )
+    )
+
+    return {"title": "Trip Composition & Timing", "criteria": rows}
+
+
+def compute_dynamics(data, spec):
+    dyn_spec = spec.get("dynamics", {}) if isinstance(spec, Mapping) else {}
+    avg_speed_bounds = _range_tuple(dyn_spec.get("urban_avg_speed_range_kmh"))
+    stop_bounds = _range_tuple(dyn_spec.get("stop_time_share_urban_percent_range"))
+    maw_low_min = _as_number(dyn_spec.get("maw_low_speed_valid_percent_min"))
+    maw_high_min = _as_number(dyn_spec.get("maw_high_speed_valid_percent_min"))
+
+    avg_speed = _as_number(data.get("avg_speed_urban_kmh"))
+    stop_share = _as_number(data.get("stop_time_share_urban_percent"))
+    maw_low = _as_number(data.get("maw_low_speed_valid_percent"))
+    maw_high = _as_number(data.get("maw_high_speed_valid_percent"))
+
+    rows = [
+        _crit(
+            "EU7-DY-01",
+            "Average urban speed",
+            _format_range(avg_speed_bounds, "km/h"),
+            _value_display(avg_speed),
+            "km/h",
+            _in_range(avg_speed, avg_speed_bounds),
+        ),
+        _crit(
+            "EU7-DY-02",
+            "Urban stop time share",
+            _format_range(stop_bounds, "%"),
+            _value_display(stop_share),
+            "%",
+            _in_range(stop_share, stop_bounds),
+        ),
+        _crit(
+            "EU7-DY-03",
+            "Valid MAW windows (low speed)",
+            _format_le(maw_low_min, "%").replace("≤", "≥"),
+            _value_display(maw_low),
+            "%",
+            maw_low is not None and (maw_low_min is None or maw_low >= maw_low_min),
+        ),
+        _crit(
+            "EU7-DY-04",
+            "Valid MAW windows (high speed)",
+            _format_le(maw_high_min, "%").replace("≤", "≥"),
+            _value_display(maw_high),
+            "%",
+            maw_high is not None and (maw_high_min is None or maw_high >= maw_high_min),
+        ),
+    ]
+
+    return {"title": "Dynamics / MAW", "criteria": rows}
+
+
+def compute_gps_validity(data, spec):
+    gps_spec = spec.get("gps", {}) if isinstance(spec, Mapping) else {}
+    max_loss = _as_number(data.get("gps_max_loss_s"))
+    total_loss = _as_number(data.get("gps_total_loss_s"))
+    rows = [
+        _crit(
+            "EU7-GPS-01",
+            "Maximum GPS loss",
+            _format_le(gps_spec.get("max_loss_s"), "s"),
+            _value_display(max_loss),
+            "s",
+            max_loss is not None
+            and gps_spec.get("max_loss_s") is not None
+            and max_loss <= gps_spec.get("max_loss_s"),
+        ),
+        _crit(
+            "EU7-GPS-02",
+            "Total GPS loss",
+            _format_le(gps_spec.get("total_loss_s"), "s"),
+            _value_display(total_loss),
+            "s",
+            total_loss is not None
+            and gps_spec.get("total_loss_s") is not None
+            and total_loss <= gps_spec.get("total_loss_s"),
+        ),
+    ]
+
+    return {"title": "GPS/Altitude Validity", "criteria": rows}
+
+
+def compute_emissions_summary(data, spec):
+    limits = spec.get("limits", {}) if isinstance(spec, Mapping) else {}
+    pollutants = [
+        ("EU7-EM-01", "NOx", "nox_mg_per_km", "mg/km"),
+        ("EU7-EM-02", "PN", "pn_per_km", "#/km"),
+        ("EU7-EM-03", "CO", "co_mg_per_km", "mg/km"),
+    ]
+    rows = []
+    for ref, label, key, unit in pollutants:
+        limit = _as_number(limits.get(key))
+        value = _as_number(data.get(key))
+        passed = True if limit is None else (value is not None and value <= limit)
+        rows.append(
+            _crit(
+                ref,
+                f"{label} emissions",
+                _format_le(limit, unit),
+                _value_display(value, 3),
+                unit,
+                passed,
+            )
+        )
+    return {"title": "Emissions Summary", "criteria": rows}
+
+
+def compute_final_conformity(emissions_section, spec):
+    limits = spec.get("limits", {}) if isinstance(spec, Mapping) else {}
+    if not isinstance(limits, Mapping) or any(value is None for value in limits.values()):
+        return None
+
+    criteria = []
+    if isinstance(emissions_section, Mapping):
+        criteria = list(emissions_section.get("criteria") or [])
+
+    overall_pass = all(bool(row.get("pass")) for row in criteria) if criteria else False
+    return {
+        "title": "Final Conformity",
+        "pass": overall_pass,
+        "pollutants": criteria,
+    }
+
+
 def _as_float(value: Any) -> float | None:
     if isinstance(value, (int, float)):
         return float(value)

@@ -21,6 +21,20 @@ _SPEC_DIR = Path(__file__).resolve().parent / "specs"
 _DEFAULT_LEGISLATION = "eu7_ld"
 
 
+SPEC_DIR = _SPEC_DIR
+
+
+def _load_yaml(name: str) -> Mapping[str, Any]:
+    path = SPEC_DIR / name
+    if yaml is None:
+        raise RuntimeError("PyYAML is required to load legislation specifications.")
+    with path.open("r", encoding="utf-8") as handle:
+        data = yaml.safe_load(handle)
+    if not isinstance(data, Mapping):
+        raise ValueError(f"Specification '{name}' must be a mapping.")
+    return data
+
+
 def _deep_update(target: MutableMapping[str, Any], patch: Mapping[str, Any]) -> MutableMapping[str, Any]:
     """Merge *patch* into *target* recursively and return the mutated mapping."""
 
@@ -102,91 +116,90 @@ def build_results_payload(
 
 
 def evaluate_eu7_ld(raw_inputs: Mapping[str, Any] | None = None) -> dict[str, Any]:
-    """Evaluate the EU7-LD report ensuring UI-friendly defaults."""
+    """Evaluate the EU7 Light-Duty ruleset for the provided *raw_inputs*."""
 
-    spec_mapping = deepcopy(dict(load_spec("eu7_ld")))
-    data = (
-        dict(raw_inputs)
-        if isinstance(raw_inputs, Mapping)
-        else eu7_ld.build_default_inputs(spec_mapping)
-    )
+    raw_inputs = raw_inputs or {}
+    spec = dict(_load_yaml("eu7_ld.yaml"))
 
-    payload = eu7_ld.build_report(data, spec_mapping)
+    def _num(key: str, default: float) -> float:
+        value = raw_inputs.get(key, default)
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return default
 
-    visual_block = payload.get("visual") if isinstance(payload.get("visual"), Mapping) else {}
-    map_block = visual_block.get("map") if isinstance(visual_block, Mapping) else {}
-    if not isinstance(map_block, Mapping):
-        map_block = {}
-    chart_block = (
-        visual_block.get("chart")
-        if isinstance(visual_block, Mapping)
-        else {}
-    )
-    if not isinstance(chart_block, Mapping):
-        chart_block = {}
-    payload["visual"] = {"map": dict(map_block), "chart": dict(chart_block)}
+    total_override = raw_inputs.get("total_km")
+    try:
+        total_distance_override = float(total_override) if total_override is not None else None
+    except (TypeError, ValueError):
+        total_distance_override = None
 
-    sections = payload.get("sections")
-    if not isinstance(sections, list):
-        sections = []
-    ordered_titles = [
-        "Pre/Post Checks (Zero/Span)",
-        "Trip Composition & Timing",
-        "Dynamics / MAW metrics",
-        "GPS/Altitude validity",
-        "Emissions Summary",
-        "Final Conformity (overall PASS/FAIL)",
+    start_value = raw_inputs.get("start_urban", True)
+    if isinstance(start_value, str):
+        start_value_normalised = start_value.strip().lower()
+        start_urban = start_value_normalised in {"1", "true", "yes"}
+    else:
+        start_urban = bool(start_value)
+
+    data = {
+        "pn_zero_pre": _num("pn_zero_pre", 3200.0),
+        "pn_zero_post": _num("pn_zero_post", 3400.0),
+        "urban_km": _num("urban_km", 18.5),
+        "expressway_km": _num("expressway_km", 27.2),
+        "rural_km": _num("rural_km", 12.3),
+        "total_km": total_distance_override,
+        "duration_minutes": _num("duration_minutes", 102.0),
+        "start_urban": start_urban,
+        "avg_speed_urban_kmh": _num("avg_speed_urban_kmh", 28.0),
+        "stop_time_share_urban_percent": _num("stop_time_share_urban_percent", 12.5),
+        "maw_low_speed_valid_percent": _num("maw_low_speed_valid_percent", 92.0),
+        "maw_high_speed_valid_percent": _num("maw_high_speed_valid_percent", 88.0),
+        "gps_max_loss_s": _num("gps_max_loss_s", 8.0),
+        "gps_total_loss_s": _num("gps_total_loss_s", 45.0),
+        "nox_mg_per_km": _num("nox_mg_per_km", 9.236e3),
+        "pn_per_km": _num("pn_per_km", 1.055e7),
+        "co_mg_per_km": _num("co_mg_per_km", 350.0),
+    }
+
+    if data.get("total_km") is None:
+        total_distance = sum(
+            value for value in (data.get("urban_km"), data.get("expressway_km"), data.get("rural_km")) if isinstance(value, (int, float))
+        )
+        data["total_km"] = total_distance
+
+    sections = [
+        eu7_ld.compute_zero_span(data, spec),
+        eu7_ld.compute_trip_composition(data, spec),
+        eu7_ld.compute_dynamics(data, spec),
+        eu7_ld.compute_gps_validity(data, spec),
+        eu7_ld.compute_emissions_summary(data, spec),
     ]
-    block_lookup = {
-        block.get("title"): block
-        for block in sections
-        if isinstance(block, Mapping)
+    final_block = eu7_ld.compute_final_conformity(sections[-1], spec)
+
+    visual = {
+        "map": {"center": {"lat": 47.07, "lon": 15.44, "zoom": 10}, "latlngs": []},
+        "chart": {"series": [], "labels": []},
     }
-    ordered_sections: list[dict[str, Any]] = []
-    for title in ordered_titles:
-        block = block_lookup.get(title)
-        if isinstance(block, Mapping):
-            ordered_sections.append(dict(block))
-    for block in sections:
-        if not isinstance(block, Mapping):
-            continue
-        if block.get("title") in ordered_titles:
-            continue
-        ordered_sections.append(dict(block))
-    payload["sections"] = ordered_sections
+    kpis = [
+        {"label": "NOx (mg/km)", "value": data["nox_mg_per_km"]},
+        {"label": "PN (#/km)", "value": data["pn_per_km"]},
+        {"label": "CO (mg/km)", "value": data["co_mg_per_km"]},
+    ]
 
-    if not isinstance(payload.get("kpi_numbers"), list):
-        payload["kpi_numbers"] = []
-
-    final_block = payload.get("final") if isinstance(payload.get("final"), Mapping) else {}
-    payload["final"] = {
-        "pass": bool(final_block.get("pass")),
-        "pollutants": list(final_block.get("pollutants", [])),
-        "notes": list(final_block.get("notes", [])),
-        "label": final_block.get("label") or ("PASS" if final_block.get("pass") else "FAIL"),
+    payload = {
+        "meta": {"legislation": spec.get("name", "EU7 Light-Duty"), "version": spec.get("version")},
+        "sections": sections,
+        "final": final_block,
+        "visual": visual,
+        "kpi_numbers": kpis,
     }
 
-    meta = dict(payload.get("meta") or {})
-    meta.setdefault("legislation", "EU7 Light-Duty")
-    payload["meta"] = meta
-
-    # Mirror top-level conveniences used by legacy UI helpers
-    payload["map"] = payload.get("visual", {}).get("map", {})
-    payload["chart"] = payload.get("visual", {}).get("chart", {})
-
-    normalised = ensure_results_payload_defaults(payload)
-    # restore fields that ensure_results_payload_defaults may normalise away
-    normalised["meta"] = payload.get("meta", {})
-    normalised["sections"] = payload.get("sections", [])
-    normalised["final"] = payload.get("final", {})
-    normalised["emissions"] = payload.get("emissions", {})
-    normalised["id"] = payload.get("id")
-    normalised["name"] = payload.get("name")
-    normalised["version"] = payload.get("version")
-    normalised["columns"] = payload.get("columns")
-    normalised["values"] = payload.get("values")
-
-    return normalised
+    payload = ensure_results_payload_defaults(payload)
+    payload.setdefault("meta", {}).setdefault("legislation", spec.get("name", "EU7 Light-Duty"))
+    payload.setdefault("meta", {}).setdefault("version", spec.get("version"))
+    payload["chart"] = payload.get("visual", {}).get("chart")
+    payload["map"] = payload.get("visual", {}).get("map")
+    return payload
 
 
 __all__ = ["build_results_payload", "load_spec", "render_report", "evaluate_eu7_ld"]
