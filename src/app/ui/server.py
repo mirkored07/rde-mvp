@@ -9,6 +9,7 @@ import io
 import json
 import math
 import pathlib
+from datetime import datetime
 from collections.abc import Mapping
 from pathlib import Path
 import tempfile
@@ -124,6 +125,36 @@ def _count_section_results(payload: Mapping[str, Any]) -> tuple[int, int]:
                 else:
                     fail_count += 1
     return pass_count, fail_count
+
+
+@router.get("/export_pdf", include_in_schema=False)
+def export_pdf_legislation(legislation: str = Query("demo")) -> Response:
+    """Generate a printable PDF report for EU7-LD."""
+
+    if legislation.lower() != "eu7_ld":
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND, detail="Legislation not supported for PDF export."
+        )
+
+    results_payload = evaluate_eu7_ld(None)
+    template = templates.get_template("eu7_pdf.html")
+    generated_at = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+    html_document = template.render(
+        results_payload=results_payload,
+        generated_at=generated_at,
+        title="EU7 Light-Duty Report",
+        heading="EU7 Light-Duty",
+    )
+    try:
+        pdf_bytes = html_to_pdf_bytes(html_document)
+    except RuntimeError as exc:  # pragma: no cover - dependency missing
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": 'attachment; filename="report_eu7_ld.pdf"'},
+    )
 
 
 @router.get("/results", include_in_schema=False)
