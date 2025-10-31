@@ -101,7 +101,8 @@ def test_index_page_renders() -> None:
     response = client.get("/")
     assert response.status_code == 200
     assert "Upload PEMS, GPS, and ECU data" in response.text
-    assert "Download sample files" in response.text
+    assert "Column mapping assistant" in response.text
+    assert "Download sample files" not in response.text
 
 
 def test_static_assets_served() -> None:
@@ -567,23 +568,31 @@ def test_export_pdf_requires_payload() -> None:
 def test_export_pdf_generates_document() -> None:
     payload = _post_analysis()
 
-    response = client.post("/export_pdf", json={"results": payload})
+    response = client.post("/export_pdf", json={"results_payload": payload})
     assert response.status_code == 200
-    body = response.json()
-    results = body["results_payload"]
-    attachments = results.get("attachments", [])
-    assert attachments, "expected pdf attachment"
-    pdf_info = attachments[0]
-    assert pdf_info["media_type"] == "application/pdf"
-    pdf_bytes = base64.b64decode(pdf_info["content_base64"])
-    assert len(pdf_bytes) > 500
+    assert response.headers["content-type"] == "application/pdf"
+    assert response.headers["content-disposition"] == 'attachment; filename="report_eu7_ld.pdf"'
+    assert response.content.startswith(b"%PDF")
+    assert len(response.content) > 500
+
+
+@pytest.mark.skipif(not WEASYPRINT_AVAILABLE, reason="WeasyPrint not installed")
+def test_export_pdf_get_uses_last_payload() -> None:
+    payload = _post_analysis()
+    post_response = client.post("/export_pdf", json={"results_payload": payload})
+    assert post_response.status_code == 200
+
+    get_response = client.get("/export_pdf")
+    assert get_response.status_code == 200
+    assert get_response.headers["content-type"] == "application/pdf"
+    assert len(get_response.content) > 500
 
 
 @pytest.mark.skipif(WEASYPRINT_AVAILABLE, reason="WeasyPrint installed")
 def test_export_pdf_reports_missing_dependency() -> None:
     payload = _post_analysis()
 
-    response = client.post("/export_pdf", json={"results": payload})
+    response = client.post("/export_pdf", json={"results_payload": payload})
     assert response.status_code == 503
     detail = response.json().get("detail", "")
     assert "WeasyPrint" in detail
