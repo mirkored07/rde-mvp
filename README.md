@@ -36,6 +36,9 @@ poetry run uvicorn src.main:app --reload
 * Open `/report/{test_id}` in the browser to review the grouped conformity
   criteria with PASS/FAIL badges. Example: http://localhost:8000/report/sample
   while the development server is running.
+* Thresholds for the UN 168-based evaluation live in
+  `src/app/regulation/eu7ld_un168_limits.py`. Update those constants to adjust
+  the regulatory boundaries without touching the rule logic.
 * To add or refine checks without changing the schema, edit the rows generated
   in `src/app/reporting/eu7ld_report.py`. Each criterion is a dedicated entry
   in the typed `ReportData` model.

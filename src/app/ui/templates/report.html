@@ -3,7 +3,8 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>EU7-LD Conformity Report</title>
+    <title>EU7 Light-Duty Compliance Report</title>
+    <link rel="stylesheet" href="/static/leaflet/leaflet.css" />
     <link rel="stylesheet" href="/static/css/styles.css" />
     <style>
       :root {
@@ -20,22 +21,167 @@
         margin: 0 auto;
         padding: 48px 32px 72px;
       }
-      .card {
+      .header-card {
         background: #ffffff;
         border-radius: 28px;
         box-shadow: 0 24px 64px -48px rgba(15, 23, 42, 0.4);
         padding: 32px;
       }
-      .header {
+      .back-link {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        margin-bottom: 16px;
+        color: #2563eb;
+        text-decoration: none;
+        font-weight: 600;
+      }
+      .header-top {
+        display: flex;
+        flex-direction: column;
+        gap: 20px;
+      }
+      .title-row {
         display: flex;
         flex-direction: column;
         gap: 12px;
-        margin-bottom: 32px;
       }
-      .header__meta {
+      .title-row h1 {
+        margin: 0;
+        font-size: 2rem;
+      }
+      .meta-grid {
         display: grid;
+        gap: 16px;
+        margin-top: 24px;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      }
+      .meta-grid div {
+        font-size: 0.9rem;
+        color: #475569;
+      }
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        padding: 4px 14px;
+        border-radius: 999px;
+        font-size: 0.75rem;
+        font-weight: 600;
+        background: rgba(59, 130, 246, 0.12);
+        color: #1d4ed8;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+      }
+      .overall-badge {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding: 6px 16px;
+        border-radius: 999px;
+        font-size: 0.75rem;
+        font-weight: 600;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+      .overall-badge.pass { background: rgba(16, 185, 129, 0.16); color: #047857; }
+      .overall-badge.fail { background: rgba(239, 68, 68, 0.16); color: #b91c1c; }
+      .overall-badge.pending { background: rgba(251, 191, 36, 0.18); color: #92400e; }
+      .actions {
+        display: flex;
+        flex-wrap: wrap;
         gap: 12px;
-        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      }
+      .actions a,
+      .actions button {
+        border: none;
+        border-radius: 999px;
+        padding: 10px 22px;
+        font-weight: 600;
+        font-size: 0.9rem;
+        cursor: pointer;
+      }
+      .actions a {
+        text-decoration: none;
+        background: rgba(148, 163, 184, 0.2);
+        color: #1f2937;
+      }
+      .actions button {
+        background: linear-gradient(120deg, #0ea5e9, #1d4ed8);
+        color: #fff;
+        box-shadow: 0 12px 30px -18px rgba(14, 165, 233, 0.8);
+      }
+      .quick-grid {
+        margin-top: 28px;
+        display: grid;
+        gap: 16px;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      }
+      .quick-card {
+        background: linear-gradient(165deg, rgba(30, 64, 175, 0.1), rgba(59, 130, 246, 0.08));
+        border-radius: 20px;
+        padding: 18px 20px;
+        box-shadow: 0 24px 60px -40px rgba(30, 64, 175, 0.5);
+        position: relative;
+        overflow: hidden;
+      }
+      .quick-card strong {
+        font-size: 0.95rem;
+        color: #0f172a;
+      }
+      .quick-card span {
+        display: block;
+        margin-top: 12px;
+        font-size: 1.2rem;
+        font-weight: 700;
+        color: #1e293b;
+      }
+      .quick-status {
+        position: absolute;
+        top: 18px;
+        right: 18px;
+        font-size: 0.7rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        padding: 4px 10px;
+        border-radius: 999px;
+        letter-spacing: 0.08em;
+      }
+      .quick-status.pass { background: rgba(16, 185, 129, 0.18); color: #047857; }
+      .quick-status.fail { background: rgba(239, 68, 68, 0.2); color: #b91c1c; }
+      .quick-status.n-a { background: rgba(148, 163, 184, 0.2); color: #475569; }
+      .section {
+        margin-top: 40px;
+      }
+      .section h2 {
+        font-size: 1.2rem;
+        margin-bottom: 18px;
+        color: #1e293b;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        border-radius: 18px;
+        overflow: hidden;
+        box-shadow: 0 24px 48px -42px rgba(15, 23, 42, 0.4);
+      }
+      thead {
+        background: #e2e8f0;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        font-size: 0.72rem;
+        color: #475569;
+      }
+      th {
+        text-align: left;
+        padding: 12px 14px;
+      }
+      td {
+        padding: 14px;
+        border-top: 1px solid #e2e8f0;
+        font-size: 0.92rem;
+      }
+      tbody tr:nth-child(even) td {
+        background: rgba(248, 250, 252, 0.7);
       }
       .badge {
         display: inline-flex;
@@ -48,226 +194,224 @@
         letter-spacing: 0.08em;
         text-transform: uppercase;
       }
-      .badge--pass {
-        background: rgba(16, 185, 129, 0.16);
-        color: #047857;
-      }
-      .badge--fail {
-        background: rgba(239, 68, 68, 0.16);
-        color: #b91c1c;
-      }
-      .badge--na {
-        background: rgba(148, 163, 184, 0.16);
-        color: #475569;
-      }
-      .section {
-        margin-top: 36px;
-      }
-      .section h2 {
-        font-size: 1.125rem;
-        margin-bottom: 16px;
-        color: #1e293b;
-      }
-      table {
-        width: 100%;
-        border-collapse: collapse;
-      }
-      thead tr {
-        background: #e2e8f0;
-      }
-      th {
-        text-align: left;
-        font-size: 0.75rem;
-        letter-spacing: 0.14em;
-        text-transform: uppercase;
-        padding: 10px 12px;
-        color: #475569;
-      }
-      td {
-        padding: 12px;
-        border-top: 1px solid #e2e8f0;
-        font-size: 0.9rem;
-        vertical-align: top;
-      }
-      tbody tr:nth-child(even) td {
-        background: rgba(248, 250, 252, 0.7);
-      }
-      .limits {
+      .badge.pass { background: rgba(16, 185, 129, 0.16); color: #047857; }
+      .badge.fail { background: rgba(239, 68, 68, 0.16); color: #b91c1c; }
+      .badge.n-a { background: rgba(148, 163, 184, 0.16); color: #475569; }
+      .limit-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
         gap: 16px;
-        margin-top: 16px;
+        margin-top: 32px;
       }
       .limit-card {
-        background: rgba(37, 99, 235, 0.08);
+        background: rgba(96, 165, 250, 0.12);
         border-radius: 18px;
-        padding: 14px 16px;
+        padding: 18px 20px;
       }
       .limit-card h3 {
         margin: 0 0 6px;
-        font-size: 0.75rem;
-        letter-spacing: 0.12em;
         text-transform: uppercase;
+        letter-spacing: 0.1em;
+        font-size: 0.75rem;
         color: #1d4ed8;
       }
       .limit-card p {
         margin: 0;
         font-size: 1rem;
         font-weight: 600;
+        color: #1e293b;
       }
-      .emissions {
-        margin-top: 24px;
+      .dual-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-        gap: 16px;
+        grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+        gap: 20px;
+        margin-top: 24px;
       }
-      .emissions-card {
-        border: 1px solid #e2e8f0;
-        border-radius: 18px;
-        padding: 18px 20px;
+      .panel {
+        border: 1px solid rgba(148, 163, 184, 0.2);
+        border-radius: 20px;
+        padding: 20px 24px;
+        background: rgba(255, 255, 255, 0.85);
       }
-      .emissions-card h3 {
+      .panel h3 {
         margin: 0 0 12px;
-        font-size: 1rem;
+        font-size: 0.85rem;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        color: #475569;
       }
-      .emissions-card dl {
-        margin: 0;
+      dl.device {
         display: grid;
         grid-template-columns: auto 1fr;
-        row-gap: 8px;
-        column-gap: 12px;
-        font-size: 0.9rem;
-      }
-      .device {
-        margin-top: 24px;
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-        gap: 12px;
+        gap: 12px 24px;
+        margin: 0;
         font-size: 0.9rem;
         color: #334155;
       }
-      a.back-link {
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-        margin-bottom: 16px;
-        color: #2563eb;
-        text-decoration: none;
-        font-weight: 600;
+      #chart-speed,
+      #drive-map {
+        border-radius: 20px;
+        border: 1px solid rgba(148, 163, 184, 0.2);
+        background: rgba(241, 245, 249, 0.6);
+        min-height: 320px;
+      }
+      @media (max-width: 720px) {
+        .page { padding: 32px 20px 56px; }
+        .quick-card { padding: 16px 18px; }
+        .actions { flex-direction: column; align-items: stretch; }
+        .actions a, .actions button { width: 100%; text-align: center; }
       }
     </style>
   </head>
   <body>
     <main class="page">
       <a class="back-link" href="/">← Back to dashboard</a>
-      <section class="card">
-        <header class="header">
-          <div>
-            <h1 style="margin: 0; font-size: 1.75rem;">EU7-LD Conformity Report</h1>
-            <p style="margin: 6px 0 0; color: #64748b; font-size: 0.95rem;">
-              {{ report.meta.legislation }} · Test {{ report.meta.testId }}
+      <section class="header-card">
+        <div class="header-top">
+          <div class="title-row">
+            <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+              <h1>EU7 Light-Duty Compliance Report</h1>
+              <span class="pill">{{ report.meta.legislation }}</span>
+              <span class="overall-badge {{ overall_result }}" title="Overall conformity status">
+                {% if overall_result == 'pass' %}PASS{% elif overall_result == 'fail' %}FAIL{% else %}PENDING{% endif %}
+              </span>
+            </div>
+            <p style="margin: 0; color: #64748b; font-size: 0.95rem;">
+              Test {{ report.meta.testId }} · Velocity source {{ report.meta.velocitySource }}
             </p>
           </div>
-          <div class="header__meta">
-            <div>
-              <strong>Engine</strong><br />{{ report.meta.engine }}
-            </div>
-            <div>
-              <strong>Propulsion</strong><br />{{ report.meta.propulsion }}
-            </div>
-            <div>
-              <strong>Velocity source</strong><br />{{ report.meta.velocitySource }}
-            </div>
-            <div>
-              <strong>Test start</strong><br />{{ report.meta.testStart }}
-            </div>
-            <div>
-              <strong>Printout</strong><br />{{ report.meta.printout }}
-            </div>
+          <div class="actions">
+            <a href="/analyze">Run analysis</a>
+            <button id="btn-export-pdf" type="button">Download PDF</button>
           </div>
-        </header>
+        </div>
+        <div class="meta-grid">
+          <div><strong>Engine</strong><br />{{ report.meta.engine }}</div>
+          <div><strong>Propulsion</strong><br />{{ report.meta.propulsion }}</div>
+          <div><strong>Test start</strong><br />{{ report.meta.testStart }}</div>
+          <div><strong>Printout</strong><br />{{ report.meta.printout }}</div>
+        </div>
+        <div class="quick-grid" style="margin-top: 28px;">
+          {% for card in quick_cards %}
+          <article class="quick-card" title="{{ card.tooltip }}">
+            <div class="quick-status {{ card.status|replace('/', '-') }}">{{ card.status|upper }}</div>
+            <strong>{{ card.label }}</strong>
+            <span>{{ card.value }}</span>
+          </article>
+          {% endfor %}
+        </div>
+        <div class="limit-grid">
+          <div class="limit-card"><h3>CO (WLTP)</h3><p>{{ '%.0f'|format(report.limits.CO_mg_km_WLTP) }} mg/km</p></div>
+          <div class="limit-card"><h3>NOx (RDE)</h3><p>{{ '%.0f'|format(report.limits.NOx_mg_km_RDE) }} mg/km</p></div>
+          <div class="limit-card"><h3>PN (RDE)</h3><p>{{ '{:.1e}'|format(report.limits.PN_hash_km_RDE).replace('e+','e') }} #/km</p></div>
+        </div>
+      </section>
 
-        <section class="section">
-          <h2>Regulatory Limits</h2>
-          <div class="limits">
-            <div class="limit-card">
-              <h3>CO (WLTP)</h3>
-              <p>{{ '%.0f'|format(report.limits.CO_mg_km_WLTP) }} mg/km</p>
-            </div>
-            <div class="limit-card">
-              <h3>NOx (RDE)</h3>
-              <p>{{ '%.0f'|format(report.limits.NOx_mg_km_RDE) }} mg/km</p>
-            </div>
-            <div class="limit-card">
-              <h3>PN (RDE)</h3>
-              <p>{{ '%.2e'|format(report.limits.PN_hash_km_RDE) }} #/km</p>
-            </div>
-          </div>
-        </section>
+      {% set section_order = [
+        'Pre/Post Checks (Zero/Span)',
+        'Span Gas Coverage',
+        'Vehicle Preconditioning & Soak',
+        'Start/End (ICE)',
+        'Cold-Start Window',
+        'Trip Composition & Timing',
+        'GPS Validity',
+        'Dynamics & MAW',
+        'CO₂ Characteristic Windows (MAW)',
+        'Emissions Summary',
+        'Final Conformity',
+        'Leak Checks & Device Errors'
+      ] %}
 
-        <section class="section">
-          <h2>Emissions Summary</h2>
-          <div class="emissions">
-            {% for block in [report.emissions.urban, report.emissions.trip] %}
-            <div class="emissions-card">
-              <h3>{{ block.label }}</h3>
-              <dl>
-                <dt>CO<sub>2</sub></dt>
-                <dd>{{ block.CO2_g_km if block.CO2_g_km is not none else 'n/a' }} g/km</dd>
-                <dt>CO</dt>
-                <dd>{{ block.CO_mg_km if block.CO_mg_km is not none else 'n/a' }} mg/km</dd>
-                <dt>NOx</dt>
-                <dd>{{ block.NOx_mg_km if block.NOx_mg_km is not none else 'n/a' }} mg/km</dd>
-                <dt>PN</dt>
-                <dd>{{ block.PN_hash_km if block.PN_hash_km is not none else 'n/a' }} #/km</dd>
-              </dl>
-            </div>
-            {% endfor %}
-          </div>
-        </section>
-
-        <section class="section">
-          <h2>Measurement Devices</h2>
-          <div class="device">
-            <div><strong>Gas PEMS</strong><br />{{ report.device.gasPEMS }}</div>
-            <div><strong>PN PEMS</strong><br />{{ report.device.pnPEMS }}</div>
-            {% if report.device.efm %}
-            <div><strong>EFM</strong><br />{{ report.device.efm }}</div>
-            {% endif %}
-          </div>
-        </section>
-
-        {% for section, items in grouped_criteria.items() %}
-        <section class="section">
-          <h2>{{ section }}</h2>
+      {% for section_name in section_order %}
+      {% set rows = grouped_criteria.get(section_name) %}
+      {% if rows %}
+      <section class="section">
+        <h2>{{ section_name }}</h2>
+        <div style="overflow-x: auto;">
           <table>
             <thead>
               <tr>
-                <th style="width: 18%;">Clause</th>
-                <th>Description</th>
-                <th style="width: 18%;">Limit</th>
-                <th style="width: 18%;">Measured</th>
-                <th style="width: 12%;">Result</th>
+                <th>Ref</th>
+                <th>Criterion</th>
+                <th>Condition</th>
+                <th>Value</th>
+                <th>Unit</th>
+                <th>Result</th>
               </tr>
             </thead>
             <tbody>
-              {% for item in items %}
+              {% for row in rows %}
               <tr>
-                <td>{{ item.clause or '—' }}</td>
-                <td>{{ item.description }}</td>
-                <td>{{ item.limit }}</td>
-                <td>{{ item.measured or 'n/a' }}</td>
+                <td>EU7-LD</td>
                 <td>
-                  {% set cls = 'badge--pass' if item.result.value == 'pass' else 'badge--fail' if item.result.value == 'fail' else 'badge--na' %}
-                  <span class="badge {{ cls }}">{{ item.result.value|upper }}</span>
+                  <div style="font-weight: 600; color: #0f172a;">{{ row.description }}</div>
+                  {% if row.clause %}<div style="font-size: 0.75rem; color: #64748b; margin-top: 4px;">{{ row.clause }}</div>{% endif %}
+                </td>
+                <td style="color: #334155;">{{ row.limit }}</td>
+                <td>{{ row.measured or 'n/a' }}</td>
+                <td>{{ row.unit or '—' }}</td>
+                <td>
+                  <span class="badge {{ row.result.value|replace('/', '-') }}">{{ row.result.value|upper }}</span>
                 </td>
               </tr>
               {% endfor %}
             </tbody>
           </table>
-        </section>
-        {% endfor %}
+        </div>
       </section>
+      {% endif %}
+      {% endfor %}
+
+      <div class="dual-grid">
+        <section class="panel">
+          <h3>Device identifiers</h3>
+          <dl class="device">
+            <dt>Gas PEMS</dt><dd>{{ report.device.gasPEMS }}</dd>
+            <dt>PN PEMS</dt><dd>{{ report.device.pnPEMS }}</dd>
+            {% if report.device.efm %}<dt>EFM</dt><dd>{{ report.device.efm }}</dd>{% endif %}
+          </dl>
+        </section>
+        <section class="panel">
+          <h3>Emissions (urban / trip)</h3>
+          <p style="margin: 0; font-size: 0.9rem; color: #334155;">
+            NOx: {{ quick_cards[6].value if quick_cards|length > 6 else 'n/a' }}<br />
+            PN: {{ quick_cards[7].value if quick_cards|length > 7 else 'n/a' }}<br />
+            CO: {{ quick_cards[8].value if quick_cards|length > 8 else 'n/a' }}
+          </p>
+        </section>
+      </div>
+
+      <div class="dual-grid" style="margin-top: 32px;">
+        <section class="panel">
+          <h3>Charts &amp; KPIs</h3>
+          <div id="chart-speed"></div>
+        </section>
+        <section class="panel">
+          <h3>Route map</h3>
+          <div id="drive-map"></div>
+        </section>
+      </div>
     </main>
+
+    <script src="/static/leaflet/leaflet.js"></script>
+    <script>
+      window.__EU7_REPORT__ = {{ report_payload | tojson | safe }};
+      window.__RDE_RESULT__ = window.__EU7_REPORT__;
+      window.dispatchEvent(new Event('rde:payload-ready'));
+      (async () => {
+        try {
+          const response = await fetch(`/api/report/{{ report.meta.testId }}`);
+          if (response.ok) {
+            const latest = await response.json();
+            window.__EU7_REPORT__ = latest;
+            window.__RDE_RESULT__ = latest;
+            window.dispatchEvent(new Event('rde:payload-ready'));
+          }
+        } catch (error) {
+          console.warn('Report refresh failed', error);
+        }
+      })();
+    </script>
+    <script src="/static/js/app.js"></script>
   </body>
 </html>

@@ -17,7 +17,8 @@ def test_sample_report_validates() -> None:
     report = ReportData.model_validate(raw)
     assert report.meta.testId == "sample"
     assert report.device.gasPEMS
-    assert any(item.section == "Conformity of Emissions" for item in report.criteria)
+    assert any(item.section == "Final Conformity" for item in report.criteria)
+    assert len(report.criteria) == 53
 
 
 def test_report_endpoint_returns_sample() -> None:
@@ -27,8 +28,9 @@ def test_report_endpoint_returns_sample() -> None:
     assert payload["meta"]["testId"] == "sample"
     assert payload["limits"]["NOx_mg_km_RDE"] == 60.0
     assert "criteria" in payload and payload["criteria"]
-    conformity = [c for c in payload["criteria"] if c["section"] == "Conformity of Emissions"]
+    conformity = [c for c in payload["criteria"] if c["section"] == "Final Conformity"]
     assert conformity
     results = {item["id"]: item["result"] for item in conformity}
     assert results.get("conformity:nox") == "pass"
+    assert len(payload["criteria"]) == 53
 
