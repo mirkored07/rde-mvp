@@ -10,6 +10,13 @@ Install dependencies with [Poetry](https://python-poetry.org/):
 poetry install
 ```
 
+> **Offline environments.** Continuous-integration sandboxes that do not allow
+> network egress will need pre-downloaded wheels for the heavy scientific stack
+> used by the project (``numpy``, ``pandas``, ``fastapi`` and friends). Populate a
+> local package index or vendor directory before running the test suite in such
+> settings; otherwise `pytest` will fail during collection when those imports are
+> missing.
+
 Run the development server:
 
 ```bash
