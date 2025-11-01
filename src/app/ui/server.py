@@ -127,45 +127,11 @@ def _count_section_results(payload: Mapping[str, Any]) -> tuple[int, int]:
     return pass_count, fail_count
 
 
-@router.get("/export_pdf", include_in_schema=False)
-def export_pdf_legislation(legislation: str = Query("demo")) -> Response:
-    """Generate a printable PDF report for EU7-LD."""
-
-    if legislation.lower() != "eu7_ld":
-        raise HTTPException(
-            status.HTTP_404_NOT_FOUND, detail="Legislation not supported for PDF export."
-        )
-
-    results_payload = evaluate_eu7_ld(None)
-    template = templates.get_template("eu7_pdf.html")
-    generated_at = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
-    html_document = template.render(
-        results_payload=results_payload,
-        generated_at=generated_at,
-        title="EU7 Light-Duty Report",
-        heading="EU7 Light-Duty",
-    )
-    try:
-        pdf_bytes = html_to_pdf_bytes(html_document)
-    except RuntimeError as exc:  # pragma: no cover - dependency missing
-        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
-
-    return Response(
-        content=pdf_bytes,
-        media_type="application/pdf",
-        headers={"Content-Disposition": 'attachment; filename="report_eu7_ld.pdf"'},
-    )
-
-
 @router.get("/results", include_in_schema=False)
 def get_results(request: Request) -> Response:
     """Render the EU7 Light-Duty report preview."""
 
     payload = evaluate_eu7_ld(raw_inputs={})
-    try:  # pragma: no cover - session optional in some test environments
-        request.session["latest_results_payload"] = payload
-    except RuntimeError:
-        pass
     accept = (request.headers.get("accept") or "").lower()
     if "application/json" in accept:
         return legacy_respond_success(payload)
@@ -2751,11 +2717,6 @@ async def analyze(request: Request) -> Response:
     visual_shapes = _build_visual_shapes(results_payload)
     results_payload["visual"] = visual_shapes
     analysis_block["visual"] = visual_shapes
-
-    try:  # pragma: no cover - session middleware optional in some environments
-        request.session["latest_results_payload"] = results_payload
-    except RuntimeError:
-        pass
 
     context = _base_template_context(
         request,
