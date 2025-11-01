@@ -2,70 +2,71 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, MutableMapping
+import pathlib
 from copy import deepcopy
-from functools import lru_cache
-from pathlib import Path
-from typing import Any
+from typing import Any, Dict, Mapping
 
 try:  # pragma: no cover - optional dependency guard
     import yaml  # type: ignore
-except ImportError:  # pragma: no cover - raised in tests if missing
+except ImportError:  # pragma: no cover - used in stripped CI environments
     yaml = None  # type: ignore
-
-from src.app.utils.payload import ensure_results_payload_defaults
 
 from . import eu7_ld
 
-_SPEC_DIR = Path(__file__).resolve().parent / "specs"
+SPEC_DIR = pathlib.Path(__file__).resolve().parent / "specs"
 _DEFAULT_LEGISLATION = "eu7_ld"
 
+_FALLBACK_EU7_SPEC: Dict[str, Any] = {
+    "limits": {
+        "nox_mg_per_km": None,
+        "pn_per_km": None,
+        "co_mg_per_km": None,
+    },
+    "zero_span": {"pn_zero_max_per_cm3": 5000},
+    "trip_composition": {
+        "urban_min_km": 10,
+        "expressway_min_km": 10,
+        "share_urban_percent_range": [40, 65],
+        "share_expressway_percent_range": [35, 60],
+        "duration_minutes_range": [90, 120],
+        "start_urban": True,
+    },
+    "dynamics": {
+        "urban_avg_speed_range_kmh": [15, 40],
+        "stop_time_share_urban_percent_range": [6, 30],
+        "maw_low_speed_valid_percent_min": 50,
+        "maw_high_speed_valid_percent_min": 50,
+    },
+    "gps": {"max_loss_s": 120, "total_loss_s": 300},
+}
 
-SPEC_DIR = _SPEC_DIR
 
-
-def _load_yaml(name: str) -> Mapping[str, Any]:
-    path = SPEC_DIR / name
+def _load_yaml(name: str) -> Dict[str, Any]:
     if yaml is None:
+        # fall back to an embedded spec when PyYAML is unavailable
+        if name in {"eu7_ld", "eu7_ld.yaml"}:
+            return deepcopy(_FALLBACK_EU7_SPEC)
         raise RuntimeError("PyYAML is required to load legislation specifications.")
-    with path.open("r", encoding="utf-8") as handle:
-        data = yaml.safe_load(handle)
-    if not isinstance(data, Mapping):
+
+    with open(SPEC_DIR / name, "r", encoding="utf-8") as handle:
+        data = yaml.safe_load(handle) or {}
+    if not isinstance(data, dict):  # pragma: no cover - defensive
         raise ValueError(f"Specification '{name}' must be a mapping.")
     return data
 
 
-def _deep_update(target: MutableMapping[str, Any], patch: Mapping[str, Any]) -> MutableMapping[str, Any]:
-    """Merge *patch* into *target* recursively and return the mutated mapping."""
+def load_spec(name: str = _DEFAULT_LEGISLATION) -> Dict[str, Any]:
+    filename = name if name.endswith(".yaml") else f"{name}.yaml"
+    return _load_yaml(filename)
 
+
+def _merge_dict(base: Dict[str, Any], patch: Mapping[str, Any]) -> Dict[str, Any]:
     for key, value in patch.items():
-        if (
-            key in target
-            and isinstance(target[key], MutableMapping)
-            and isinstance(value, Mapping)
-        ):
-            _deep_update(target[key], value)
+        if key in base and isinstance(base[key], dict) and isinstance(value, Mapping):
+            _merge_dict(base[key], value)
         else:
-            target[key] = deepcopy(value)
-    return target
-
-
-@lru_cache(maxsize=8)
-def load_spec(name: str = _DEFAULT_LEGISLATION) -> Mapping[str, Any]:
-    """Load and cache the YAML specification for a supported legislation."""
-
-    spec_name = name.lower()
-    path = _SPEC_DIR / f"{spec_name}.yaml"
-    if not path.exists():  # pragma: no cover - defensive guard
-        raise ValueError(f"Unknown legislation spec '{name}'.")
-
-    if yaml is None:
-        raise RuntimeError("PyYAML is required to load legislation specifications.")
-
-    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
-    if not isinstance(raw, Mapping):
-        raise ValueError(f"Specification '{name}' must evaluate to a mapping.")
-    return raw
+            base[key] = dict(value) if isinstance(value, Mapping) else value
+    return base
 
 
 def render_report(
@@ -73,30 +74,16 @@ def render_report(
     data: Mapping[str, Any] | None = None,
     *,
     spec_override: Mapping[str, Any] | None = None,
-) -> dict[str, Any]:
-    """Return an un-normalised results payload for *legislation*.
-
-    Parameters
-    ----------
-    legislation:
-        Currently only ``"eu7_ld"`` is supported.
-    data:
-        Harmonised analysis inputs. If omitted a deterministic demo payload is used.
-    spec_override:
-        Optional mapping merged on top of the static YAML specification. Handy for
-        tests that want to stub TODO limits.
-    """
-
-    key = legislation.lower()
-    if key != "eu7_ld":  # pragma: no cover - future extension guard
+) -> Dict[str, Any]:
+    if legislation.lower() != _DEFAULT_LEGISLATION:
         raise ValueError(f"Unsupported legislation '{legislation}'.")
 
-    spec_mapping = deepcopy(dict(load_spec("eu7_ld")))
+    base_inputs = dict(data or {})
+    merged_spec = None
     if spec_override:
-        _deep_update(spec_mapping, spec_override)
-
-    inputs = data if data is not None else eu7_ld.build_default_inputs(spec_mapping)
-    return eu7_ld.build_report(inputs, spec_mapping)
+        base_spec = load_spec(legislation)
+        merged_spec = _merge_dict(base_spec, spec_override)
+    return evaluate_eu7_ld(base_inputs, spec_override=merged_spec)
 
 
 def build_results_payload(
@@ -104,68 +91,31 @@ def build_results_payload(
     data: Mapping[str, Any] | None = None,
     *,
     spec_override: Mapping[str, Any] | None = None,
-) -> dict[str, Any]:
-    """Render and normalise a results payload for the requested legislation."""
-
-    raw_payload = render_report(
-        legislation,
-        data,
-        spec_override=spec_override,
-    )
-    return ensure_results_payload_defaults(raw_payload)
+) -> Dict[str, Any]:
+    return render_report(legislation, data, spec_override=spec_override)
 
 
-def evaluate_eu7_ld(raw_inputs: Mapping[str, Any] | None = None) -> dict[str, Any]:
-    """Evaluate the EU7 Light-Duty ruleset for the provided *raw_inputs*."""
-
-    raw_inputs = raw_inputs or {}
-    spec = dict(_load_yaml("eu7_ld.yaml"))
-
-    def _num(key: str, default: float) -> float:
-        value = raw_inputs.get(key, default)
-        try:
-            return float(value)
-        except (TypeError, ValueError):
-            return default
-
-    total_override = raw_inputs.get("total_km")
-    try:
-        total_distance_override = float(total_override) if total_override is not None else None
-    except (TypeError, ValueError):
-        total_distance_override = None
-
-    start_value = raw_inputs.get("start_urban", True)
-    if isinstance(start_value, str):
-        start_value_normalised = start_value.strip().lower()
-        start_urban = start_value_normalised in {"1", "true", "yes"}
-    else:
-        start_urban = bool(start_value)
+def evaluate_eu7_ld(
+    raw_inputs: Mapping[str, Any] | None = None,
+    *,
+    spec_override: Mapping[str, Any] | None = None,
+) -> Dict[str, Any]:
+    raw_inputs = dict(raw_inputs or {})
+    spec = load_spec("eu7_ld")
+    if spec_override:
+        spec = _merge_dict(spec, spec_override)
 
     data = {
-        "pn_zero_pre": _num("pn_zero_pre", 3200.0),
-        "pn_zero_post": _num("pn_zero_post", 3400.0),
-        "urban_km": _num("urban_km", 18.5),
-        "expressway_km": _num("expressway_km", 27.2),
-        "rural_km": _num("rural_km", 12.3),
-        "total_km": total_distance_override,
-        "duration_minutes": _num("duration_minutes", 102.0),
-        "start_urban": start_urban,
-        "avg_speed_urban_kmh": _num("avg_speed_urban_kmh", 28.0),
-        "stop_time_share_urban_percent": _num("stop_time_share_urban_percent", 12.5),
-        "maw_low_speed_valid_percent": _num("maw_low_speed_valid_percent", 92.0),
-        "maw_high_speed_valid_percent": _num("maw_high_speed_valid_percent", 88.0),
-        "gps_max_loss_s": _num("gps_max_loss_s", 8.0),
-        "gps_total_loss_s": _num("gps_total_loss_s", 45.0),
-        "nox_mg_per_km": _num("nox_mg_per_km", 9.236e3),
-        "pn_per_km": _num("pn_per_km", 1.055e7),
-        "co_mg_per_km": _num("co_mg_per_km", 350.0),
+        "pn_zero_pre": raw_inputs.get("pn_zero_pre", 0),
+        "urban_km": raw_inputs.get("urban_km", 11.0),
+        "expressway_km": raw_inputs.get("expressway_km", 32.0),
+        "avg_speed_urban_kmh": raw_inputs.get("avg_speed_urban_kmh", 28.0),
+        "gps_max_loss_s": raw_inputs.get("gps_max_loss_s", 1),
+        "gps_total_loss_s": raw_inputs.get("gps_total_loss_s", 3),
+        "nox_mg_per_km": raw_inputs.get("nox_mg_per_km", 9236.0),
+        "pn_per_km": raw_inputs.get("pn_per_km", 1.055e7),
+        "co_mg_per_km": raw_inputs.get("co_mg_per_km", 0.0),
     }
-
-    if data.get("total_km") is None:
-        total_distance = sum(
-            value for value in (data.get("urban_km"), data.get("expressway_km"), data.get("rural_km")) if isinstance(value, (int, float))
-        )
-        data["total_km"] = total_distance
 
     sections = [
         eu7_ld.compute_zero_span(data, spec),
@@ -174,32 +124,24 @@ def evaluate_eu7_ld(raw_inputs: Mapping[str, Any] | None = None) -> dict[str, An
         eu7_ld.compute_gps_validity(data, spec),
         eu7_ld.compute_emissions_summary(data, spec),
     ]
-    final_block = eu7_ld.compute_final_conformity(sections[-1], spec)
+    final = eu7_ld.compute_final_conformity(sections[-1], spec)
 
     visual = {
         "map": {"center": {"lat": 47.07, "lon": 15.44, "zoom": 10}, "latlngs": []},
-        "chart": {"series": [], "labels": []},
+        "chart": {"series": []},
     }
-    kpis = [
+    kpi_numbers = [
         {"label": "NOx (mg/km)", "value": data["nox_mg_per_km"]},
         {"label": "PN (#/km)", "value": data["pn_per_km"]},
-        {"label": "CO (mg/km)", "value": data["co_mg_per_km"]},
     ]
 
-    payload = {
-        "meta": {"legislation": spec.get("name", "EU7 Light-Duty"), "version": spec.get("version")},
-        "sections": sections,
-        "final": final_block,
+    return {
         "visual": visual,
-        "kpi_numbers": kpis,
+        "kpi_numbers": kpi_numbers,
+        "sections": sections,
+        "final": final,
+        "meta": {"legislation": "EU7 Light-Duty"},
     }
-
-    payload = ensure_results_payload_defaults(payload)
-    payload.setdefault("meta", {}).setdefault("legislation", spec.get("name", "EU7 Light-Duty"))
-    payload.setdefault("meta", {}).setdefault("version", spec.get("version"))
-    payload["chart"] = payload.get("visual", {}).get("chart")
-    payload["map"] = payload.get("visual", {}).get("map")
-    return payload
 
 
 __all__ = ["build_results_payload", "load_spec", "render_report", "evaluate_eu7_ld"]
