@@ -10,6 +10,7 @@ from fastapi.staticfiles import StaticFiles
 
 from src.app.ui.routes import export as export_routes
 from src.app.ui.routes import export_pdf as export_pdf_routes
+from src.app.ui.routes import results as results_routes
 from src.app.ui.server import router as ui_router
 
 app = FastAPI(title="RDE MVP")
@@ -35,6 +36,7 @@ app.include_router(ui_router)
 # Lightweight export utilities.
 app.include_router(export_routes.router)
 app.include_router(export_pdf_routes.router)
+app.include_router(results_routes.router)
 
 
 # Expose static assets (CSS/JS) used by the Tailwind/HTMX UI.

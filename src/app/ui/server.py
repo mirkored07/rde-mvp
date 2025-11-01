@@ -44,7 +44,6 @@ from src.app.utils.mappings import (
     slugify_profile_name,
 )
 from src.app.utils.payload import ensure_results_payload_defaults
-from src.app.rules.engine import evaluate_eu7_ld
 from src.app.ui.responses import (
     make_results_payload as legacy_make_results_payload,
     respond_success as legacy_respond_success,
@@ -125,19 +124,6 @@ def _count_section_results(payload: Mapping[str, Any]) -> tuple[int, int]:
                 else:
                     fail_count += 1
     return pass_count, fail_count
-
-
-@router.get("/results", include_in_schema=False)
-def get_results(request: Request) -> Response:
-    """Render the EU7 Light-Duty report preview."""
-
-    payload = evaluate_eu7_ld(raw_inputs={})
-    accept = (request.headers.get("accept") or "").lower()
-    if "application/json" in accept:
-        return legacy_respond_success(payload)
-
-    context = {"request": request, "results_payload": payload}
-    return templates.TemplateResponse(request, "results.html", context)
 
 
 def _ensure_dict(value: Any | None) -> dict[str, Any] | None:
