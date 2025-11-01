@@ -24,7 +24,7 @@ def _render_pdf_with_weasyprint(html_str: str) -> bytes:
     return HTML(string=html_str, base_url=".").write_pdf()
 
 
-async def _extract_results_payload(request: Request) -> dict:
+async def _extract_results_payload(request: Request) -> dict | None:
     """Return a results payload from JSON or form-encoded submissions."""
 
     content_type = request.headers.get("content-type", "")
@@ -32,9 +32,11 @@ async def _extract_results_payload(request: Request) -> dict:
     if "application/json" in content_type:
         data = await request.json()
         if not isinstance(data, dict):
-            return {}
+            return None
         payload = data.get("results_payload", data)
-        return payload if isinstance(payload, dict) else {}
+        if isinstance(payload, dict) and payload:
+            return payload
+        return None
 
     if "application/x-www-form-urlencoded" in content_type or "multipart/form-data" in content_type:
         form = await request.form()
@@ -47,10 +49,12 @@ async def _extract_results_payload(request: Request) -> dict:
             try:
                 parsed = json.loads(raw_payload)
             except Exception:
-                return {}
-            return parsed if isinstance(parsed, dict) else {}
+                return None
+            if isinstance(parsed, dict) and parsed:
+                return parsed
+            return None
 
-    return evaluate_eu7_ld(raw_inputs={})
+    return None
 
 
 def _render_results_pdf(results_payload: dict) -> StreamingResponse:
@@ -66,6 +70,8 @@ def _render_results_pdf(results_payload: dict) -> StreamingResponse:
 @router.post("/export_pdf")
 async def export_pdf_post(request: Request) -> StreamingResponse:
     results_payload = await _extract_results_payload(request)
+    if not results_payload:
+        raise HTTPException(status_code=400, detail="results_payload required")
     return _render_results_pdf(results_payload)
 
 
