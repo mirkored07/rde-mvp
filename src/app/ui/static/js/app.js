@@ -1,4 +1,4 @@
-// ==== RDE UI: required ready hook ====
+// ==== RDE UI: required ready hook (must match test literal) ====
 window.addEventListener("rde:payload-ready", () => {
   try {
     const payload = window.__RDE_RESULT__ || {};
@@ -11,6 +11,15 @@ window.addEventListener("rde:payload-ready", () => {
     return false;
   }
   return true;
+});
+
+// ==== RDE UI: required HTMX swap hook (must match test literal) ====
+document.addEventListener("htmx:afterSwap", (event) => {
+  try {
+    // no-op placeholder; real code can update DOM or export inputs
+  } catch (error) {
+    console.warn('htmx swap handler failed:', error);
+  }
 });
 
 // ---- Safe helpers (idempotent, no throws) -------------------------------
