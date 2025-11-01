@@ -9,8 +9,6 @@ from starlette.templating import Jinja2Templates
 router = APIRouter()
 templates = Jinja2Templates(directory="src/app/ui/templates")
 
-# Tiny valid single-page PDF (no external deps)
-# “Hello EU7” 1-page PDF generated offline. Safe to hardcode for dev fallback.
 _DEV_PDF_BYTES = (
     b"%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n"
     b"2 0 obj<</Type/Pages/Count 1/Kids[3 0 R]>>endobj\n"
@@ -37,14 +35,14 @@ async def export_pdf(request: Request) -> Response:
 
     try:
         from weasyprint import HTML  # noqa: F401
-    except Exception as exc:  # pragma: no cover - dependency check via HTTP tests
+    except Exception:  # pragma: no cover - dependency check via HTTP tests
         if dev_fallback:
             return Response(
                 content=_DEV_PDF_BYTES,
                 media_type="application/pdf",
                 headers={"Content-Disposition": "attachment; filename=report_eu7_ld.pdf"},
             )
-        raise HTTPException(status_code=503, detail="WeasyPrint not installed") from exc
+        raise HTTPException(status_code=503, detail="WeasyPrint not installed")
 
     html = templates.get_template("print_eu7.html").render({"results_payload": payload})
     from weasyprint import HTML
