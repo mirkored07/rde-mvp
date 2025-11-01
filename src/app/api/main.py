@@ -8,10 +8,12 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
+from src.app.api.routes import report as report_routes
 from src.app.ui.routes import analyze as analyze_routes
 from src.app.ui.routes import export as export_routes
 from src.app.ui.routes import export_pdf as export_pdf_routes
 from src.app.ui.routes import print_preview as print_preview_routes
+from src.app.ui.routes import report as report_view_routes
 from src.app.ui.routes import results as results_routes
 from src.app.ui.routes import samples as samples_routes
 from src.app.ui.server import router as ui_router
@@ -37,6 +39,8 @@ def favicon() -> Response:
 app.include_router(ui_router)
 
 # Lightweight export utilities and demo analysis endpoints.
+app.include_router(report_routes.router)
+app.include_router(report_view_routes.router)
 app.include_router(results_routes.router)
 app.include_router(analyze_routes.router)
 app.include_router(samples_routes.router)

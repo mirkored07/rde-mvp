@@ -1,0 +1,479 @@
+{
+  "meta": {
+    "testId": "sample",
+    "engine": "WLTP-ICE 2.0L",
+    "propulsion": "ICE",
+    "legislation": "UN 168 LD – Certification (EU7 LD aligned)",
+    "testStart": "2024-03-12T07:30:00+00:00",
+    "printout": "2024-03-12T09:45:00+00:00",
+    "velocitySource": "GPS"
+  },
+  "limits": {
+    "CO_mg_km_WLTP": 1000.0,
+    "NOx_mg_km_RDE": 60.0,
+    "PN_hash_km_RDE": 600000000000.0
+  },
+  "criteria": [
+    {
+      "id": "zero-span:co2-zero",
+      "section": "Zero/Span Drift",
+      "clause": "§6.1",
+      "description": "CO₂ zero drift",
+      "limit": "≤ 2 % drift",
+      "measured": "0.8 %",
+      "unit": "%",
+      "result": "pass"
+    },
+    {
+      "id": "zero-span:co2-span",
+      "section": "Zero/Span Drift",
+      "clause": "§6.1",
+      "description": "CO₂ span drift",
+      "limit": "≤ 3 % drift",
+      "measured": "1.5 %",
+      "unit": "%",
+      "result": "pass"
+    },
+    {
+      "id": "zero-span:co-zero",
+      "section": "Zero/Span Drift",
+      "clause": "§6.1",
+      "description": "CO zero drift",
+      "limit": "≤ 2 % drift",
+      "measured": "0.5 %",
+      "unit": "%",
+      "result": "pass"
+    },
+    {
+      "id": "zero-span:co-span",
+      "section": "Zero/Span Drift",
+      "clause": "§6.1",
+      "description": "CO span drift",
+      "limit": "≤ 3 % drift",
+      "measured": "1.2 %",
+      "unit": "%",
+      "result": "pass"
+    },
+    {
+      "id": "zero-span:nox-zero",
+      "section": "Zero/Span Drift",
+      "clause": "§6.1",
+      "description": "NOx zero drift",
+      "limit": "≤ 2 % drift",
+      "measured": "0.9 %",
+      "unit": "%",
+      "result": "pass"
+    },
+    {
+      "id": "zero-span:nox-span",
+      "section": "Zero/Span Drift",
+      "clause": "§6.1",
+      "description": "NOx span drift",
+      "limit": "≤ 3 % drift",
+      "measured": "1.1 %",
+      "unit": "%",
+      "result": "pass"
+    },
+    {
+      "id": "pn:zero-pre",
+      "section": "Particle Number Zeros",
+      "clause": "§4.6",
+      "description": "PN zero (pre-test)",
+      "limit": "≤ 500 #/cm³",
+      "measured": "220 #/cm³",
+      "unit": "#/cm³",
+      "result": "pass"
+    },
+    {
+      "id": "pn:zero-post",
+      "section": "Particle Number Zeros",
+      "clause": "§4.6",
+      "description": "PN zero (post-test)",
+      "limit": "≤ 500 #/cm³",
+      "measured": "240 #/cm³",
+      "unit": "#/cm³",
+      "result": "pass"
+    },
+    {
+      "id": "span:co2",
+      "section": "Span Coverage",
+      "clause": "§6.3",
+      "description": "CO₂ span coverage",
+      "limit": "≥ 85 % (void if >200 %)",
+      "measured": "96 %",
+      "unit": "%",
+      "result": "pass"
+    },
+    {
+      "id": "span:co",
+      "section": "Span Coverage",
+      "clause": "§6.3",
+      "description": "CO span coverage",
+      "limit": "≥ 85 % (void if >200 %)",
+      "measured": "95 %",
+      "unit": "%",
+      "result": "pass"
+    },
+    {
+      "id": "span:nox",
+      "section": "Span Coverage",
+      "clause": "§6.3",
+      "description": "NOx span coverage",
+      "limit": "≥ 85 % (void if >200 %)",
+      "measured": "97 %",
+      "unit": "%",
+      "result": "pass"
+    },
+    {
+      "id": "preconditioning:operation-time",
+      "section": "Preconditioning & Soak",
+      "clause": "§8.3.2",
+      "description": "10 min per operation type",
+      "limit": "≥ 10 min",
+      "measured": "12 min",
+      "unit": "min",
+      "result": "pass"
+    },
+    {
+      "id": "preconditioning:soak-duration",
+      "section": "Preconditioning & Soak",
+      "clause": "§10.6",
+      "description": "Soak duration",
+      "limit": "6–72 h",
+      "measured": "8.5 h",
+      "unit": "h",
+      "result": "pass"
+    },
+    {
+      "id": "preconditioning:soak-temperature",
+      "section": "Preconditioning & Soak",
+      "clause": "§10.6",
+      "description": "Soak temperature",
+      "limit": "-7 to 35 °C",
+      "measured": "-12 °C",
+      "unit": "°C",
+      "result": "fail"
+    },
+    {
+      "id": "preconditioning:cold-start-multiplier",
+      "section": "Preconditioning & Soak",
+      "clause": "§10.6",
+      "description": "Cold-start multiplier applied",
+      "limit": "1.6× if extended",
+      "measured": "Applied",
+      "unit": null,
+      "result": "pass"
+    },
+    {
+      "id": "start-end:ice",
+      "section": "Start/End Information",
+      "clause": "§8.1",
+      "description": "ICE start/end confirmation",
+      "limit": "Logged",
+      "measured": "Engine start 07:32 / stop 09:14",
+      "unit": null,
+      "result": "pass"
+    },
+    {
+      "id": "cold-start:avg-speed",
+      "section": "Cold-start Window",
+      "clause": "§9.3.4",
+      "description": "Average speed",
+      "limit": "15–40 km/h",
+      "measured": "24.5 km/h",
+      "unit": "km/h",
+      "result": "pass"
+    },
+    {
+      "id": "cold-start:max-speed",
+      "section": "Cold-start Window",
+      "clause": "§3.8.2",
+      "description": "Maximum speed",
+      "limit": "≤ 60 km/h",
+      "measured": "56 km/h",
+      "unit": "km/h",
+      "result": "pass"
+    },
+    {
+      "id": "cold-start:movement",
+      "section": "Cold-start Window",
+      "clause": "§3.8.2",
+      "description": "Movement after engine start",
+      "limit": "≤ 15 s",
+      "measured": "12 s",
+      "unit": "s",
+      "result": "pass"
+    },
+    {
+      "id": "cold-start:stops",
+      "section": "Cold-start Window",
+      "clause": "§3.8.2",
+      "description": "Stops within window",
+      "limit": "≤ 90 s",
+      "measured": "70 s",
+      "unit": "s",
+      "result": "pass"
+    },
+    {
+      "id": "trip:urban-distance",
+      "section": "Trip Shares & Distances",
+      "clause": "§9.2",
+      "description": "Urban distance",
+      "limit": "≥ 16 km",
+      "measured": "18.6 km",
+      "unit": "km",
+      "result": "pass"
+    },
+    {
+      "id": "trip:expressway-distance",
+      "section": "Trip Shares & Distances",
+      "clause": "§9.2",
+      "description": "Expressway distance",
+      "limit": "≥ 16 km",
+      "measured": "21.4 km",
+      "unit": "km",
+      "result": "pass"
+    },
+    {
+      "id": "trip:urban-share",
+      "section": "Trip Shares & Distances",
+      "clause": "§9.3.2",
+      "description": "Urban share",
+      "limit": "55 ± 10 %",
+      "measured": "57 %",
+      "unit": "%",
+      "result": "pass"
+    },
+    {
+      "id": "trip:expressway-share",
+      "section": "Trip Shares & Distances",
+      "clause": "§9.3.2",
+      "description": "Expressway share",
+      "limit": "45 ± 10 %",
+      "measured": "43 %",
+      "unit": "%",
+      "result": "pass"
+    },
+    {
+      "id": "trip:duration",
+      "section": "Trip Requirements",
+      "clause": "§9.3.3",
+      "description": "Trip duration",
+      "limit": "90–120 min",
+      "measured": "104 min",
+      "unit": "min",
+      "result": "pass"
+    },
+    {
+      "id": "trip:delta-elevation",
+      "section": "Trip Requirements",
+      "clause": "§8.1",
+      "description": "Δ elevation",
+      "limit": "≤ 100 m",
+      "measured": "82 m",
+      "unit": "m",
+      "result": "pass"
+    },
+    {
+      "id": "trip:cumulative-elevation-trip",
+      "section": "Trip Requirements",
+      "clause": "§8.1",
+      "description": "Cumulative +elevation (trip)",
+      "limit": "≤ 1200 m/100 km",
+      "measured": "880 m/100 km",
+      "unit": "m/100 km",
+      "result": "pass"
+    },
+    {
+      "id": "trip:cumulative-elevation-urban",
+      "section": "Trip Requirements",
+      "clause": "§8.1",
+      "description": "Cumulative +elevation (urban)",
+      "limit": "≤ 1200 m/100 km",
+      "measured": "760 m/100 km",
+      "unit": "m/100 km",
+      "result": "pass"
+    },
+    {
+      "id": "trip:extended-conditions",
+      "section": "Trip Requirements",
+      "clause": "§8.1",
+      "description": "Extended conditions rule",
+      "limit": "No auto-void",
+      "measured": "Extended",
+      "unit": null,
+      "result": "fail"
+    },
+    {
+      "id": "gps:ecu-delta",
+      "section": "GPS Consistency",
+      "clause": "§4.7",
+      "description": "ECU vs GPS velocity",
+      "limit": "± 4 %",
+      "measured": "2.4 %",
+      "unit": "%",
+      "result": "pass"
+    },
+    {
+      "id": "gps:single-loss",
+      "section": "GPS Consistency",
+      "clause": "§6.5",
+      "description": "Single GPS loss",
+      "limit": "≤ 120 s",
+      "measured": "22 s",
+      "unit": "s",
+      "result": "pass"
+    },
+    {
+      "id": "gps:total-loss",
+      "section": "GPS Consistency",
+      "clause": "§6.5",
+      "description": "Total GPS loss",
+      "limit": "≤ 300 s",
+      "measured": "140 s",
+      "unit": "s",
+      "result": "pass"
+    },
+    {
+      "id": "dynamics:accel-urban",
+      "section": "Dynamics",
+      "clause": "§3.1.3.1",
+      "description": "Count(a>0.1) urban",
+      "limit": "Tracked",
+      "measured": "248 events",
+      "unit": "events",
+      "result": "pass"
+    },
+    {
+      "id": "dynamics:accel-expressway",
+      "section": "Dynamics",
+      "clause": "§3.1.3.1",
+      "description": "Count(a>0.1) expressway",
+      "limit": "Tracked",
+      "measured": "190 events",
+      "unit": "events",
+      "result": "pass"
+    },
+    {
+      "id": "dynamics:va95-urban",
+      "section": "Dynamics",
+      "clause": "§4.1.1",
+      "description": "va_pos95 urban",
+      "limit": "≤ 0.3 m/s²",
+      "measured": "0.22 m/s²",
+      "unit": "m/s²",
+      "result": "pass"
+    },
+    {
+      "id": "dynamics:va95-expressway",
+      "section": "Dynamics",
+      "clause": "§4.1.2",
+      "description": "va_pos95 expressway",
+      "limit": "≤ 0.5 m/s²",
+      "measured": "0.29 m/s²",
+      "unit": "m/s²",
+      "result": "pass"
+    },
+    {
+      "id": "dynamics:rpa-urban",
+      "section": "Dynamics",
+      "clause": "§4.1.1",
+      "description": "RPA urban",
+      "limit": "≤ 0.3 m²/s³",
+      "measured": "0.27 m²/s³",
+      "unit": "m²/s³",
+      "result": "pass"
+    },
+    {
+      "id": "dynamics:rpa-expressway",
+      "section": "Dynamics",
+      "clause": "§4.1.2",
+      "description": "RPA expressway",
+      "limit": "≤ 0.6 m²/s³",
+      "measured": "0.44 m²/s³",
+      "unit": "m²/s³",
+      "result": "pass"
+    },
+    {
+      "id": "co2-window:low",
+      "section": "CO₂ Characteristic Windows",
+      "clause": "App. 8 §4.5.1.2",
+      "description": "Low range coverage",
+      "limit": "≥ 50 % within tolerance",
+      "measured": "62 %",
+      "unit": "%",
+      "result": "pass"
+    },
+    {
+      "id": "co2-window:high",
+      "section": "CO₂ Characteristic Windows",
+      "clause": "App. 8 §4.5.1.2",
+      "description": "High range coverage",
+      "limit": "≥ 50 % within tolerance",
+      "measured": "58 %",
+      "unit": "%",
+      "result": "pass"
+    },
+    {
+      "id": "leak-device:checks",
+      "section": "Leak & Device Errors",
+      "clause": "§6.5",
+      "description": "Leak checks & device diagnostics",
+      "limit": "No unresolved errors",
+      "measured": "Clear",
+      "unit": null,
+      "result": "pass"
+    },
+    {
+      "id": "conformity:nox",
+      "section": "Conformity of Emissions",
+      "clause": "App. 11 §4",
+      "description": "NOx vs limit",
+      "limit": "≤ 60 mg/km",
+      "measured": "n/a",
+      "unit": "mg/km",
+      "result": "n/a"
+    },
+    {
+      "id": "conformity:pn",
+      "section": "Conformity of Emissions",
+      "clause": "App. 11 §4",
+      "description": "PN vs limit",
+      "limit": "≤ 6.0e11 #/km",
+      "measured": "n/a",
+      "unit": "#/km",
+      "result": "n/a"
+    },
+    {
+      "id": "conformity:co",
+      "section": "Conformity of Emissions",
+      "clause": "App. 11 §4",
+      "description": "CO vs limit",
+      "limit": "≤ 1000 mg/km",
+      "measured": "n/a",
+      "unit": "mg/km",
+      "result": "n/a"
+    }
+  ],
+  "emissions": {
+    "urban": {
+      "label": "Urban",
+      "CO2_g_km": 210.4,
+      "CO_mg_km": 420.0,
+      "NOx_mg_km": 42.0,
+      "PN_hash_km": 210000000000.0
+    },
+    "trip": {
+      "label": "Trip",
+      "CO2_g_km": 198.2,
+      "CO_mg_km": 480.0,
+      "NOx_mg_km": 34.0,
+      "PN_hash_km": 190000000000.0
+    }
+  },
+  "device": {
+    "gasPEMS": "AVL GAS 601",
+    "pnPEMS": "AVL PN PEMS 483",
+    "efm": "AVL 7350"
+  }
+}

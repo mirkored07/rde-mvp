@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from fastapi import APIRouter, Request
 from starlette.templating import Jinja2Templates
 
@@ -32,7 +34,30 @@ def results(request: Request):
     visual_block = payload.setdefault("visual", {})
     visual_block.setdefault("map", {})
     visual_block.setdefault("chart", {})
-    payload.setdefault("meta", {}).setdefault("legislation", "EU7 Light-Duty")
+    meta = dict(payload.get("meta") or {})
+    meta.setdefault("legislation", "EU7 Light-Duty")
+    meta.setdefault("test_id", "demo-run")
+    meta.setdefault("engine", "WLTP-ICE 2.0L")
+    meta.setdefault("propulsion", "ICE")
+    meta.setdefault("velocity_source", "GPS")
+    now_iso = datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+    meta.setdefault("test_start", now_iso)
+    meta.setdefault("printout", now_iso)
+    meta.setdefault("co_mg_per_km", payload.get("meta", {}).get("co_mg_per_km", 0.0))
+    devices = dict(meta.get("devices") or {})
+    devices.setdefault("gas_pems", "AVL GAS 601")
+    devices.setdefault("pn_pems", "AVL PN PEMS 483")
+    meta["devices"] = devices
+    payload["meta"] = meta
+    payload["emissions"] = {
+        "urban": {"label": "Urban"},
+        "trip": {
+            "label": "Trip",
+            "NOx_mg_km": meta.get("nox_mg_per_km"),
+            "PN_hash_km": meta.get("pn_per_km"),
+            "CO_mg_km": meta.get("co_mg_per_km"),
+        },
+    }
     accept = (request.headers.get("accept") or "").lower()
     if "application/json" in accept:
         return respond_success(payload)
