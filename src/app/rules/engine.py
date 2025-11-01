@@ -18,9 +18,9 @@ _DEFAULT_LEGISLATION = "eu7_ld"
 
 _FALLBACK_EU7_SPEC: Dict[str, Any] = {
     "limits": {
-        "nox_mg_per_km": None,
-        "pn_per_km": None,
-        "co_mg_per_km": None,
+        "nox_mg_per_km": 6000,
+        "pn_per_km": 12_000_000,
+        "co_mg_per_km": 1000,
     },
     "zero_span": {"pn_zero_max_per_cm3": 5000},
     "trip_composition": {

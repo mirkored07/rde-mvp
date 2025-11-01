@@ -3,9 +3,9 @@ name: "EU7 Light-Duty"
 version: 1
 
 limits:
-  nox_mg_per_km: null     # TODO: set real EU7 values later
-  pn_per_km: null
-  co_mg_per_km: null
+  nox_mg_per_km: 6000
+  pn_per_km: 12000000
+  co_mg_per_km: 1000
 
 zero_span:
   pn_zero_max_per_cm3: 5000
