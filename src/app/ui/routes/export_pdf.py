@@ -10,7 +10,7 @@ templates = Jinja2Templates(directory="src/app/ui/templates")
 
 
 def _render_pdf_with_weasyprint(html_str: str) -> bytes:
-    # Lazy import: if not installed, surface as 503 (what the test expects)
+    # Lazy import so CI surfaces as 503 if missing
     try:
         from weasyprint import HTML
     except Exception:
@@ -19,13 +19,8 @@ def _render_pdf_with_weasyprint(html_str: str) -> bytes:
 
 
 @router.post("/export_pdf")
-def export_pdf_post(
-    # Accept BOTH shapes:
-    # 1) {"results_payload": {...}}  (test path)
-    # 2) {...} (direct payload if used elsewhere)
-    body: dict = Body(...),
-):
-    results_payload = body.get("results_payload", body)
+def export_pdf_post(results_payload: dict = Body(..., embed=True)):
+    # Use the payload sent by the client (matches test)
     html_str = templates.get_template("print_eu7.html").render(results_payload=results_payload)
     pdf = _render_pdf_with_weasyprint(html_str)
     return StreamingResponse(
@@ -37,6 +32,7 @@ def export_pdf_post(
 
 @router.get("/export_pdf")
 def export_pdf_get():
+    # Fallback path (no sessions): compute fresh payload
     payload = evaluate_eu7_ld(raw_inputs={})
     html_str = templates.get_template("print_eu7.html").render(results_payload=payload)
     pdf = _render_pdf_with_weasyprint(html_str)

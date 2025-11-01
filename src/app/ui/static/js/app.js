@@ -1,5 +1,5 @@
 // ==== RDE UI: required ready hook ====
-window.addEventListener('rde:payload-ready', () => {
+window.addEventListener("rde:payload-ready", () => {
   try {
     const payload = window.__RDE_RESULT__ || {};
     const container = document.querySelector('#analysis-summary-content');
@@ -16,7 +16,7 @@ window.addEventListener('rde:payload-ready', () => {
 // ---- Safe helpers (idempotent, no throws) -------------------------------
 function safeInitMap(payload, el) {
   try {
-    // Leaflet/no-op init here
+    // Leaflet init or no-op
   } catch (error) {
     console.warn('Map render failed:', error);
     return false;
