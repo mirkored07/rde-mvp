@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import csv
+import io
 from collections.abc import Mapping
 
 import numpy as np
@@ -176,6 +178,22 @@ def _normalize(
     return df[ordered].copy()
 
 
+def read_pems_csv(text: str) -> list[dict[str, str]]:
+    """Parse CSV *text* into a list of dictionaries.
+
+    The UI analysis route only needs lightweight access to the raw rows to
+    derive aggregates (distance, averages, etc.).  Returning a list of dicts
+    keeps the dependency surface minimal compared to allocating a full
+    ``DataFrame`` when that additional structure is unnecessary.
+    """
+
+    if not text or not text.strip():
+        return []
+
+    reader = csv.DictReader(io.StringIO(text))
+    return [dict(row) for row in reader]
+
+
 class PEMSReader:
     """PEMS ingestion (MVP): CSV -> normalized DataFrame with SI units."""
 
@@ -189,6 +207,4 @@ class PEMSReader:
     ) -> pd.DataFrame:
         frame = pd.read_csv(path, **read_csv_kwargs)
         return _normalize(frame, mapping=columns, units=units)
-
-
-__all__ = ["PEMSReader", "ORDERED"]
+__all__ = ["PEMSReader", "ORDERED", "read_pems_csv"]
