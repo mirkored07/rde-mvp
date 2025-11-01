@@ -2999,57 +2999,6 @@ def _export_error_html(message: str, status_code: int) -> HTMLResponse:
     )
 
 
-@router.post("/export_pdf", include_in_schema=False)
-async def export_pdf(request: Request) -> Response:
-    hx_request = False
-    raw_results: Mapping[str, Any] | None = None
-
-    content_type = request.headers.get("content-type", "")
-    if "application/x-www-form-urlencoded" in content_type or "multipart/form-data" in content_type:
-        form = await request.form()
-        if "results_json" in form:
-            hx_request = True
-            results_json_value = form.get("results_json") or ""
-            if not results_json_value:
-                return _export_error_html("Results payload is required.", status.HTTP_400_BAD_REQUEST)
-            try:
-                parsed_results = json.loads(html.unescape(results_json_value))
-            except json.JSONDecodeError:
-                return _export_error_html("Invalid results payload.", status.HTTP_400_BAD_REQUEST)
-            if not isinstance(parsed_results, Mapping):
-                return _export_error_html("Invalid results payload.", status.HTTP_400_BAD_REQUEST)
-            raw_results = dict(parsed_results)
-
-    if raw_results is None:
-        try:
-            payload = await request.json()
-        except Exception as exc:  # pragma: no cover - FastAPI handles parsing
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Invalid JSON payload.") from exc
-
-        if not isinstance(payload, Mapping):
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Payload must be a JSON object.")
-
-        raw_results = payload.get("results")
-        if not isinstance(raw_results, Mapping):
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Results payload is required.")
-
-    try:
-        results_payload = _generate_pdf_export_results(raw_results)
-    except HTTPException as exc:
-        if hx_request:
-            detail_text = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
-            return _export_error_html(detail_text, exc.status_code)
-        raise
-    except Exception as exc:  # pragma: no cover - defensive guard
-        if hx_request:
-            return _export_error_html(str(exc), status.HTTP_500_INTERNAL_SERVER_ERROR)
-        raise
-
-    if hx_request:
-        return _export_success_html("PDF")
-
-    return legacy_respond_success(results_payload)
-
 
 @router.post("/export_zip", include_in_schema=False)
 async def export_zip(request: Request) -> Response:
