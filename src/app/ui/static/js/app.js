@@ -16,13 +16,244 @@ window.addEventListener("rde:payload-ready", () => {
 // ==== RDE UI: required HTMX swap hook (must match test literal) ====
 document.addEventListener("htmx:afterSwap", (event) => {
   try {
-    // keep or extend existing logic; no throws
+    initDropzones(event && event.target ? event.target : document);
   } catch (error) {
     console.warn('htmx swap handler failed:', error);
   }
 });
 
 // ---- Safe helpers (idempotent, no throws) -------------------------------
+function initDropzones(root = document) {
+  try {
+    const zones = Array.from((root || document).querySelectorAll('[data-dropzone]'));
+    if (!zones.length) {
+      return false;
+    }
+
+    zones.forEach((zone) => {
+      if (!zone || zone._dropzoneBound) {
+        return;
+      }
+      zone._dropzoneBound = true;
+
+      const input = zone.querySelector('input[type="file"]');
+      const feedback = zone.querySelector('[data-file-label]');
+      const errorEl = zone.querySelector('[data-error]');
+
+      const defaultFeedback = feedback ? feedback.textContent : '';
+      if (feedback && !feedback.dataset.defaultLabel) {
+        feedback.dataset.defaultLabel = defaultFeedback;
+      }
+
+      const allowedRaw = (input && input.dataset && input.dataset.allowed) || '';
+      const allowed = allowedRaw
+        .split(',')
+        .map((value) => value.trim().toLowerCase())
+        .filter(Boolean);
+
+      let maxSizeMb = 0;
+      if (input && input.dataset && input.dataset.maxSizeMb) {
+        const parsed = Number.parseFloat(input.dataset.maxSizeMb);
+        if (!Number.isNaN(parsed) && parsed > 0) {
+          maxSizeMb = parsed;
+        }
+      }
+      const maxSizeBytes = maxSizeMb ? maxSizeMb * 1024 * 1024 : 0;
+
+      const setFeedback = (message) => {
+        if (feedback) {
+          feedback.textContent = message || feedback.dataset.defaultLabel || '';
+        }
+      };
+
+      const showError = (message) => {
+        if (zone) {
+          zone.classList.add('has-error');
+          zone.classList.remove('has-file');
+        }
+        if (errorEl) {
+          errorEl.textContent = message;
+          errorEl.classList.remove('hidden');
+        }
+        setFeedback(feedback && feedback.dataset ? feedback.dataset.defaultLabel : defaultFeedback);
+      };
+
+      const clearError = () => {
+        if (zone) {
+          zone.classList.remove('has-error');
+        }
+        if (errorEl) {
+          errorEl.textContent = '';
+          errorEl.classList.add('hidden');
+        }
+      };
+
+      const validateFile = (file) => {
+        if (!file) {
+          return { valid: false, reason: '' };
+        }
+
+        if (allowed.length) {
+          const extension = file.name && file.name.includes('.')
+            ? `.${file.name.split('.').pop().toLowerCase()}`
+            : '';
+          const mimeType = (file.type || '').toLowerCase();
+          const matchesExtension = extension && allowed.includes(extension);
+          const matchesMime = mimeType && allowed.includes(mimeType);
+          if (!matchesExtension && !matchesMime) {
+            return {
+              valid: false,
+              reason: `File must be one of: ${allowed.join(', ')}`,
+            };
+          }
+        }
+
+        if (maxSizeBytes && file.size > maxSizeBytes) {
+          return {
+            valid: false,
+            reason: `File must be smaller than ${maxSizeMb} MB`,
+          };
+        }
+
+        return { valid: true };
+      };
+
+      const formatSize = (bytes) => {
+        if (!bytes || Number.isNaN(bytes)) {
+          return '';
+        }
+        if (bytes < 1024) {
+          return `${bytes} B`;
+        }
+        const kb = bytes / 1024;
+        if (kb < 1024) {
+          return `${kb.toFixed(1)} KB`;
+        }
+        const mb = kb / 1024;
+        return `${mb.toFixed(1)} MB`;
+      };
+
+      const updateFromInput = () => {
+        const file = input && input.files ? input.files[0] : undefined;
+        if (!file) {
+          if (zone) {
+            zone.classList.remove('has-file');
+          }
+          clearError();
+          setFeedback(defaultFeedback);
+          return;
+        }
+
+        const { valid, reason } = validateFile(file);
+        if (!valid) {
+          if (input) {
+            input.value = '';
+          }
+          showError(reason || 'Invalid file.');
+          return;
+        }
+
+        clearError();
+        if (zone) {
+          zone.classList.add('has-file');
+        }
+        const sizeLabel = formatSize(file.size);
+        setFeedback(sizeLabel ? `${file.name} (${sizeLabel})` : file.name);
+      };
+
+      if (input) {
+        input.addEventListener('change', () => {
+          updateFromInput();
+        });
+      }
+
+      const dragState = { counter: 0 };
+
+      const onDragEnter = (event) => {
+        if (!event) return;
+        event.preventDefault();
+        dragState.counter += 1;
+        zone.classList.add('is-dragover');
+      };
+
+      const onDragOver = (event) => {
+        if (!event) return;
+        event.preventDefault();
+        if (event.dataTransfer) {
+          event.dataTransfer.dropEffect = 'copy';
+        }
+        zone.classList.add('is-dragover');
+      };
+
+      const onDragLeave = (event) => {
+        if (!event) return;
+        dragState.counter = Math.max(0, dragState.counter - 1);
+        if (dragState.counter === 0) {
+          zone.classList.remove('is-dragover');
+        }
+      };
+
+      const onDrop = (event) => {
+        if (!event) return;
+        event.preventDefault();
+        dragState.counter = 0;
+        zone.classList.remove('is-dragover');
+        if (!input) {
+          return;
+        }
+        const files = event.dataTransfer && event.dataTransfer.files;
+        if (!files || !files.length) {
+          return;
+        }
+        const file = files[0];
+        const { valid, reason } = validateFile(file);
+        if (!valid) {
+          showError(reason || 'Invalid file.');
+          return;
+        }
+        clearError();
+        let assigned = false;
+        if (typeof DataTransfer !== 'undefined') {
+          try {
+            const dataTransfer = new DataTransfer();
+            dataTransfer.items.add(file);
+            input.files = dataTransfer.files;
+            assigned = true;
+          } catch (assignError) {
+            console.warn('DataTransfer assignment failed:', assignError);
+          }
+        }
+        if (!assigned) {
+          try {
+            input.files = event.dataTransfer.files;
+            assigned = true;
+          } catch (fallbackError) {
+            console.warn('FileList assignment failed:', fallbackError);
+          }
+        }
+        if (!assigned) {
+          showError('Unable to use dropped file. Please use browse instead.');
+          return;
+        }
+        const changeEvent = new Event('change', { bubbles: true });
+        input.dispatchEvent(changeEvent);
+      };
+
+      zone.addEventListener('dragenter', onDragEnter);
+      zone.addEventListener('dragover', onDragOver);
+      zone.addEventListener('dragleave', onDragLeave);
+      zone.addEventListener('dragend', onDragLeave);
+      zone.addEventListener('drop', onDrop);
+
+      updateFromInput();
+    });
+    return true;
+  } catch (error) {
+    console.warn('Dropzone init failed:', error);
+    return false;
+  }
+}
+
 function safeInitMap(payload, el) {
   try {
     // Leaflet init or no-op
@@ -182,3 +413,7 @@ function populateExportForms(payload) {
     pdfField.value = serialised;
   }
 }
+
+document.addEventListener('DOMContentLoaded', () => {
+  initDropzones(document);
+});
