@@ -154,7 +154,7 @@ def compute_final_conformity(emissions_block: Dict[str, Any], spec: Dict[str, An
     if not rows:
         return {
             "title": "Final Conformity",
-            "pass": None,
+            "pass": False,
             "pollutants": [],
             "notes": ["EU7 limits not configured"],
         }
