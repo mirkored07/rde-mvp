@@ -176,7 +176,6 @@
 <script>
   window.__RDE_RESULT__ = {{ payload | tojson | safe }};
   window.dispatchEvent(new Event('rde:payload-ready'));
-  document.dispatchEvent(new Event('rde:payload-ready'));
 </script>
 <!-- App bundle must come after payload -->
 <script src="/static/js/app.js"></script>

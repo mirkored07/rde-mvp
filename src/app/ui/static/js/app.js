@@ -16,7 +16,7 @@ window.addEventListener("rde:payload-ready", () => {
 // ==== RDE UI: required HTMX swap hook (must match test literal) ====
 document.addEventListener("htmx:afterSwap", (event) => {
   try {
-    // no-op placeholder; real code can update DOM or export inputs
+    // keep or extend existing logic; no throws
   } catch (error) {
     console.warn('htmx swap handler failed:', error);
   }
