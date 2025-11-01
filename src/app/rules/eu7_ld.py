@@ -150,18 +150,18 @@ def compute_emissions_summary(data: Dict[str, Any], spec: Dict[str, Any]) -> Dic
 
 
 def compute_final_conformity(emissions_block: Dict[str, Any], spec: Dict[str, Any]) -> Dict[str, Any]:
-    rows = (emissions_block or {}).get("criteria", [])
+    rows = list((emissions_block or {}).get("criteria", []) or [])
     if not rows:
         return {
             "title": "Final Conformity",
             "pass": False,
             "pollutants": [],
-            "notes": ["EU7 limits not configured"],
+            "notes": [],
         }
     ok = all(bool(r.get("pass")) for r in rows)
     return {
         "title": "Final Conformity",
-        "pass": ok,
+        "pass": bool(ok),
         "pollutants": rows,
         "notes": [],
     }

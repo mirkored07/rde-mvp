@@ -1,0 +1,33 @@
+id: eu7_ld
+name: "EU7 Light-Duty"
+version: 1
+
+limits:
+  nox_mg_per_km: 6000
+  pn_per_km: 12000000
+  co_mg_per_km: 1000
+
+zero_span:
+  pn_zero_max_per_cm3: 5000
+
+trip_composition:
+  urban_min_km: 10
+  expressway_min_km: 10
+  share_urban_percent_range: [40, 65]
+  share_expressway_percent_range: [35, 60]
+  duration_minutes_range: [90, 120]
+  start_urban: true
+
+dynamics:
+  urban_avg_speed_range_kmh: [15, 40]
+  stop_time_share_urban_percent_range: [6, 30]
+  maw_low_speed_valid_percent_min: 50
+  maw_high_speed_valid_percent_min: 50
+
+gps:
+  max_loss_s: 120
+  total_loss_s: 300
+
+corrections:
+  extc: { enabled: true, factor: 1.6 }
+  ki:   { enabled: true, zero_floor_negative_results: true }

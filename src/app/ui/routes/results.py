@@ -29,8 +29,9 @@ def results(request: Request):
     raw_inputs = _build_inputs_from_session_or_demo(request)
     payload = evaluate_eu7_ld(raw_inputs)
     payload.setdefault("kpi_numbers", [])
-    payload.setdefault("visual", {}).setdefault("map", {})
-    payload.setdefault("visual", {}).setdefault("chart", {})
+    visual_block = payload.setdefault("visual", {})
+    visual_block.setdefault("map", {})
+    visual_block.setdefault("chart", {})
     payload.setdefault("meta", {}).setdefault("legislation", "EU7 Light-Duty")
     accept = (request.headers.get("accept") or "").lower()
     if "application/json" in accept:

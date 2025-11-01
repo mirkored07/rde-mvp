@@ -14,7 +14,7 @@ router = APIRouter()
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 SAMPLES_DIR = REPO_ROOT / "data" / "samples"
-ALLOWED_SAMPLE_FILES = ["ecu_demo.csv", "gps_demo.csv", "pems_demo.csv"]
+ALLOWED_SAMPLE_FILES = ("ecu_demo.csv", "gps_demo.csv", "pems_demo.csv")
 
 
 def build_samples_zip_bytes() -> bytes:
