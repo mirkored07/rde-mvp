@@ -1,130 +1,201 @@
-<!DOCTYPE html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <title>EU7 Light-Duty Report</title>
-    <style>
-      :root { color-scheme: light; }
-      body { font-family: "Inter", "Segoe UI", sans-serif; margin: 0; padding: 2.5rem; background: #f8fafc; color: #0f172a; }
-      h1, h2, h3 { margin: 0; }
-      h1 { font-size: 1.8rem; margin-bottom: 0.5rem; }
-      h2 { font-size: 1.4rem; margin-top: 2rem; margin-bottom: 0.75rem; }
-      h3 { font-size: 1.1rem; margin-top: 1.5rem; margin-bottom: 0.5rem; }
-      p { margin: 0.25rem 0; }
-      table { width: 100%; border-collapse: collapse; margin-top: 0.75rem; font-size: 0.92rem; }
-      th, td { border: 1px solid #cbd5f5; padding: 0.45rem 0.6rem; text-align: left; }
-      th { background: #e2e8f0; font-weight: 600; text-transform: uppercase; font-size: 0.75rem; letter-spacing: 0.08em; }
-      tbody tr:nth-child(even) { background: #f1f5f9; }
-      .badge { display: inline-block; padding: 0.15rem 0.5rem; border-radius: 999px; font-size: 0.65rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; }
-      .badge-pass { background: #d1fae5; color: #047857; }
-      .badge-fail { background: #fee2e2; color: #b91c1c; }
-      .badge-pending { background: #fef3c7; color: #b45309; }
-      .meta { margin-top: 0.25rem; font-size: 0.9rem; color: #475569; }
-      .section { page-break-inside: avoid; }
-    </style>
-  </head>
-  <body>
-    {% set payload = results_payload or {} %}
-    {% set sections = payload.sections or [] %}
-    {% set final_block = payload.final %}
-    {% set meta = payload.meta or {} %}
-    {% set final_status = final_block.pass if final_block else None %}
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>EU7 Report</title>
+<style>
+  /* A4, portrait; WeasyPrint-friendly (no external CSS/fonts) */
+  @page { size: A4; margin: 18mm 16mm 18mm 16mm; }
+  * { box-sizing: border-box; }
+  body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; color: #0f172a; font-size: 11px; }
+  h1,h2,h3 { margin: 0 0 6px 0; }
+  h1 { font-size: 20px; }
+  h2 { font-size: 14px; margin-top: 18px; }
+  h3 { font-size: 12px; margin-top: 10px; }
+  .muted { color: #475569; }
+  .small { font-size: 10px; }
+  .pill { padding: 2px 8px; border-radius: 999px; font-weight: 600; font-size: 10px; display: inline-block; }
+  .pass { background: #d1fae5; color: #065f46; }
+  .fail { background: #fee2e2; color: #991b1b; }
+  .pending { background: #fde68a; color: #92400e; }
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+  .card { border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px; }
+  .metrics { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 8px; }
+  .metric { border: 1px solid #e2e8f0; border-radius: 6px; padding: 8px; }
+  .metric dt { font-size: 10px; color: #475569; margin-bottom: 2px; }
+  .metric dd { font-weight: 700; font-size: 12px; }
+  table { width: 100%; border-collapse: collapse; }
+  thead th { background: #f1f5f9; color: #334155; font-weight: 700; font-size: 10px; text-align: left; padding: 6px 8px; border-bottom: 1px solid #e2e8f0; }
+  tbody td { padding: 6px 8px; border-bottom: 1px solid #e2e8f0; vertical-align: top; }
+  .nowrap { white-space: nowrap; }
+  .note { color: #64748b; }
+  footer { position: fixed; bottom: 10mm; left: 16mm; right: 16mm; font-size: 10px; color: #475569; display: flex; justify-content: space-between; }
+  .page-num:after { content: counter(page) " / " counter(pages); }
+</style>
+</head>
+<body>
+{% set p = results_payload or {} %}
+{% set final = p.final or {} %}
+{% set sections = p.sections or [] %}
+{% set kpis = p.kpi_numbers or [] %}
+{% set verdict = final.pass %}
+{% macro pill(val) -%}
+  {%- if val is sameas true -%}<span class="pill pass">PASS</span>
+  {%- elif val is sameas false -%}<span class="pill fail">FAIL</span>
+  {%- else -%}<span class="pill pending">PENDING</span>
+  {%- endif -%}
+{%- endmacro %}
+{% macro fmt(x) -%}
+  {%- if x is number -%}{{"{:,.3g}".format(x)}}{%- else -%}{{ x or "n/a" }}{%- endif -%}
+{%- endmacro %}
 
-    <header>
-      <h1>EU7 Light-Duty Compliance Report</h1>
-      {% if meta.legislation %}
-      <p class="meta">Legislation: {{ meta.legislation }}</p>
-      {% endif %}
-      {% if meta.version %}
-      <p class="meta">Specification version: {{ meta.version }}</p>
-      {% endif %}
-      <p class="meta">
-        Overall result:
-        {% if final_block is none %}
-        <span class="badge badge-pending">Pending</span>
-        {% elif final_status %}
-        <span class="badge badge-pass">Pass</span>
+<header>
+  <div class="grid-2">
+    <div>
+      <h1>EU7 Light-Duty – Compliance Report</h1>
+      <div class="muted small">{{ p.meta.legislation or "EU7 Light-Duty" }}</div>
+    </div>
+    <div style="text-align:right;">
+      <div class="small muted">Overall verdict</div>
+      {{ pill(verdict) }}
+    </div>
+  </div>
+</header>
+
+<section class="card" style="margin-top:10px;">
+  <div class="metrics">
+    <div class="metric">
+      <dt>Total distance</dt>
+      <dd>{{ fmt(p.meta.total_distance_km) }} km</dd>
+    </div>
+    <div class="metric">
+      <dt>Duration</dt>
+      <dd>{{ fmt(p.meta.total_time_min) }} min</dd>
+    </div>
+    <div class="metric">
+      <dt>NOx (mg/km)</dt>
+      <dd>{{ fmt(p.meta.nox_mg_per_km) }}</dd>
+    </div>
+    <div class="metric">
+      <dt>PN (1/km)</dt>
+      <dd>{{ fmt(p.meta.pn_per_km) }}</dd>
+    </div>
+  </div>
+</section>
+
+<section class="grid-2" style="margin-top:10px;">
+  <div class="card">
+    <h2>Speed-bin coverage</h2>
+    <table>
+      <thead><tr>
+        <th class="nowrap">Bin</th>
+        <th class="nowrap">Time (s)</th>
+        <th class="nowrap">Distance (km)</th>
+        <th class="nowrap">Status</th>
+      </tr></thead>
+      <tbody>
+        {% for row in (p.meta.speed_bin_coverage or []) %}
+        <tr>
+          <td>{{ row.bin or '–' }}</td>
+          <td class="nowrap">{{ fmt(row.time_s) }}</td>
+          <td class="nowrap">{{ fmt(row.distance_km) }}</td>
+          <td>{{ pill(row.pass) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <h2>KPIs (selection)</h2>
+    <table>
+      <thead><tr>
+        <th>Key</th><th>Value</th><th>Unit</th>
+      </tr></thead>
+      <tbody>
+        {% for k in kpis %}
+        <tr>
+          <td>{{ k.key or 'KPI' }}</td>
+          <td class="nowrap">{{ fmt(k.value) }}</td>
+          <td class="nowrap">{{ k.unit or '' }}</td>
+        </tr>
         {% else %}
-        <span class="badge badge-fail">Fail</span>
-        {% endif %}
-      </p>
-    </header>
+        <tr><td colspan="3" class="note">No KPIs configured.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
 
-    {% for section in sections %}
-    {% set criteria = section.criteria or [] %}
-    <div class="section">
-      <h2>{{ section.title }}</h2>
-      {% if criteria %}
-      <table>
-        <thead>
-          <tr>
-            <th>Ref</th>
-            <th>Criterion</th>
-            <th>Condition</th>
-            <th>Value</th>
-            <th>Unit</th>
-            <th>Result</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for row in criteria %}
-          <tr>
-            <td>{{ row.ref }}</td>
-            <td>{{ row.criterion }}</td>
-            <td>{{ row.condition }}</td>
-            <td>{{ row.value }}</td>
-            <td>{{ row.unit }}</td>
-            <td>
-              {% if row.pass %}
-              <span class="badge badge-pass">Pass</span>
-              {% else %}
-              <span class="badge badge-fail">Fail</span>
-              {% endif %}
-            </td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-      {% else %}
-      <p>No criteria available.</p>
-      {% endif %}
-    </div>
-    {% endfor %}
+<section class="card" style="margin-top:10px;">
+  <h2>Rule evidence</h2>
+  {% for block in sections %}
+    {% set criteria = block.criteria or [] %}
+    <h3>{{ block.title }}</h3>
+    <table>
+      <thead><tr>
+        <th class="nowrap">Ref</th>
+        <th>Criterion</th>
+        <th>Condition</th>
+        <th class="nowrap">Value</th>
+        <th class="nowrap">Unit</th>
+        <th class="nowrap">Result</th>
+      </tr></thead>
+      <tbody>
+        {% for r in criteria %}
+        <tr>
+          <td class="nowrap">{{ r.ref or '—' }}</td>
+          <td>{{ r.criterion or '—' }}</td>
+          <td>{{ r.condition or '—' }}</td>
+          <td class="nowrap">{{ fmt(r.value) }}</td>
+          <td class="nowrap">{{ r.unit or '' }}</td>
+          <td>{{ pill(r.pass) }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="6" class="note">No criteria available.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% endfor %}
+</section>
 
-    <div class="section">
-      <h2>Final Conformity</h2>
-      {% if final_block and final_block.pollutants %}
-      <table>
-        <thead>
-          <tr>
-            <th>Pollutant</th>
-            <th>Condition</th>
-            <th>Value</th>
-            <th>Unit</th>
-            <th>Result</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for pollutant in final_block.pollutants %}
-          <tr>
-            <td>{{ pollutant.criterion }}</td>
-            <td>{{ pollutant.condition }}</td>
-            <td>{{ pollutant.value }}</td>
-            <td>{{ pollutant.unit }}</td>
-            <td>
-              {% if pollutant.pass %}
-              <span class="badge badge-pass">Pass</span>
-              {% else %}
-              <span class="badge badge-fail">Fail</span>
-              {% endif %}
-            </td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
+<section class="card" style="margin-top:10px;">
+  <h2>Final Conformity</h2>
+  <div style="margin-bottom:6px;">Overall: {{ pill(verdict) }}</div>
+  <table>
+    <thead><tr>
+      <th>Pollutant</th>
+      <th>Condition</th>
+      <th class="nowrap">Value</th>
+      <th class="nowrap">Unit</th>
+      <th class="nowrap">Result</th>
+    </tr></thead>
+    <tbody>
+      {% for pol in (final.pollutants or []) %}
+      <tr>
+        <td>{{ pol.criterion or '—' }}</td>
+        <td>{{ pol.condition or '—' }}</td>
+        <td class="nowrap">{{ fmt(pol.value) }}</td>
+        <td class="nowrap">{{ pol.unit or '' }}</td>
+        <td>{{ pill(pol.pass) }}</td>
+      </tr>
       {% else %}
-      <p>Emission limits not fully configured; final verdict pending.</p>
-      {% endif %}
+      <tr><td colspan="5" class="note">Emission limits not fully configured.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% if (final.notes or []) %}
+    <div class="note small" style="margin-top:6px;">
+      {{ final.notes | join('; ') }}
     </div>
-  </body>
+  {% endif %}
+</section>
+
+<footer>
+  <div>Generated by EU7 engine</div>
+  <div class="page-num"></div>
+</footer>
+
+</body>
 </html>

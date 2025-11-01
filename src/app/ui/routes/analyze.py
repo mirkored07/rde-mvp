@@ -295,10 +295,20 @@ async def analyze(
     payload["visual"] = visual_payload
 
     kpi_numbers = list(payload.get("kpi_numbers") or [])
-    kpi_numbers.append({"label": "Distance (km)", "value": round(visual_data.get("distance_km", 0.0), 2)})
+
+    def _upsert_kpi(key: str, label: str, value: float, unit: str) -> None:
+        for entry in kpi_numbers:
+            if entry.get("key") == key or entry.get("label") == label:
+                entry.update({"key": key, "label": label, "value": value, "unit": unit})
+                return
+        kpi_numbers.append({"key": key, "label": label, "value": value, "unit": unit})
+
+    distance_km = round(visual_data.get("distance_km", 0.0), 2)
+    _upsert_kpi("total_distance_km", "Distance (km)", distance_km, "km")
+
     avg_speed = visual_data.get("avg_speed_m_s")
     if avg_speed is not None:
-        kpi_numbers.append({"label": "Avg speed (km/h)", "value": round(avg_speed * 3.6, 1)})
+        _upsert_kpi("avg_speed_kmh", "Avg speed (km/h)", round(avg_speed * 3.6, 1), "km/h")
     payload["kpi_numbers"] = kpi_numbers
 
     meta = dict(payload.get("meta") or {})
