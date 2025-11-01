@@ -23,6 +23,23 @@ Run the development server:
 poetry run uvicorn src.main:app --reload
 ```
 
+### EU7-LD conformity module
+
+* The JSON reports served by the API live under `reports/` by default. Override
+  the directory by exporting `REPORT_DIR=/path/to/reports` before starting the
+  app.
+* Generate a conformity JSON file by triggering any export action (PDF or ZIP)
+  after running an analysis. The serializer writes `<testId>.json` into the
+  reports directory alongside the export artifact.
+* Fetch a stored report via `GET /api/report/{test_id}`. The sample dataset is
+  available at `/api/report/sample` once the repo is cloned.
+* Open `/report/{test_id}` in the browser to review the grouped conformity
+  criteria with PASS/FAIL badges. Example: http://localhost:8000/report/sample
+  while the development server is running.
+* To add or refine checks without changing the schema, edit the rows generated
+  in `src/app/reporting/eu7ld_report.py`. Each criterion is a dedicated entry
+  in the typed `ReportData` model.
+
 Run the test suite:
 
 ```bash

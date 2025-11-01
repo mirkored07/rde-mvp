@@ -313,12 +313,34 @@ async def analyze(
 
     meta = dict(payload.get("meta") or {})
     meta.setdefault("legislation", "EU7 Light-Duty")
+    meta.setdefault("test_id", "demo-run")
+    meta.setdefault("engine", "WLTP-ICE 2.0L")
+    meta.setdefault("propulsion", "ICE")
+    meta.setdefault("velocity_source", "GPS")
+    timestamp = datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+    meta.setdefault("test_start", timestamp)
+    meta.setdefault("printout", timestamp)
+    meta.setdefault("co_mg_per_km", engine_inputs.get("co_mg_per_km", 0.0))
+    devices = dict(meta.get("devices") or {})
+    devices.setdefault("gas_pems", "AVL GAS 601")
+    devices.setdefault("pn_pems", "AVL PN PEMS 483")
+    meta["devices"] = devices
     meta["sources"] = {
         "pems_rows": len(pems_rows),
         "gps_rows": len(gps_rows),
         "ecu_rows": len(ecu_rows),
     }
     payload["meta"] = meta
+
+    payload["emissions"] = {
+        "urban": {"label": "Urban"},
+        "trip": {
+            "label": "Trip",
+            "NOx_mg_km": meta.get("nox_mg_per_km"),
+            "PN_hash_km": meta.get("pn_per_km"),
+            "CO_mg_km": meta.get("co_mg_per_km"),
+        },
+    }
 
     normalised_payload = ensure_results_payload_defaults(payload)
 

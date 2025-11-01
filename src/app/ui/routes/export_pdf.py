@@ -6,6 +6,12 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import Response
 from starlette.templating import Jinja2Templates
 
+from src.app.reporting.eu7ld_report import (
+    apply_guardrails,
+    build_report_data,
+    save_report_json,
+)
+
 router = APIRouter()
 templates = Jinja2Templates(directory="src/app/ui/templates")
 
@@ -32,6 +38,9 @@ async def export_pdf(request: Request) -> Response:
 
     if not payload:
         raise HTTPException(status_code=400, detail="Results payload is required.")
+
+    report = apply_guardrails(build_report_data(payload))
+    save_report_json(report)
 
     try:
         from weasyprint import HTML  # noqa: F401
