@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import csv
+import io
 from collections.abc import Mapping
 from typing import Any
 
@@ -151,5 +153,15 @@ class ECUReader:
         return _normalize(df)
 
 
-__all__ = ["ECUReader", "ORDERED"]
+def read_ecu_csv(text: str) -> list[dict[str, str]]:
+    """Parse ECU CSV *text* into raw dictionaries."""
+
+    if not text or not text.strip():
+        return []
+
+    reader = csv.DictReader(io.StringIO(text))
+    return [dict(row) for row in reader]
+
+
+__all__ = ["ECUReader", "ORDERED", "read_ecu_csv"]
 

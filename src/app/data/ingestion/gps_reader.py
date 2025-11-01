@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import csv
 import datetime as dt
+import io
 import math
 from typing import Mapping
 
@@ -14,6 +16,16 @@ import pynmea2
 from src.app.utils import to_utc_series
 
 ORDERED = ["timestamp", "lat", "lon", "alt_m", "speed_m_s", "hdop", "fix_ok"]
+
+
+def read_gps_csv(text: str) -> list[dict[str, str]]:
+    """Return raw GPS rows parsed from CSV *text*."""
+
+    if not text or not text.strip():
+        return []
+
+    reader = csv.DictReader(io.StringIO(text))
+    return [dict(row) for row in reader]
 def _haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     """Return the great-circle distance between two WGS84 coordinates in metres."""
 
@@ -221,3 +233,6 @@ def _normalize(df: pd.DataFrame) -> pd.DataFrame:
     df["fix_ok"] = df["fix_ok"].astype(bool)
 
     return df[ORDERED].copy()
+
+
+__all__ = ["GPSReader", "ORDERED", "read_gps_csv"]
