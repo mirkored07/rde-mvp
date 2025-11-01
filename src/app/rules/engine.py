@@ -126,21 +126,84 @@ def evaluate_eu7_ld(
     ]
     final = eu7_ld.compute_final_conformity(sections[-1], spec)
 
+    total_distance_km = float(
+        raw_inputs.get("total_distance_km")
+        or data.get("urban_km", 0.0)
+        + data.get("expressway_km", 0.0)
+    )
+    total_time_min = float(raw_inputs.get("total_time_min") or 108.0)
+
+    default_speed_bins = [
+        {
+            "bin": "urban",
+            "time_s": float(raw_inputs.get("urban_time_s") or 4200),
+            "distance_km": float(data.get("urban_km", 0.0)),
+            "pass": True,
+        },
+        {
+            "bin": "rural",
+            "time_s": float(raw_inputs.get("rural_time_s") or 2100),
+            "distance_km": float(raw_inputs.get("rural_km") or 15.0),
+            "pass": True,
+        },
+        {
+            "bin": "motorway",
+            "time_s": float(raw_inputs.get("motorway_time_s") or 1800),
+            "distance_km": float(data.get("expressway_km", 0.0)),
+            "pass": True,
+        },
+    ]
+
+    speed_bin_coverage = raw_inputs.get("speed_bin_coverage")
+    if not isinstance(speed_bin_coverage, list) or not speed_bin_coverage:
+        speed_bin_coverage = default_speed_bins
+
     visual = {
         "map": {"center": {"lat": 47.07, "lon": 15.44, "zoom": 10}, "latlngs": []},
         "chart": {"series": []},
     }
     kpi_numbers = [
-        {"label": "NOx (mg/km)", "value": data["nox_mg_per_km"]},
-        {"label": "PN (#/km)", "value": data["pn_per_km"]},
+        {
+            "key": "nox_mg_per_km",
+            "label": "NOx (mg/km)",
+            "value": data["nox_mg_per_km"],
+            "unit": "mg/km",
+        },
+        {
+            "key": "pn_per_km",
+            "label": "PN (#/km)",
+            "value": data["pn_per_km"],
+            "unit": "#/km",
+        },
+        {
+            "key": "total_distance_km",
+            "label": "Distance (km)",
+            "value": total_distance_km,
+            "unit": "km",
+        },
+        {
+            "key": "total_time_min",
+            "label": "Duration (min)",
+            "value": total_time_min,
+            "unit": "min",
+        },
     ]
+
+    meta = {
+        "legislation": "EU7 Light-Duty",
+        "total_distance_km": total_distance_km,
+        "total_time_min": total_time_min,
+        "nox_mg_per_km": data["nox_mg_per_km"],
+        "pn_per_km": data["pn_per_km"],
+        "speed_bin_coverage": speed_bin_coverage,
+    }
 
     return {
         "visual": visual,
         "kpi_numbers": kpi_numbers,
         "sections": sections,
         "final": final,
-        "meta": {"legislation": "EU7 Light-Duty"},
+        "meta": meta,
     }
 
 

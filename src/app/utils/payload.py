@@ -41,9 +41,14 @@ def ensure_results_payload_defaults(payload: dict | None) -> dict:
 
     if p.get("kpi_numbers") is None:
         p["kpi_numbers"] = [
-            {"label": "Trips", "value": 0},
-            {"label": "Distance [km]", "value": 0},
-            {"label": "Avg Speed [km/h]", "value": 0},
+            {"key": "trips", "label": "Trips", "value": 0, "unit": ""},
+            {"key": "distance_km", "label": "Distance [km]", "value": 0, "unit": "km"},
+            {
+                "key": "avg_speed_kmh",
+                "label": "Avg Speed [km/h]",
+                "value": 0,
+                "unit": "km/h",
+            },
         ]
 
     return p
