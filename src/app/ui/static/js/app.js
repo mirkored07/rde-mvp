@@ -239,40 +239,38 @@ if (window.__RDE_APP_JS_LOADED__) {
 
     window.initDropzones = initDropzones;
 
+    // Patch once
     if (!window.__RDE_SAFE_MAP_PATCHED__) {
       window.__RDE_SAFE_MAP_PATCHED__ = true;
 
       if (typeof window.safeInitMap !== 'function') {
-        window.safeInitMap = function baseSafeInitMap() { return true; };
+        window.safeInitMap = function () { return true; };
       }
-      var __safeInitMapBase = window.safeInitMap;
+      var __base = window.safeInitMap;
 
-      window.safeInitMap = function safeInitMapEnhanced(payload, el) { // eslint-disable-line no-global-assign
-        if (!el || !payload || !payload.visual || !payload.visual.map) {
-          return false;
-        }
+      window.safeInitMap = function safeInitMap(payload, el) { // eslint-disable-line no-global-assign
+        if (!el || !payload || !payload.visual || !payload.visual.map) return false;
         try {
-          if (typeof L === 'undefined') {
-            return __safeInitMapBase(payload, el);
-          }
-          // keep a single map instance per element
-          if (el.__leafletMap) {
-            return true;
-          }
+          if (typeof L === 'undefined') return __base(payload, el);
 
-          var center = payload.visual.map.center || { lat: 48.2082, lon: 16.3738, zoom: 8 };
+          // Ensure height if CSS collapsed
+          var h = el.clientHeight || 0;
+          if (h < 60) { el.style.height = '320px'; }
+
+          // Reuse map if already initialized
+          if (el.__leafletMap) return true;
+
+          var center = payload.visual.map.center || { lat: 48.2082, lon: 16.3738, zoom: 9 };
           var map = L.map(el, { preferCanvas: true });
           el.__leafletMap = map;
 
-          // add basic OSM tiles
           L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            attribution: '&copy; OpenStreetMap contributors',
+            attribution: '© OpenStreetMap',
             maxZoom: 19
           }).addTo(map);
 
-          map.setView([center.lat, center.lon], center.zoom || 8);
+          map.setView([center.lat, center.lon], center.zoom || 9);
 
-          // optional polyline
           var pts = (payload.visual.map.latlngs || []).filter(Boolean);
           if (pts.length) {
             var latlngs = pts.map(function (p) { return [p.lat, p.lon]; });
@@ -280,8 +278,8 @@ if (window.__RDE_APP_JS_LOADED__) {
             map.fitBounds(latlngs);
           }
           return true;
-        } catch (error) {
-          console.warn('Map render failed:', error);
+        } catch (e) {
+          console.warn('Map render failed:', e);
           return false;
         }
       };
@@ -292,20 +290,19 @@ if (window.__RDE_APP_JS_LOADED__) {
       try {
         el.setAttribute('data-chart-ready', '1');
 
-        // if there is a series, draw a tiny sparkline with pure SVG (no libs)
-        var series = (payload.visual.chart.series || [])[0];
-        var data = (series && series.data) || [];
-
-        // if already drawn, skip
         if (el.__rdeChartDrawn) return true;
         el.__rdeChartDrawn = true;
 
+        var series = (payload.visual.chart.series || [])[0];
+        var data = (series && series.data) || [];
+
+        // Visible “ready” text if no data
         if (!data.length) {
-          var txt = document.createElement('div');
-          txt.style.opacity = '0.7';
-          txt.style.fontSize = '12px';
-          txt.textContent = 'Chart ready';
-          el.appendChild(txt);
+          var note = document.createElement('div');
+          note.style.opacity = '0.7';
+          note.style.fontSize = '12px';
+          note.textContent = 'Chart ready';
+          el.appendChild(note);
           return true;
         }
 
@@ -315,32 +312,31 @@ if (window.__RDE_APP_JS_LOADED__) {
         svg.setAttribute('width', w);
         svg.setAttribute('height', h);
         svg.setAttribute('viewBox', '0 0 ' + w + ' ' + h);
+        svg.style.color = 'rgba(148,163,184,0.9)';
 
-        // normalize data to [0,1]
-        var ys = data.map(function (d) { return +d || 0; });
+        var ys = data.map(function (v) { return +v || 0; });
         var min = Math.min.apply(null, ys);
         var max = Math.max.apply(null, ys);
         var span = (max - min) || 1;
 
-        var path = 'M 0 ' + (h - ((ys[0]-min)/span)*h);
-        for (var i=1; i<ys.length; i++) {
+        var d = 'M 0 ' + (h - ((ys[0] - min) / span) * h);
+        for (var i = 1; i < ys.length; i++) {
           var x = (i / (ys.length - 1)) * (w - 2);
           var y = h - ((ys[i] - min) / span) * (h - 2);
-          path += ' L ' + x.toFixed(1) + ' ' + y.toFixed(1);
+          d += ' L ' + x.toFixed(1) + ' ' + y.toFixed(1);
         }
 
-        var pl = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-        pl.setAttribute('d', path);
-        pl.setAttribute('fill', 'none');
-        pl.setAttribute('stroke', 'currentColor');
-        pl.setAttribute('stroke-width', '2');
-        svg.style.color = 'rgba(148, 163, 184, 0.9)'; // slate-400
+        var path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        path.setAttribute('d', d);
+        path.setAttribute('fill', 'none');
+        path.setAttribute('stroke', 'currentColor');
+        path.setAttribute('stroke-width', '2');
 
+        svg.appendChild(path);
         el.appendChild(svg);
-        svg.appendChild(pl);
         return true;
-      } catch (error) {
-        console.warn('Chart render failed:', error);
+      } catch (e) {
+        console.warn('Chart render failed:', e);
         return false;
       }
     }
@@ -360,38 +356,40 @@ if (window.__RDE_APP_JS_LOADED__) {
     };
 
     async function downloadCurrentPdf() {
-      const tryFetch = async (url) => {
-        const res = await fetch(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ results_payload: window.__RDE_RESULT__ })
-        });
-        return res;
-      };
+      const post = async (url) => fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ results_payload: window.__RDE_RESULT__ })
+      });
 
       try {
-        let url = '/export_pdf';
-        let res = await tryFetch(url);
+        // First try: normal path (CI wants this to 503 if WeasyPrint missing)
+        var url = '/export_pdf';
+        var res = await post(url);
 
+        // If WeasyPrint is missing in dev, retry with fallback=1
         if (res.status === 503) {
-          // WeasyPrint not installed: dev retry with fallback
           url = '/export_pdf?dev_fallback=1';
-          res = await tryFetch(url);
+          res = await post(url);
         }
 
-        const contentType = res.headers.get('content-type') || '';
-        if (!res.ok || !contentType.includes('application/pdf')) {
-          const text = await res.text().catch(()=> '');
-          alert('PDF export failed.\n' + (text || `HTTP ${res.status}`));
-          return;
+        var ct = (res.headers.get('content-type') || '').toLowerCase();
+        if (!res.ok || !ct.includes('application/pdf')) {
+          var text = await res.text().catch(function () { return ''; });
+          throw new Error(text || ('PDF request failed (' + res.status + ')'));
         }
-        const blob = await res.blob();
-        const obj = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = obj; a.download = 'report_eu7_ld.pdf';
-        document.body.appendChild(a); a.click(); a.remove();
-        URL.revokeObjectURL(obj);
+
+        var blob = await res.blob();
+        var href = URL.createObjectURL(blob);
+        var a = document.createElement('a');
+        a.href = href;
+        a.download = 'report_eu7_ld.pdf';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(href);
       } catch (err) {
+        console.error('PDF export failed:', err);
         alert('PDF export failed.\n' + (err && err.message ? err.message : ''));
       }
     }
