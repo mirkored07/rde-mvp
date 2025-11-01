@@ -241,28 +241,44 @@ if (window.__RDE_APP_JS_LOADED__) {
 
     if (!window.__RDE_SAFE_MAP_PATCHED__) {
       window.__RDE_SAFE_MAP_PATCHED__ = true;
+
       if (typeof window.safeInitMap !== 'function') {
         window.safeInitMap = function baseSafeInitMap() { return true; };
       }
       var __safeInitMapBase = window.safeInitMap;
-      window.safeInitMap = function safeInitMapEnhanced(payload, el) {
+
+      window.safeInitMap = function safeInitMapEnhanced(payload, el) { // eslint-disable-line no-global-assign
         if (!el || !payload || !payload.visual || !payload.visual.map) {
           return false;
         }
         try {
-          if (typeof window.L === 'undefined') {
+          if (typeof L === 'undefined') {
             return __safeInitMapBase(payload, el);
           }
-          if (el.__RDE_LEAFLET_INSTANCE__) {
+          // keep a single map instance per element
+          if (el.__leafletMap) {
             return true;
           }
+
           var center = payload.visual.map.center || { lat: 48.2082, lon: 16.3738, zoom: 8 };
-          var lat = typeof center.lat === 'number' ? center.lat : 48.2082;
-          var lon = typeof center.lon === 'number' ? center.lon : 16.3738;
-          var zoom = typeof center.zoom === 'number' ? center.zoom : 8;
-          var map = window.L.map(el, { preferCanvas: true });
-          map.setView([lat, lon], zoom);
-          el.__RDE_LEAFLET_INSTANCE__ = map;
+          var map = L.map(el, { preferCanvas: true });
+          el.__leafletMap = map;
+
+          // add basic OSM tiles
+          L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; OpenStreetMap contributors',
+            maxZoom: 19
+          }).addTo(map);
+
+          map.setView([center.lat, center.lon], center.zoom || 8);
+
+          // optional polyline
+          var pts = (payload.visual.map.latlngs || []).filter(Boolean);
+          if (pts.length) {
+            var latlngs = pts.map(function (p) { return [p.lat, p.lon]; });
+            L.polyline(latlngs, { weight: 3, opacity: 0.8 }).addTo(map);
+            map.fitBounds(latlngs);
+          }
           return true;
         } catch (error) {
           console.warn('Map render failed:', error);
@@ -271,16 +287,65 @@ if (window.__RDE_APP_JS_LOADED__) {
       };
     }
 
-    window.safeInitCharts = function safeInitCharts(payload, el) {
+    function safeInitCharts(payload, el) {
       if (!el || !payload || !payload.visual || !payload.visual.chart) return false;
       try {
         el.setAttribute('data-chart-ready', '1');
+
+        // if there is a series, draw a tiny sparkline with pure SVG (no libs)
+        var series = (payload.visual.chart.series || [])[0];
+        var data = (series && series.data) || [];
+
+        // if already drawn, skip
+        if (el.__rdeChartDrawn) return true;
+        el.__rdeChartDrawn = true;
+
+        if (!data.length) {
+          var txt = document.createElement('div');
+          txt.style.opacity = '0.7';
+          txt.style.fontSize = '12px';
+          txt.textContent = 'Chart ready';
+          el.appendChild(txt);
+          return true;
+        }
+
+        var w = el.clientWidth || 600;
+        var h = 200;
+        var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        svg.setAttribute('width', w);
+        svg.setAttribute('height', h);
+        svg.setAttribute('viewBox', '0 0 ' + w + ' ' + h);
+
+        // normalize data to [0,1]
+        var ys = data.map(function (d) { return +d || 0; });
+        var min = Math.min.apply(null, ys);
+        var max = Math.max.apply(null, ys);
+        var span = (max - min) || 1;
+
+        var path = 'M 0 ' + (h - ((ys[0]-min)/span)*h);
+        for (var i=1; i<ys.length; i++) {
+          var x = (i / (ys.length - 1)) * (w - 2);
+          var y = h - ((ys[i] - min) / span) * (h - 2);
+          path += ' L ' + x.toFixed(1) + ' ' + y.toFixed(1);
+        }
+
+        var pl = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        pl.setAttribute('d', path);
+        pl.setAttribute('fill', 'none');
+        pl.setAttribute('stroke', 'currentColor');
+        pl.setAttribute('stroke-width', '2');
+        svg.style.color = 'rgba(148, 163, 184, 0.9)'; // slate-400
+
+        el.appendChild(svg);
+        svg.appendChild(pl);
         return true;
       } catch (error) {
         console.warn('Chart render failed:', error);
         return false;
       }
-    };
+    }
+
+    window.safeInitCharts = safeInitCharts;
 
     window.safeInjectKpis = function safeInjectKpis(payload, el) {
       const kpis = payload && (payload.kpi_numbers || payload.kpis);
@@ -295,32 +360,39 @@ if (window.__RDE_APP_JS_LOADED__) {
     };
 
     async function downloadCurrentPdf() {
-      try {
-        const response = await fetch('/export_pdf', {
+      const tryFetch = async (url) => {
+        const res = await fetch(url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ results_payload: window.__RDE_RESULT__ || {} }),
+          body: JSON.stringify({ results_payload: window.__RDE_RESULT__ })
         });
-        if (!response.ok) {
-          throw new Error(`PDF request failed (${response.status})`);
+        return res;
+      };
+
+      try {
+        let url = '/export_pdf';
+        let res = await tryFetch(url);
+
+        if (res.status === 503) {
+          // WeasyPrint not installed: dev retry with fallback
+          url = '/export_pdf?dev_fallback=1';
+          res = await tryFetch(url);
         }
-        const contentType = (response.headers.get('content-type') || '').toLowerCase();
-        if (!contentType.includes('application/pdf')) {
-          const preview = await response.text();
-          throw new Error(`Unexpected content-type: ${contentType}. Body: ${preview.slice(0, 200)}`);
+
+        const contentType = res.headers.get('content-type') || '';
+        if (!res.ok || !contentType.includes('application/pdf')) {
+          const text = await res.text().catch(()=> '');
+          alert('PDF export failed.\n' + (text || `HTTP ${res.status}`));
+          return;
         }
-        const blob = await response.blob();
-        const url = URL.createObjectURL(blob);
-        const anchor = document.createElement('a');
-        anchor.href = url;
-        anchor.download = 'report_eu7_ld.pdf';
-        document.body.appendChild(anchor);
-        anchor.click();
-        anchor.remove();
-        URL.revokeObjectURL(url);
-      } catch (error) {
-        console.warn('PDF export failed:', error);
-        window.alert && window.alert('Unable to download PDF. Please try again later.');
+        const blob = await res.blob();
+        const obj = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = obj; a.download = 'report_eu7_ld.pdf';
+        document.body.appendChild(a); a.click(); a.remove();
+        URL.revokeObjectURL(obj);
+      } catch (err) {
+        alert('PDF export failed.\n' + (err && err.message ? err.message : ''));
       }
     }
 
