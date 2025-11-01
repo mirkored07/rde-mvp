@@ -38,8 +38,8 @@ async def _parse_results_payload(request: Request) -> dict | None:
 async def export_pdf_post(request: Request):
     results_payload = await _parse_results_payload(request)
     if not results_payload:
-        # EXACT string expected by tests
-        raise HTTPException(status_code=400, detail="results_payload required")
+        # exact message required by the test
+        raise HTTPException(status_code=400, detail="Results payload is required.")
 
     html_str = templates.get_template("print_eu7.html").render(results_payload=results_payload)
     pdf = _render_pdf_with_weasyprint(html_str)
