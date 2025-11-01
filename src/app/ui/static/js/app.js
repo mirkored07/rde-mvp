@@ -1,3 +1,18 @@
+// ==== RDE UI: required ready hook ====
+window.addEventListener('rde:payload-ready', () => {
+  try {
+    const payload = window.__RDE_RESULT__ || {};
+    const container = document.querySelector('#analysis-summary-content');
+    // no-throw rendering helpers
+    if (typeof renderSummary === 'function' && container) {
+      renderSummary(container);
+    }
+  } catch (error) {
+    console.warn('Map render failed:', error);
+    return false;
+  }
+  return true;
+});
 // ---- Safe helpers (idempotent, no throws) ---------------------------------
 function safeInitMap(payload, el) {
   if (!el || !payload || !payload.visual || !payload.visual.map) return false;
