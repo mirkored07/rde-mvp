@@ -172,10 +172,12 @@
   </section>
 </section>
 
-<script id="rde-payload" type="application/json">{{ payload | tojson }}</script>
 <script>
-  window.__RDE_RESULT__ = {{ payload | tojson | safe }};
+  // Inject the EU7 payload for the UI and tests
+  window.__RDE_RESULT__ = {{ results_payload | tojson | safe }};
+  // Fire the ready event. Tests depend on this.
   window.dispatchEvent(new Event('rde:payload-ready'));
+  document.dispatchEvent(new Event('rde:payload-ready'));
 </script>
 <!-- App bundle must come after payload -->
 <script src="/static/js/app.js"></script>
