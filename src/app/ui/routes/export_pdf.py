@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import Response
 from starlette.templating import Jinja2Templates
@@ -33,11 +35,27 @@ async def export_pdf(request: Request) -> Response:
     params = request.query_params
     dev_fallback = params.get("dev_fallback") in ("1", "true", "yes")
 
-    data = await request.json() if "application/json" in content_type else {}
+    data: dict | None = None
+    if "application/json" in content_type:
+        data = await request.json()
+    elif "application/x-www-form-urlencoded" in content_type or "multipart/form-data" in content_type:
+        form = await request.form()
+        data = dict(form)
+    else:
+        data = {}
+
     payload = (data or {}).get("results_payload")
+    if isinstance(payload, str):
+        try:
+            payload = json.loads(payload)
+        except json.JSONDecodeError as exc:
+            raise HTTPException(status_code=400, detail="Results payload must be valid JSON.") from exc
 
     if not payload:
         raise HTTPException(status_code=400, detail="Results payload is required.")
+
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Results payload must be a JSON object.")
 
     report = apply_guardrails(build_report_data(payload))
     save_report_json(report)
