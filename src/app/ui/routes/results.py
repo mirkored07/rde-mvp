@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+import json
 
 from fastapi import APIRouter, Request
 from starlette.templating import Jinja2Templates
 
 from src.app.rules.engine import evaluate_eu7_ld
 from src.app.ui.responses import respond_success
+from src.app.ui.routes._eu7_payload import build_normalised_payload, enrich_payload
 
 router = APIRouter()
 templates = Jinja2Templates(directory="src/app/ui/templates")
@@ -30,41 +31,29 @@ def _build_inputs_from_session_or_demo(request: Request) -> dict:
 def results(request: Request):
     raw_inputs = _build_inputs_from_session_or_demo(request)
     payload = evaluate_eu7_ld(raw_inputs)
-    payload.setdefault("kpi_numbers", [])
-    visual_block = payload.setdefault("visual", {})
-    visual_block.setdefault("map", {})
-    visual_block.setdefault("chart", {})
-    meta = dict(payload.get("meta") or {})
-    meta.setdefault("legislation", "EU7 Light-Duty")
-    meta.setdefault("test_id", "demo-run")
-    meta.setdefault("engine", "WLTP-ICE 2.0L")
-    meta.setdefault("propulsion", "ICE")
-    meta.setdefault("velocity_source", "GPS")
-    now_iso = datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
-    meta.setdefault("test_start", now_iso)
-    meta.setdefault("printout", now_iso)
-    meta.setdefault("co_mg_per_km", payload.get("meta", {}).get("co_mg_per_km", 0.0))
-    devices = dict(meta.get("devices") or {})
-    devices.setdefault("gas_pems", "AVL GAS 601")
-    devices.setdefault("pn_pems", "AVL PN PEMS 483")
-    meta["devices"] = devices
-    payload["meta"] = meta
-    payload["emissions"] = {
-        "urban": {"label": "Urban"},
-        "trip": {
-            "label": "Trip",
-            "NOx_mg_km": meta.get("nox_mg_per_km"),
-            "PN_hash_km": meta.get("pn_per_km"),
-            "CO_mg_km": meta.get("co_mg_per_km"),
+    enriched = enrich_payload(
+        payload,
+        visual_data=payload.get("visual") or {},
+        row_counts={},
+        meta_overrides={
+            "co_mg_per_km": raw_inputs.get("co_mg_per_km", 0.0),
+            "test_id": raw_inputs.get("test_id", "demo-run"),
         },
-    }
+    )
+    normalised = build_normalised_payload(enriched)
+
     accept = (request.headers.get("accept") or "").lower()
     if "application/json" in accept:
-        return respond_success(payload)
+        return respond_success(normalised)
+
+    payload_json = json.dumps(normalised, ensure_ascii=False)
     return templates.TemplateResponse(
-        request,
         "results.html",
-        {"request": request, "results_payload": payload},
+        {
+            "request": request,
+            "results_payload": normalised,
+            "results_payload_json": payload_json,
+        },
     )
 
 

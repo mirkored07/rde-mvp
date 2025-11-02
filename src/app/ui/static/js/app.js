@@ -359,7 +359,7 @@ if (window.__RDE_APP_JS_LOADED__) {
       const post = async (url) => fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ results_payload: window.__RDE_RESULT__ })
+        body: JSON.stringify({ results_payload: getResultsPayload() })
       });
 
       try {
@@ -396,14 +396,404 @@ if (window.__RDE_APP_JS_LOADED__) {
 
     window.downloadCurrentPdf = downloadCurrentPdf;
 
+    function getResultsPayload() {
+      return window.results_payload || window.__RDE_RESULT__ || {};
+    }
+
+    function filterBySection(list, name) {
+      return (Array.isArray(list) ? list : []).filter((item) => item && item.section === name);
+    }
+
+    function resultState(value) {
+      if (value === true || String(value).toLowerCase() === 'pass') {
+        return 'pass';
+      }
+      if (value === false || String(value).toLowerCase() === 'fail') {
+        return 'fail';
+      }
+      return 'pending';
+    }
+
+    function createStatusBadge(result) {
+      const badge = document.createElement('span');
+      badge.className = 'ml-2 px-2 py-0.5 rounded';
+      const state = resultState(result);
+      if (state === 'pass') {
+        badge.className += ' bg-emerald-600/20 text-emerald-300';
+        badge.textContent = 'Pass';
+      } else if (state === 'fail') {
+        badge.className += ' bg-rose-600/20 text-rose-300';
+        badge.textContent = 'Fail';
+      } else {
+        badge.className += ' bg-slate-700/40 text-slate-200';
+        badge.textContent = 'n/a';
+      }
+      return badge;
+    }
+
+    function formatValue(value) {
+      if (value === null || typeof value === 'undefined') {
+        return 'n/a';
+      }
+      if (typeof value === 'number' && Number.isFinite(value)) {
+        const abs = Math.abs(value);
+        const options = { maximumFractionDigits: abs >= 100 ? 1 : 3 };
+        return value.toLocaleString(undefined, options);
+      }
+      return String(value);
+    }
+
+    function setOverallStatus(payload) {
+      const badge = document.getElementById('overall-result-badge');
+      if (!badge) return;
+      const finalBlock = (payload && payload.final) || {};
+      const state = resultState(typeof finalBlock.pass === 'boolean' ? finalBlock.pass : null);
+      const baseClasses = 'rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-wide';
+      if (state === 'pass') {
+        badge.className = baseClasses + ' bg-emerald-500/20 text-emerald-200';
+        badge.textContent = 'Pass';
+      } else if (state === 'fail') {
+        badge.className = baseClasses + ' bg-rose-500/20 text-rose-200';
+        badge.textContent = 'Fail';
+      } else {
+        badge.className = baseClasses + ' bg-amber-500/20 text-amber-700 dark:text-amber-200';
+        badge.textContent = 'Pending limits';
+      }
+
+      const meta = payload && payload.meta ? payload.meta : {};
+      const legislationBadge = document.getElementById('legislation-badge');
+      if (legislationBadge && meta.legislation) {
+        legislationBadge.textContent = meta.legislation;
+      }
+    }
+
+    function renderQuickVerdicts(payload) {
+      const container = document.getElementById('quick-verdicts');
+      if (!container) return;
+      container.innerHTML = '';
+      const criteria = Array.isArray(payload && payload.criteria) ? payload.criteria : [];
+      const sections = [
+        'Pre/Post Checks (Zero/Span)',
+        'Trip Composition & Timing',
+        'Dynamics & MAW',
+        'GPS Validity',
+        'Emissions Summary',
+      ];
+      let total = 0;
+      let passes = 0;
+
+      sections.forEach((name) => {
+        filterBySection(criteria, name)
+          .slice(0, 2)
+          .forEach((item) => {
+            total += 1;
+            if (resultState(item && item.result) === 'pass') {
+              passes += 1;
+            }
+            const card = document.createElement('div');
+            card.className = 'flex items-center justify-between rounded border border-slate-800/60 bg-slate-800/30 px-2 py-1';
+            const label = document.createElement('span');
+            label.className = 'text-slate-300 truncate';
+            const title = (item && (item.description || item.criterion || item.id)) || 'Criterion';
+            label.title = title;
+            label.textContent = title;
+            const badge = createStatusBadge(item && item.result);
+            card.appendChild(label);
+            card.appendChild(badge);
+            container.appendChild(card);
+          });
+      });
+
+      if (!container.children.length) {
+        const placeholder = document.createElement('div');
+        placeholder.className = 'rounded border border-slate-800/60 bg-slate-800/30 px-2 py-2 text-slate-400';
+        placeholder.textContent = 'No quick verdict data.';
+        container.appendChild(placeholder);
+      }
+
+      const summary = document.getElementById('quick-verdict-summary');
+      if (summary) {
+        if (!total) {
+          summary.textContent = 'Summary pending';
+          summary.className = 'px-2 py-0.5 rounded text-xs bg-slate-800/40 text-slate-300';
+        } else {
+          summary.textContent = `Quick verdicts: ${passes}/${total} pass`;
+          summary.className = passes === total
+            ? 'px-2 py-0.5 rounded text-xs bg-emerald-600/20 text-emerald-200'
+            : 'px-2 py-0.5 rounded text-xs bg-amber-500/20 text-amber-200';
+        }
+      }
+    }
+
+    function renderSectionTable(selector, rows) {
+      const target = typeof selector === 'string' ? document.querySelector(selector) : selector;
+      if (!target) return;
+      const criteria = Array.isArray(rows) ? rows : [];
+      if (!criteria.length) {
+        target.innerHTML = '<p class="text-sm text-slate-500 dark:text-slate-400">No criteria available for this section.</p>';
+        return;
+      }
+
+      const wrapper = document.createElement('div');
+      wrapper.className = 'overflow-x-auto';
+      const table = document.createElement('table');
+      table.className = 'min-w-full divide-y divide-slate-200 text-sm dark:divide-slate-700';
+
+      const thead = document.createElement('thead');
+      thead.className = 'bg-slate-100 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:bg-slate-800/80 dark:text-slate-300';
+      thead.innerHTML = '<tr>'
+        + '<th scope="col" class="px-4 py-3 text-left">Ref</th>'
+        + '<th scope="col" class="px-4 py-3 text-left">Criterion</th>'
+        + '<th scope="col" class="px-4 py-3 text-left">Condition</th>'
+        + '<th scope="col" class="px-4 py-3 text-left">Value</th>'
+        + '<th scope="col" class="px-4 py-3 text-left">Unit</th>'
+        + '<th scope="col" class="px-4 py-3 text-left">Result</th>'
+        + '</tr>';
+
+      const tbody = document.createElement('tbody');
+      tbody.className = 'divide-y divide-slate-100 dark:divide-slate-800';
+
+      criteria.forEach((item) => {
+        const row = document.createElement('tr');
+        row.className = 'bg-white/60 text-slate-700 dark:bg-slate-900/60 dark:text-slate-200';
+
+        const refCell = document.createElement('td');
+        refCell.className = 'px-4 py-3 font-semibold text-slate-500 dark:text-slate-400';
+        refCell.textContent = (item && (item.clause || item.ref || item.id)) || '—';
+
+        const critCell = document.createElement('td');
+        critCell.className = 'px-4 py-3 font-medium text-slate-900 dark:text-white';
+        critCell.textContent = (item && (item.description || item.criterion || item.id)) || '—';
+
+        const condCell = document.createElement('td');
+        condCell.className = 'px-4 py-3 text-slate-600 dark:text-slate-300';
+        condCell.textContent = (item && (item.limit || item.condition)) || '—';
+
+        const valueCell = document.createElement('td');
+        valueCell.className = 'px-4 py-3';
+        valueCell.textContent = formatValue(item && (item.measured || item.value));
+
+        const unitCell = document.createElement('td');
+        unitCell.className = 'px-4 py-3';
+        unitCell.textContent = (item && item.unit) || '';
+
+        const resultCell = document.createElement('td');
+        resultCell.className = 'px-4 py-3';
+        resultCell.appendChild(createStatusBadge(item && item.result));
+
+        row.appendChild(refCell);
+        row.appendChild(critCell);
+        row.appendChild(condCell);
+        row.appendChild(valueCell);
+        row.appendChild(unitCell);
+        row.appendChild(resultCell);
+        tbody.appendChild(row);
+      });
+
+      table.appendChild(thead);
+      table.appendChild(tbody);
+      wrapper.appendChild(table);
+      target.innerHTML = '';
+      target.appendChild(wrapper);
+    }
+
+    function renderEmissionsSummary(selector, emissions, limits) {
+      const target = typeof selector === 'string' ? document.querySelector(selector) : selector;
+      if (!target) return;
+      const block = emissions || {};
+      const trip = block.trip || {};
+      const urban = block.urban || {};
+      const finalLimits = limits || {};
+
+      const rows = [
+        {
+          label: 'Trip NOx (mg/km)',
+          value: trip.NOx_mg_km,
+          limit: finalLimits.NOx_mg_km_RDE,
+          unit: 'mg/km',
+        },
+        {
+          label: 'Trip PN (#/km)',
+          value: trip.PN_hash_km,
+          limit: finalLimits.PN_hash_km_RDE,
+          unit: '#/km',
+        },
+        {
+          label: 'Trip CO (mg/km)',
+          value: trip.CO_mg_km,
+          limit: finalLimits.CO_mg_km_WLTP,
+          unit: 'mg/km',
+        },
+        {
+          label: 'Urban NOx (mg/km)',
+          value: urban.NOx_mg_km,
+          limit: null,
+          unit: 'mg/km',
+        },
+        {
+          label: 'Urban PN (#/km)',
+          value: urban.PN_hash_km,
+          limit: null,
+          unit: '#/km',
+        },
+        {
+          label: 'Urban CO (mg/km)',
+          value: urban.CO_mg_km,
+          limit: null,
+          unit: 'mg/km',
+        },
+      ].filter((item) => typeof item.value !== 'undefined' && item.value !== null);
+
+      if (!rows.length) {
+        target.innerHTML = '<p class="text-sm text-slate-500 dark:text-slate-400">Emission metrics unavailable.</p>';
+        return;
+      }
+
+      const table = document.createElement('table');
+      table.className = 'min-w-full divide-y divide-slate-200 text-sm dark:divide-slate-700';
+      const thead = document.createElement('thead');
+      thead.className = 'bg-slate-100 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:bg-slate-800/80 dark:text-slate-300';
+      thead.innerHTML = '<tr>'
+        + '<th class="px-4 py-3 text-left">Metric</th>'
+        + '<th class="px-4 py-3 text-left">Value</th>'
+        + '<th class="px-4 py-3 text-left">Limit</th>'
+        + '<th class="px-4 py-3 text-left">Result</th>'
+        + '</tr>';
+
+      const tbody = document.createElement('tbody');
+      tbody.className = 'divide-y divide-slate-100 dark:divide-slate-800';
+
+      rows.forEach((row) => {
+        const tr = document.createElement('tr');
+        tr.className = 'bg-white/60 text-slate-700 dark:bg-slate-900/60 dark:text-slate-200';
+
+        const labelCell = document.createElement('td');
+        labelCell.className = 'px-4 py-3 font-medium text-slate-900 dark:text-white';
+        labelCell.textContent = row.label;
+
+        const valueCell = document.createElement('td');
+        valueCell.className = 'px-4 py-3';
+        valueCell.textContent = `${formatValue(row.value)} ${row.unit || ''}`.trim();
+
+        const limitCell = document.createElement('td');
+        limitCell.className = 'px-4 py-3';
+        if (typeof row.limit === 'number') {
+          limitCell.textContent = `≤ ${formatValue(row.limit)} ${row.unit || ''}`.trim();
+        } else {
+          limitCell.textContent = '—';
+        }
+
+        const resultCell = document.createElement('td');
+        resultCell.className = 'px-4 py-3';
+        let state = 'pending';
+        if (typeof row.limit === 'number' && typeof row.value === 'number') {
+          state = row.value <= row.limit ? 'pass' : 'fail';
+        }
+        resultCell.appendChild(createStatusBadge(state));
+
+        tr.appendChild(labelCell);
+        tr.appendChild(valueCell);
+        tr.appendChild(limitCell);
+        tr.appendChild(resultCell);
+        tbody.appendChild(tr);
+      });
+
+      table.appendChild(thead);
+      table.appendChild(tbody);
+      target.innerHTML = '';
+      target.appendChild(table);
+    }
+
+    function renderFinalConformity(selector, payload) {
+      const target = typeof selector === 'string' ? document.querySelector(selector) : selector;
+      if (!target) return;
+      const finalBlock = (payload && payload.final) || {};
+      const pollutants = Array.isArray(finalBlock.pollutants)
+        ? finalBlock.pollutants
+        : filterBySection(payload && payload.criteria, 'Final Conformity');
+
+      if (!pollutants || !pollutants.length) {
+        target.innerHTML = '<p class="text-sm text-slate-500 dark:text-slate-400">Emission limits not fully configured; final verdict pending.</p>';
+        return;
+      }
+
+      const table = document.createElement('table');
+      table.className = 'min-w-full divide-y divide-slate-200 text-sm dark:divide-slate-700';
+      const thead = document.createElement('thead');
+      thead.className = 'bg-slate-100 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:bg-slate-800/80 dark:text-slate-300';
+      thead.innerHTML = '<tr>'
+        + '<th class="px-4 py-3 text-left">Pollutant</th>'
+        + '<th class="px-4 py-3 text-left">Condition</th>'
+        + '<th class="px-4 py-3 text-left">Value</th>'
+        + '<th class="px-4 py-3 text-left">Unit</th>'
+        + '<th class="px-4 py-3 text-left">Result</th>'
+        + '</tr>';
+
+      const tbody = document.createElement('tbody');
+      tbody.className = 'divide-y divide-slate-100 dark:divide-slate-800';
+
+      pollutants.forEach((item) => {
+        const row = document.createElement('tr');
+        row.className = 'bg-white/60 text-slate-700 dark:bg-slate-900/60 dark:text-slate-200';
+
+        const critCell = document.createElement('td');
+        critCell.className = 'px-4 py-3 font-medium text-slate-900 dark:text-white';
+        critCell.textContent = (item && (item.criterion || item.description || item.id)) || '—';
+
+        const condCell = document.createElement('td');
+        condCell.className = 'px-4 py-3 text-slate-600 dark:text-slate-300';
+        condCell.textContent = (item && (item.condition || item.limit)) || '—';
+
+        const valueCell = document.createElement('td');
+        valueCell.className = 'px-4 py-3';
+        valueCell.textContent = formatValue(item && (item.value || item.measured));
+
+        const unitCell = document.createElement('td');
+        unitCell.className = 'px-4 py-3';
+        unitCell.textContent = (item && item.unit) || '';
+
+        const resultCell = document.createElement('td');
+        resultCell.className = 'px-4 py-3';
+        resultCell.appendChild(createStatusBadge(item && item.result));
+
+        row.appendChild(critCell);
+        row.appendChild(condCell);
+        row.appendChild(valueCell);
+        row.appendChild(unitCell);
+        row.appendChild(resultCell);
+        tbody.appendChild(row);
+      });
+
+      table.appendChild(thead);
+      table.appendChild(tbody);
+      target.innerHTML = '';
+      target.appendChild(table);
+    }
+
+    window.filterBySection = filterBySection;
+    window.renderQuickVerdicts = renderQuickVerdicts;
+    window.renderSectionTable = renderSectionTable;
+    window.renderEmissionsSummary = renderEmissionsSummary;
+    window.renderFinalConformity = renderFinalConformity;
+
     // ==== RDE UI: required ready hook (must match test literal) ====
-    window.addEventListener("rde:payload-ready", () => {
+    document.addEventListener("rde:payload-ready", () => {
       try {
-        const payload = window.__RDE_RESULT__ || {};
+        const payload = getResultsPayload();
+        setOverallStatus(payload);
+        renderQuickVerdicts(payload);
+        renderSectionTable('#section-zero-span', filterBySection(payload.criteria, 'Pre/Post Checks (Zero/Span)'));
+        renderSectionTable('#section-trip-comp', filterBySection(payload.criteria, 'Trip Composition & Timing'));
+        renderSectionTable('#section-dynamics', filterBySection(payload.criteria, 'Dynamics & MAW'));
+        renderSectionTable('#section-gps', filterBySection(payload.criteria, 'GPS Validity'));
+        renderEmissionsSummary('#section-emissions', payload.emissions, payload.limits);
+        renderFinalConformity('#section-final', payload);
+
         const container = document.querySelector('#analysis-summary-content');
         if (typeof window.renderSummary === 'function' && container) {
           window.renderSummary(container);
         }
+
         const btn = document.getElementById('btn-export-pdf');
         if (btn && !btn._rdePdfBound) {
           btn._rdePdfBound = true;
@@ -412,8 +802,10 @@ if (window.__RDE_APP_JS_LOADED__) {
             downloadCurrentPdf();
           });
         }
+
+        populateExportForms(payload);
       } catch (error) {
-        console.warn('Map render failed:', error);
+        console.warn('Payload render failed:', error);
         return false;
       }
       return true;
@@ -453,9 +845,10 @@ if (window.__RDE_APP_JS_LOADED__) {
     function renderSummary(container) {
       const target = container.querySelector('#analysis-summary-content') || container;
       try {
-        safeInitMap(window.__RDE_RESULT__, document.getElementById('drive-map'));
-        safeInitCharts(window.__RDE_RESULT__, document.getElementById('chart-speed'));
-        safeInjectKpis(window.__RDE_RESULT__, target);
+        const payload = getResultsPayload();
+        safeInitMap(payload, document.getElementById('drive-map'));
+        safeInitCharts(payload, document.getElementById('chart-speed'));
+        safeInjectKpis(payload, target);
       } catch (error) {
         console.warn('Map render failed:', error);
         return false;
@@ -489,7 +882,7 @@ if (window.__RDE_APP_JS_LOADED__) {
 
     document.addEventListener('DOMContentLoaded', () => {
       initDropzones(document);
-      populateExportForms(window.__RDE_RESULT__ || {});
+      populateExportForms(getResultsPayload());
     });
   })();
 }

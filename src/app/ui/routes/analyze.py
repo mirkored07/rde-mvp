@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import statistics
-from datetime import datetime
-from typing import Any, Iterable, Sequence
+from typing import Any, Sequence
 
-from fastapi import APIRouter, File, Request, UploadFile
+from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 from starlette.templating import Jinja2Templates
 
 from src.app.data.ingestion.ecu_reader import read_ecu_csv
@@ -14,7 +14,7 @@ from src.app.data.ingestion.gps_reader import read_gps_csv
 from src.app.data.ingestion.pems_reader import read_pems_csv
 from src.app.rules.engine import evaluate_eu7_ld
 from src.app.ui.responses import respond_success
-from src.app.utils.payload import ensure_results_payload_defaults
+from src.app.ui.routes._eu7_payload import build_normalised_payload, enrich_payload
 
 router = APIRouter()
 templates = Jinja2Templates(directory="src/app/ui/templates")
@@ -262,6 +262,111 @@ def _safe_readers(
     return pems_rows, gps_rows, ecu_rows
 
 
+def _build_row_counts(
+    pems_rows: Sequence[dict[str, Any]] | None,
+    gps_rows: Sequence[dict[str, Any]] | None,
+    ecu_rows: Sequence[dict[str, Any]] | None,
+) -> dict[str, int]:
+    return {
+        "pems_rows": len(pems_rows or []),
+        "gps_rows": len(gps_rows or []),
+        "ecu_rows": len(ecu_rows or []),
+    }
+
+
+def _render_response(
+    request: Request,
+    payload: dict[str, Any],
+):
+    accept = (request.headers.get("accept") or "").lower()
+
+    if "application/json" in accept:
+        return respond_success(payload)
+
+    payload_json = json.dumps(payload, ensure_ascii=False)
+    return templates.TemplateResponse(
+        "results.html",
+        {
+            "request": request,
+            "results_payload": payload,
+            "results_payload_json": payload_json,
+        },
+        media_type="text/html",
+    )
+
+
+def _prepare_demo_rows() -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+    timestamps = [
+        "2024-01-01T00:00:00Z",
+        "2024-01-01T00:00:01Z",
+        "2024-01-01T00:00:02Z",
+        "2024-01-01T00:00:03Z",
+    ]
+    pems_rows = [
+        {
+            "timestamp": ts,
+            "veh_speed_m_s": 12 + idx,
+            "nox_mg_s": 120 + idx * 5,
+            "pn_1_s": 200 + idx * 10,
+        }
+        for idx, ts in enumerate(timestamps)
+    ]
+    gps_rows = [
+        {
+            "timestamp": ts,
+            "lat": 48.8566 + idx * 0.0003,
+            "lon": 2.3522 + idx * 0.0003,
+            "speed_m_s": 12 + idx,
+        }
+        for idx, ts in enumerate(timestamps)
+    ]
+    ecu_rows = [
+        {
+            "timestamp": ts,
+            "veh_speed_m_s": 12 + idx,
+            "engine_speed_rpm": 1500 + idx * 40,
+        }
+        for idx, ts in enumerate(timestamps)
+    ]
+    return pems_rows, gps_rows, ecu_rows
+
+
+def _build_results_payload(
+    *,
+    engine_inputs: dict[str, Any],
+    visual_data: dict[str, Any],
+    row_counts: dict[str, int],
+    meta_overrides: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    payload = evaluate_eu7_ld(engine_inputs)
+    enriched = enrich_payload(
+        payload,
+        visual_data=visual_data,
+        row_counts=row_counts,
+        meta_overrides=meta_overrides,
+    )
+    return build_normalised_payload(enriched)
+
+
+@router.get("/analyze", include_in_schema=False)
+async def analyze_demo(request: Request, demo: str | None = None):
+    if demo not in {"1", "true", "yes"}:
+        raise HTTPException(status_code=400, detail="Demo flag required for GET /analyze.")
+
+    pems_rows, gps_rows, ecu_rows = _prepare_demo_rows()
+    engine_inputs, visual_data = _prepare_inputs(pems_rows, gps_rows)
+    row_counts = _build_row_counts(pems_rows, gps_rows, ecu_rows)
+
+    results_payload = _build_results_payload(
+        engine_inputs=engine_inputs,
+        visual_data=visual_data,
+        row_counts=row_counts,
+        meta_overrides={"test_id": "demo-run"},
+    )
+
+    return _render_response(request, results_payload)
+
+
 @router.post("/analyze", include_in_schema=False)
 async def analyze(
     request: Request,
@@ -271,8 +376,6 @@ async def analyze(
 ):
     """Process uploaded demo CSV files and return an EU7 results payload."""
 
-    accept = (request.headers.get("accept") or "").lower()
-
     pems_txt = await _as_text(pems_file)
     gps_txt = await _as_text(gps_file)
     ecu_txt = await _as_text(ecu_file)
@@ -280,78 +383,16 @@ async def analyze(
     pems_rows, gps_rows, ecu_rows = _safe_readers(pems_txt, gps_txt, ecu_txt)
 
     engine_inputs, visual_data = _prepare_inputs(pems_rows, gps_rows)
+    row_counts = _build_row_counts(pems_rows, gps_rows, ecu_rows)
 
-    payload = evaluate_eu7_ld(engine_inputs)
-
-    visual_payload = dict(payload.get("visual") or {})
-    map_payload = dict(visual_payload.get("map") or {})
-    map_payload.update(visual_data.get("map", {}))
-    visual_payload["map"] = map_payload
-
-    chart_payload = dict(visual_payload.get("chart") or {})
-    chart_payload.update(visual_data.get("chart", {}))
-    visual_payload["chart"] = chart_payload
-    visual_payload["distance_km"] = visual_data.get("distance_km", 0.0)
-    payload["visual"] = visual_payload
-
-    kpi_numbers = list(payload.get("kpi_numbers") or [])
-
-    def _upsert_kpi(key: str, label: str, value: float, unit: str) -> None:
-        for entry in kpi_numbers:
-            if entry.get("key") == key or entry.get("label") == label:
-                entry.update({"key": key, "label": label, "value": value, "unit": unit})
-                return
-        kpi_numbers.append({"key": key, "label": label, "value": value, "unit": unit})
-
-    distance_km = round(visual_data.get("distance_km", 0.0), 2)
-    _upsert_kpi("total_distance_km", "Distance (km)", distance_km, "km")
-
-    avg_speed = visual_data.get("avg_speed_m_s")
-    if avg_speed is not None:
-        _upsert_kpi("avg_speed_kmh", "Avg speed (km/h)", round(avg_speed * 3.6, 1), "km/h")
-    payload["kpi_numbers"] = kpi_numbers
-
-    meta = dict(payload.get("meta") or {})
-    meta.setdefault("legislation", "EU7 Light-Duty")
-    meta.setdefault("test_id", "demo-run")
-    meta.setdefault("engine", "WLTP-ICE 2.0L")
-    meta.setdefault("propulsion", "ICE")
-    meta.setdefault("velocity_source", "GPS")
-    timestamp = datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
-    meta.setdefault("test_start", timestamp)
-    meta.setdefault("printout", timestamp)
-    meta.setdefault("co_mg_per_km", engine_inputs.get("co_mg_per_km", 0.0))
-    devices = dict(meta.get("devices") or {})
-    devices.setdefault("gas_pems", "AVL GAS 601")
-    devices.setdefault("pn_pems", "AVL PN PEMS 483")
-    meta["devices"] = devices
-    meta["sources"] = {
-        "pems_rows": len(pems_rows),
-        "gps_rows": len(gps_rows),
-        "ecu_rows": len(ecu_rows),
-    }
-    payload["meta"] = meta
-
-    payload["emissions"] = {
-        "urban": {"label": "Urban"},
-        "trip": {
-            "label": "Trip",
-            "NOx_mg_km": meta.get("nox_mg_per_km"),
-            "PN_hash_km": meta.get("pn_per_km"),
-            "CO_mg_km": meta.get("co_mg_per_km"),
-        },
-    }
-
-    normalised_payload = ensure_results_payload_defaults(payload)
-
-    if "application/json" in accept:
-        return respond_success(normalised_payload)
-
-    return templates.TemplateResponse(
-        "results.html",
-        {"request": request, "results_payload": normalised_payload},
-        media_type="text/html",
+    results_payload = _build_results_payload(
+        engine_inputs=engine_inputs,
+        visual_data=visual_data,
+        row_counts=row_counts,
+        meta_overrides={"co_mg_per_km": engine_inputs.get("co_mg_per_km", 0.0)},
     )
+
+    return _render_response(request, results_payload)
 
 
 __all__ = ["router"]

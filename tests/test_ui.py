@@ -97,6 +97,26 @@ def test_analyze_returns_eu7_payload() -> None:
     kpi_numbers = payload.get("kpi_numbers")
     assert isinstance(kpi_numbers, list) and kpi_numbers
 
+    limits = payload.get("limits")
+    assert isinstance(limits, dict)
+    assert limits.get("NOx_mg_km_RDE") == 60.0
+    assert limits.get("PN_hash_km_RDE") == pytest.approx(6.0e11)
+    assert limits.get("CO_mg_km_WLTP") == 1000.0
+
+    criteria = payload.get("criteria")
+    assert isinstance(criteria, list) and len(criteria) >= 50
+    first = criteria[0]
+    assert "section" in first and "description" in first and "result" in first
+
+    emissions = payload.get("emissions")
+    assert isinstance(emissions, dict)
+    assert isinstance(emissions.get("trip"), dict)
+    assert isinstance(emissions.get("urban"), dict)
+
+    device = payload.get("device")
+    assert isinstance(device, dict)
+    assert device.get("gasPEMS")
+
     sections = payload.get("sections")
     assert isinstance(sections, list) and len(sections) == 5
     expected_titles = {
@@ -117,6 +137,8 @@ def test_analyze_returns_eu7_payload() -> None:
     meta = payload.get("meta")
     assert isinstance(meta, dict)
     assert meta.get("legislation") == "EU7 Light-Duty"
+    assert meta.get("testId")
+    assert meta.get("velocitySource")
     sources = meta.get("sources")
     assert isinstance(sources, dict) and sources.get("pems_rows")
 
@@ -128,10 +150,9 @@ def test_results_template_injects_payload_before_app_js() -> None:
     assert '<link rel="stylesheet" href="/static/leaflet/leaflet.css">' in html
     assert '<script src="/static/leaflet/leaflet.js"></script>' in html
 
-    assert "window.dispatchEvent(new Event('rde:payload-ready'))" in html
-    assert "document.dispatchEvent" not in html
+    assert 'document.dispatchEvent(new Event("rde:payload-ready"))' in html
 
-    payload_pos = html.find("window.__RDE_RESULT__")
+    payload_pos = html.find("window.results_payload")
     app_pos = html.find('/static/js/app.js')
     assert payload_pos != -1 and app_pos != -1
     assert payload_pos < app_pos
@@ -139,7 +160,7 @@ def test_results_template_injects_payload_before_app_js() -> None:
 
 def test_results_payload_embedded_in_html() -> None:
     html = _post_analysis_html()
-    match = re.search(r"window.__RDE_RESULT__\s*=\s*(.*?);\s*window.dispatchEvent", html, re.DOTALL)
+    match = re.search(r"window.results_payload\s*=\s*(.*?);\s*window.__RDE_RESULT__", html, re.DOTALL)
     assert match is not None
     payload = json.loads(match.group(1))
 
@@ -148,12 +169,23 @@ def test_results_payload_embedded_in_html() -> None:
     assert isinstance(visual.get("map", {}).get("latlngs"), list)
     assert isinstance(visual.get("chart", {}).get("series"), list)
 
+    assert isinstance(payload.get("criteria"), list) and payload["criteria"]
+
+
+def test_analyze_demo_route_renders_results() -> None:
+    response = client.get("/analyze", params={"demo": 1})
+    assert response.status_code == 200
+    html = response.text
+    assert "window.results_payload" in html
+    assert 'document.dispatchEvent(new Event("rde:payload-ready"))' in html
+
 
 def test_app_js_registers_required_listeners() -> None:
     script = Path("src/app/ui/static/js/app.js").read_text(encoding="utf-8")
-    assert 'window.addEventListener("rde:payload-ready", () => {' in script
+    assert 'document.addEventListener("rde:payload-ready", () => {' in script
     assert 'document.addEventListener("htmx:afterSwap", (event) => {' in script
-    assert 'safeInitMap(window.__RDE_RESULT__' in script
+    assert 'safeInitMap(payload, document.getElementById(' in script
+    assert 'window.renderSectionTable = renderSectionTable' in script
 
 
 def test_sample_file_downloads() -> None:
@@ -234,7 +266,7 @@ def test_export_pdf_missing_dependency() -> None:
 
 def test_results_payload_script_precedes_bundle() -> None:
     html = _post_analysis_html()
-    payload_index = html.find("window.__RDE_RESULT__=")
+    payload_index = html.find("window.results_payload =")
     bundle_index = html.find("/static/js/app.js")
     assert payload_index != -1 and bundle_index != -1
     assert payload_index < bundle_index
