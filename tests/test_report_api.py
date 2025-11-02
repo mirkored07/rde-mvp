@@ -19,6 +19,8 @@ def test_sample_report_validates() -> None:
     assert report.device.gasPEMS
     assert any(item.section == "Final Conformity" for item in report.criteria)
     assert len(report.criteria) == 53
+    populated = [item for item in report.criteria if item.value not in (None, "", "n/a")]
+    assert len(populated) >= 40
 
 
 def test_report_endpoint_returns_sample() -> None:

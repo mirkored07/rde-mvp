@@ -31,6 +31,13 @@ def _bool_from_result(result: PassFail | str | None) -> bool | None:
 
 def _criterion_row(item: Criterion) -> dict[str, Any]:
     result_literal = str(item.result)
+    raw_value: Any
+    if item.value is not None:
+        raw_value = item.value
+    elif item.measured not in {None, ""}:
+        raw_value = item.measured
+    else:
+        raw_value = None
     return {
         "id": item.id,
         "section": item.section,
@@ -40,7 +47,7 @@ def _criterion_row(item: Criterion) -> dict[str, Any]:
         "description": item.description,
         "condition": item.limit,
         "limit": item.limit,
-        "value": item.measured,
+        "value": raw_value,
         "measured": item.measured,
         "unit": item.unit,
         "result": result_literal,

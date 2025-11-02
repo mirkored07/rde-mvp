@@ -32,6 +32,10 @@ class Criterion(BaseModel):
     clause: str | None = Field(default=None, description="Regulation clause reference")
     description: str = Field(description="Human readable summary of the requirement")
     limit: str = Field(description="Requirement limit with units")
+    value: float | int | str | None = Field(
+        default=None,
+        description="Raw computed value without any unit decoration",
+    )
     measured: str | None = Field(default=None, description="Measured value rendered as text")
     unit: str | None = Field(default=None, description="Unit string (for tabular displays)")
     result: PassFail = Field(description="Outcome of the criterion evaluation")
