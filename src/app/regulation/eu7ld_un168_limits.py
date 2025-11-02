@@ -25,13 +25,19 @@ GPS_TOTAL_GAPS_S_MAX: float = 300.0  # un168.pdf Annex 7 App.2 §4.6.3
 GPS_ECU_DISTANCE_DIFF_PCT_MAX: float = 4.0  # un168.pdf Annex 7 App.2 §4.6.3
 
 # Trip composition/duration/elevation – UN R168 Annex 7 Appendix 2 §§6.2–6.4.
-URBAN_MIN_DISTANCE_KM: float = 16.0  # un168.pdf Annex 7 App.2 §6.2.1
-MOTORWAY_MIN_DISTANCE_KM: float = 16.0  # un168.pdf Annex 7 App.2 §6.2.3
-TRIP_DURATION_MIN_MIN: float = 90.0  # un168.pdf Annex 7 App.2 §6.3.1
-TRIP_DURATION_MAX_MIN: float = 120.0  # un168.pdf Annex 7 App.2 §6.3.1
+# Canonical names (used internally going forward)
 START_END_ELEV_ABS_M_MAX: float = 100.0  # un168.pdf Annex 7 App.2 §6.4.1
 CUM_POS_ELEV_TRIP_M_PER_100KM_MAX: float = 1200.0  # un168.pdf Annex 7 App.2 §6.4.3
 CUM_POS_ELEV_URBAN_M_PER_100KM_MAX: float = 1200.0  # un168.pdf Annex 7 App.2 §6.4.3
+TRIP_DURATION_MIN_MIN: float = 90.0  # un168.pdf Annex 7 App.2 §6.3.1
+TRIP_DURATION_MAX_MIN: float = 120.0  # un168.pdf Annex 7 App.2 §6.3.1
+URBAN_MIN_DISTANCE_KM: float = 16.0  # un168.pdf Annex 7 App.2 §6.2.1
+MOTORWAY_MIN_DISTANCE_KM: float = 16.0  # un168.pdf Annex 7 App.2 §6.2.3
+
+# Backward-compat aliases (keep until all imports are migrated)
+CUMULATIVE_ELEVATION_TRIP_MAX_M_PER_100KM = CUM_POS_ELEV_TRIP_M_PER_100KM_MAX
+CUMULATIVE_ELEVATION_URBAN_MAX_M_PER_100KM = CUM_POS_ELEV_URBAN_M_PER_100KM_MAX
+START_END_ELEVATION_ABS_M_MAX = START_END_ELEV_ABS_M_MAX
 
 # Cold-start window – UN R168 Annex 7 Appendix 2 §6.6.
 COLD_START_AVG_SPEED_MIN_KMH: float = 15.0  # un168.pdf Annex 7 App.2 §6.6.4
@@ -63,6 +69,19 @@ RPA_LOW_SPEED_OFFSET: float = 0.1755  # Com_Regulation_EU_2023_443_am_2017-1151_
 RPA_HIGH_SPEED_MIN: float = 0.025  # Com_Regulation_EU_2023_443_am_2017-1151_Euro6e.pdf Annex IIIA App.7 §3.4
 
 __all__ = [
+    # canonical
+    "START_END_ELEV_ABS_M_MAX",
+    "CUM_POS_ELEV_TRIP_M_PER_100KM_MAX",
+    "CUM_POS_ELEV_URBAN_M_PER_100KM_MAX",
+    "TRIP_DURATION_MIN_MIN",
+    "TRIP_DURATION_MAX_MIN",
+    "URBAN_MIN_DISTANCE_KM",
+    "MOTORWAY_MIN_DISTANCE_KM",
+    # aliases (compat)
+    "CUMULATIVE_ELEVATION_TRIP_MAX_M_PER_100KM",
+    "CUMULATIVE_ELEVATION_URBAN_MAX_M_PER_100KM",
+    "START_END_ELEVATION_ABS_M_MAX",
+    # existing exports
     "ACCEL_EVENTS_MIN",
     "COLD_START_AVG_SPEED_MAX_KMH",
     "COLD_START_AVG_SPEED_MIN_KMH",
@@ -77,12 +96,9 @@ __all__ = [
     "CO_SPAN_PPM_MAX",
     "CO_WLTP_LIMIT_MG_PER_KM",
     "CO_ZERO_PPM_MAX",
-    "CUM_POS_ELEV_TRIP_M_PER_100KM_MAX",
-    "CUM_POS_ELEV_URBAN_M_PER_100KM_MAX",
     "GPS_ECU_DISTANCE_DIFF_PCT_MAX",
     "GPS_SINGLE_GAP_S_MAX",
     "GPS_TOTAL_GAPS_S_MAX",
-    "MOTORWAY_MIN_DISTANCE_KM",
     "NOX_RDE_FINAL_MG_PER_KM",
     "NOX_SPAN_PPM_MAX",
     "NOX_ZERO_PPM_MAX",
@@ -96,10 +112,6 @@ __all__ = [
     "SPAN_ABOVE_TWO_X_MAX_COUNT",
     "SPAN_COVERAGE_MIN_PCT",
     "SPAN_TWO_X_BAND_MAX_PCT",
-    "START_END_ELEV_ABS_M_MAX",
-    "TRIP_DURATION_MAX_MIN",
-    "TRIP_DURATION_MIN_MIN",
-    "URBAN_MIN_DISTANCE_KM",
     "VA_POS95_ALT_HIGH_SPEED_OFFSET",
     "VA_POS95_ALT_HIGH_SPEED_SLOPE",
     "VA_POS95_BREAK_KMH",
