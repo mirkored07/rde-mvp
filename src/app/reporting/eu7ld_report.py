@@ -148,6 +148,12 @@ def _get_bool(metrics: Mapping[str, Any], key: str) -> bool | None:
     return None
 
 
+def _round_value(value: float | None, *, digits: int = 3) -> float | None:
+    if value is None:
+        return None
+    return round(float(value), digits)
+
+
 def _criterion(
     *,
     ident: str,
@@ -155,16 +161,30 @@ def _criterion(
     clause: str | None,
     description: str,
     limit: str,
+    value: float | int | str | None = None,
     measured: str,
     unit: str | None,
     result: PassFail,
 ) -> Criterion:
+    computed_value: float | int | str | None = value
+    if computed_value is None:
+        cleaned = (measured or "").strip()
+        if cleaned and cleaned.lower() != "n/a":
+            if cleaned[0] in "-0123456789":
+                parsed = _parse_numeric(cleaned)
+                if parsed is not None:
+                    computed_value = _round_value(parsed)
+                else:
+                    computed_value = cleaned
+            else:
+                computed_value = cleaned
     return Criterion(
         id=ident,
         section=section,
         clause=clause,
         description=description,
         limit=limit,
+        value=computed_value,
         measured=measured,
         unit=unit,
         result=result,
@@ -198,6 +218,14 @@ def _result_abs_leq(value: float | None, limit: float) -> PassFail:
 def _build_pre_post_checks(metrics: Mapping[str, Any]) -> list[Criterion]:
     section = "Pre/Post Checks (Zero/Span)"
     clause = "§6.1"
+    co2_zero = _get_float(metrics, "co2_zero_drift_ppm")
+    co2_span = _get_float(metrics, "co2_span_drift_ppm")
+    co_zero = _get_float(metrics, "co_zero_drift_ppm")
+    co_span = _get_float(metrics, "co_span_drift_ppm")
+    nox_zero = _get_float(metrics, "nox_zero_drift_ppm")
+    nox_span = _get_float(metrics, "nox_span_drift_ppm")
+    pn_zero_pre = _get_float(metrics, "pn_zero_pre_hash_cm3")
+    pn_zero_post = _get_float(metrics, "pn_zero_post_hash_cm3")
     return [
         _criterion(
             ident="zero-span:co2-zero",
@@ -205,9 +233,10 @@ def _build_pre_post_checks(metrics: Mapping[str, Any]) -> list[Criterion]:
             clause=clause,
             description="CO₂ absolute zero drift",
             limit="≤ 2000 ppm",
-            measured=_format_numeric(_get_float(metrics, "co2_zero_drift_ppm"), "ppm", precision=0),
+            value=_round_value(co2_zero),
+            measured=_format_numeric(co2_zero, "ppm", precision=0),
             unit="ppm",
-            result=_result_leq(_get_float(metrics, "co2_zero_drift_ppm"), CO2_ZERO_DRIFT_PPM_MAX),
+            result=_result_leq(co2_zero, CO2_ZERO_DRIFT_PPM_MAX),
         ),
         _criterion(
             ident="zero-span:co2-span",
@@ -215,9 +244,10 @@ def _build_pre_post_checks(metrics: Mapping[str, Any]) -> list[Criterion]:
             clause=clause,
             description="CO₂ absolute span drift",
             limit="≤ 3914 ppm",
-            measured=_format_numeric(_get_float(metrics, "co2_span_drift_ppm"), "ppm", precision=0),
+            value=_round_value(co2_span),
+            measured=_format_numeric(co2_span, "ppm", precision=0),
             unit="ppm",
-            result=_result_leq(_get_float(metrics, "co2_span_drift_ppm"), CO2_SPAN_DRIFT_PPM_MAX),
+            result=_result_leq(co2_span, CO2_SPAN_DRIFT_PPM_MAX),
         ),
         _criterion(
             ident="zero-span:co-zero",
@@ -225,9 +255,10 @@ def _build_pre_post_checks(metrics: Mapping[str, Any]) -> list[Criterion]:
             clause=clause,
             description="CO absolute zero drift",
             limit="≤ 75 ppm",
-            measured=_format_numeric(_get_float(metrics, "co_zero_drift_ppm"), "ppm", precision=0),
+            value=_round_value(co_zero),
+            measured=_format_numeric(co_zero, "ppm", precision=0),
             unit="ppm",
-            result=_result_leq(_get_float(metrics, "co_zero_drift_ppm"), CO_ZERO_DRIFT_PPM_MAX),
+            result=_result_leq(co_zero, CO_ZERO_DRIFT_PPM_MAX),
         ),
         _criterion(
             ident="zero-span:co-span",
@@ -235,9 +266,10 @@ def _build_pre_post_checks(metrics: Mapping[str, Any]) -> list[Criterion]:
             clause=clause,
             description="CO absolute span drift",
             limit="≤ 943.4 ppm",
-            measured=_format_numeric(_get_float(metrics, "co_span_drift_ppm"), "ppm", precision=1),
+            value=_round_value(co_span),
+            measured=_format_numeric(co_span, "ppm", precision=1),
             unit="ppm",
-            result=_result_leq(_get_float(metrics, "co_span_drift_ppm"), CO_SPAN_DRIFT_PPM_MAX),
+            result=_result_leq(co_span, CO_SPAN_DRIFT_PPM_MAX),
         ),
         _criterion(
             ident="zero-span:nox-zero",
@@ -245,9 +277,10 @@ def _build_pre_post_checks(metrics: Mapping[str, Any]) -> list[Criterion]:
             clause=clause,
             description="NOx absolute zero drift",
             limit="≤ 3 ppm",
-            measured=_format_numeric(_get_float(metrics, "nox_zero_drift_ppm"), "ppm", precision=1),
+            value=_round_value(nox_zero),
+            measured=_format_numeric(nox_zero, "ppm", precision=1),
             unit="ppm",
-            result=_result_leq(_get_float(metrics, "nox_zero_drift_ppm"), NOX_ZERO_DRIFT_PPM_MAX),
+            result=_result_leq(nox_zero, NOX_ZERO_DRIFT_PPM_MAX),
         ),
         _criterion(
             ident="zero-span:nox-span",
@@ -255,9 +288,10 @@ def _build_pre_post_checks(metrics: Mapping[str, Any]) -> list[Criterion]:
             clause=clause,
             description="NOx absolute span drift",
             limit="≤ 144.3 ppm",
-            measured=_format_numeric(_get_float(metrics, "nox_span_drift_ppm"), "ppm", precision=1),
+            value=_round_value(nox_span),
+            measured=_format_numeric(nox_span, "ppm", precision=1),
             unit="ppm",
-            result=_result_leq(_get_float(metrics, "nox_span_drift_ppm"), NOX_SPAN_DRIFT_PPM_MAX),
+            result=_result_leq(nox_span, NOX_SPAN_DRIFT_PPM_MAX),
         ),
         _criterion(
             ident="pn:zero-pre",
@@ -265,9 +299,10 @@ def _build_pre_post_checks(metrics: Mapping[str, Any]) -> list[Criterion]:
             clause="§4.6",
             description="PN pre-test zero",
             limit="≤ 5000 #/cm³",
-            measured=_format_numeric(_get_float(metrics, "pn_zero_pre_hash_cm3"), "#/cm³", precision=0),
+            value=_round_value(pn_zero_pre, digits=0),
+            measured=_format_numeric(pn_zero_pre, "#/cm³", precision=0),
             unit="#/cm³",
-            result=_result_leq(_get_float(metrics, "pn_zero_pre_hash_cm3"), PN_ZERO_HASH_CM3_MAX),
+            result=_result_leq(pn_zero_pre, PN_ZERO_HASH_CM3_MAX),
         ),
         _criterion(
             ident="pn:zero-post",
@@ -275,9 +310,10 @@ def _build_pre_post_checks(metrics: Mapping[str, Any]) -> list[Criterion]:
             clause="§4.6",
             description="PN post-test zero",
             limit="≤ 5000 #/cm³",
-            measured=_format_numeric(_get_float(metrics, "pn_zero_post_hash_cm3"), "#/cm³", precision=0),
+            value=_round_value(pn_zero_post, digits=0),
+            measured=_format_numeric(pn_zero_post, "#/cm³", precision=0),
             unit="#/cm³",
-            result=_result_leq(_get_float(metrics, "pn_zero_post_hash_cm3"), PN_ZERO_HASH_CM3_MAX),
+            result=_result_leq(pn_zero_post, PN_ZERO_HASH_CM3_MAX),
         ),
     ]
 
@@ -287,6 +323,9 @@ def _build_span_coverage(metrics: Mapping[str, Any]) -> list[Criterion]:
     clause = "§6.3"
     between_pct = _get_float(metrics, "co2_span_mid_points_pct")
     exceed_count = _get_int(metrics, "co2_span_over_limit_count")
+    co2_coverage = _get_float(metrics, "co2_span_coverage_pct")
+    co_coverage = _get_float(metrics, "co_span_coverage_pct")
+    nox_coverage = _get_float(metrics, "nox_span_coverage_pct")
     return [
         _criterion(
             ident="span:co2-coverage",
@@ -294,9 +333,10 @@ def _build_span_coverage(metrics: Mapping[str, Any]) -> list[Criterion]:
             clause=clause,
             description="CO₂ span coverage",
             limit="≥ 90 % of operative range",
-            measured=_format_numeric(_get_float(metrics, "co2_span_coverage_pct"), "%", precision=1),
+            value=_round_value(co2_coverage),
+            measured=_format_numeric(co2_coverage, "%", precision=1),
             unit="%",
-            result=_result_geq(_get_float(metrics, "co2_span_coverage_pct"), SPAN_COVERAGE_MIN),
+            result=_result_geq(co2_coverage, SPAN_COVERAGE_MIN),
         ),
         _criterion(
             ident="span:co2-mid-band",
@@ -304,6 +344,7 @@ def _build_span_coverage(metrics: Mapping[str, Any]) -> list[Criterion]:
             clause=clause,
             description="CO₂ points between span and 2×span",
             limit="≤ 1 % of samples",
+            value=_round_value(between_pct),
             measured=_format_numeric(between_pct, "%", precision=2),
             unit="%",
             result=_result_leq(between_pct, SPAN_TWO_X_BAND_MAX_PERCENT),
@@ -314,6 +355,7 @@ def _build_span_coverage(metrics: Mapping[str, Any]) -> list[Criterion]:
             clause=clause,
             description="CO₂ > 2×span events",
             limit="0 occurrences",
+            value=int(exceed_count) if exceed_count is not None else None,
             measured=str(exceed_count) if exceed_count is not None else "n/a",
             unit="events",
             result=
@@ -327,9 +369,10 @@ def _build_span_coverage(metrics: Mapping[str, Any]) -> list[Criterion]:
             clause=clause,
             description="CO span coverage",
             limit="≥ 90 %",
-            measured=_format_numeric(_get_float(metrics, "co_span_coverage_pct"), "%", precision=1),
+            value=_round_value(co_coverage),
+            measured=_format_numeric(co_coverage, "%", precision=1),
             unit="%",
-            result=_result_geq(_get_float(metrics, "co_span_coverage_pct"), SPAN_COVERAGE_MIN),
+            result=_result_geq(co_coverage, SPAN_COVERAGE_MIN),
         ),
         _criterion(
             ident="span:nox-coverage",
@@ -337,9 +380,10 @@ def _build_span_coverage(metrics: Mapping[str, Any]) -> list[Criterion]:
             clause=clause,
             description="NOx span coverage",
             limit="≥ 90 %",
-            measured=_format_numeric(_get_float(metrics, "nox_span_coverage_pct"), "%", precision=1),
+            value=_round_value(nox_coverage),
+            measured=_format_numeric(nox_coverage, "%", precision=1),
             unit="%",
-            result=_result_geq(_get_float(metrics, "nox_span_coverage_pct"), SPAN_COVERAGE_MIN),
+            result=_result_geq(nox_coverage, SPAN_COVERAGE_MIN),
         ),
     ]
 
@@ -371,6 +415,11 @@ def _build_preconditioning(metrics: Mapping[str, Any]) -> list[Criterion]:
     soak_temp = _get_float(metrics, "soak_temperature_c")
     last_temp = _get_float(metrics, "cold_start_last3h_temp_c")
     multiplier_applied = _get_bool(metrics, "cold_start_multiplier_applied")
+    multiplier_value: str | None
+    if multiplier_applied is None:
+        multiplier_value = None
+    else:
+        multiplier_value = "applied" if multiplier_applied else "not applied"
     return [
         _criterion(
             ident="preconditioning:operation-time",
@@ -413,6 +462,7 @@ def _build_preconditioning(metrics: Mapping[str, Any]) -> list[Criterion]:
             clause="§10.6",
             description="Cold-start multiplier",
             limit="×1.6 if extended [-7–0, 35–38] °C",
+            value=multiplier_value,
             measured=_format_cold_start(last_temp, multiplier_applied),
             unit="°C",
             result=PassFail.NA,
@@ -1029,8 +1079,10 @@ def _update_conformity_criteria(criteria: Iterable[Criterion], emissions: Emissi
             value, limit, unit = mapping[item.id]
             clamped = _clamp_non_negative(value)
             if clamped is not None:
+                item.value = _round_value(clamped)
                 item.measured = _format_emission(clamped, unit, precision=1)
             else:
+                item.value = None
                 item.measured = "n/a"
             if item.id == "conformity:pn":
                 limit_text = f"≤ {FINAL_PN_HASH_KM_LIMIT:.1e}".replace("e+", "e") + " #/km"
@@ -1080,6 +1132,7 @@ def _apply_cold_start_multiplier(report: ReportData) -> None:
         if report.emissions.urban.PN_hash_km is not None:
             report.emissions.urban.PN_hash_km *= multiplier
         criterion.measured = _format_cold_start(temp, True)
+        criterion.value = "applied"
         criterion.result = PassFail.PASS if multiplier != 1.0 else PassFail.NA
     else:
         if applied is None and not _extended_temperature(temp):
@@ -1088,6 +1141,10 @@ def _apply_cold_start_multiplier(report: ReportData) -> None:
             criterion.result = PassFail.PASS
         elif not applied and _extended_temperature(temp):
             criterion.result = PassFail.FAIL
+        if applied is None:
+            criterion.value = None
+        else:
+            criterion.value = "applied" if applied else "not applied"
 
 
 def _apply_guardrails_inplace(report: ReportData) -> None:

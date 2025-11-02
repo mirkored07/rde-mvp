@@ -8,7 +8,8 @@
       "measured": "1800 ppm",
       "result": "pass",
       "section": "Pre/Post Checks (Zero/Span)",
-      "unit": "ppm"
+      "unit": "ppm",
+      "value": 1800
     },
     {
       "clause": "\u00a76.1",
@@ -18,7 +19,8 @@
       "measured": "3200 ppm",
       "result": "pass",
       "section": "Pre/Post Checks (Zero/Span)",
-      "unit": "ppm"
+      "unit": "ppm",
+      "value": 3200
     },
     {
       "clause": "\u00a76.1",
@@ -28,7 +30,8 @@
       "measured": "58 ppm",
       "result": "pass",
       "section": "Pre/Post Checks (Zero/Span)",
-      "unit": "ppm"
+      "unit": "ppm",
+      "value": 58
     },
     {
       "clause": "\u00a76.1",
@@ -38,7 +41,8 @@
       "measured": "955 ppm",
       "result": "fail",
       "section": "Pre/Post Checks (Zero/Span)",
-      "unit": "ppm"
+      "unit": "ppm",
+      "value": 955
     },
     {
       "clause": "\u00a76.1",
@@ -48,7 +52,8 @@
       "measured": "2.4 ppm",
       "result": "pass",
       "section": "Pre/Post Checks (Zero/Span)",
-      "unit": "ppm"
+      "unit": "ppm",
+      "value": 2.4
     },
     {
       "clause": "\u00a76.1",
@@ -58,7 +63,8 @@
       "measured": "138.7 ppm",
       "result": "pass",
       "section": "Pre/Post Checks (Zero/Span)",
-      "unit": "ppm"
+      "unit": "ppm",
+      "value": 138.7
     },
     {
       "clause": "\u00a74.6",
@@ -68,7 +74,8 @@
       "measured": "4200 #/cm\u00b3",
       "result": "pass",
       "section": "Pre/Post Checks (Zero/Span)",
-      "unit": "#/cm\u00b3"
+      "unit": "#/cm\u00b3",
+      "value": 4200
     },
     {
       "clause": "\u00a74.6",
@@ -78,7 +85,8 @@
       "measured": "5600 #/cm\u00b3",
       "result": "fail",
       "section": "Pre/Post Checks (Zero/Span)",
-      "unit": "#/cm\u00b3"
+      "unit": "#/cm\u00b3",
+      "value": 5600
     },
     {
       "clause": "\u00a76.3",
@@ -88,7 +96,8 @@
       "measured": "95.4 %",
       "result": "pass",
       "section": "Span Gas Coverage",
-      "unit": "%"
+      "unit": "%",
+      "value": 95.4
     },
     {
       "clause": "\u00a76.3",
@@ -98,7 +107,8 @@
       "measured": "0.8 %",
       "result": "pass",
       "section": "Span Gas Coverage",
-      "unit": "%"
+      "unit": "%",
+      "value": 0.8
     },
     {
       "clause": "\u00a76.3",
@@ -108,7 +118,8 @@
       "measured": "0",
       "result": "pass",
       "section": "Span Gas Coverage",
-      "unit": "events"
+      "unit": "events",
+      "value": 0
     },
     {
       "clause": "\u00a76.3",
@@ -118,7 +129,8 @@
       "measured": "92.1 %",
       "result": "pass",
       "section": "Span Gas Coverage",
-      "unit": "%"
+      "unit": "%",
+      "value": 92.1
     },
     {
       "clause": "\u00a76.3",
@@ -128,7 +140,8 @@
       "measured": "88.5 %",
       "result": "fail",
       "section": "Span Gas Coverage",
-      "unit": "%"
+      "unit": "%",
+      "value": 88.5
     },
     {
       "clause": "\u00a78.3.2",
@@ -138,7 +151,8 @@
       "measured": "Urban 12 min / Expressway 11 min",
       "result": "pass",
       "section": "Vehicle Preconditioning & Soak",
-      "unit": "min"
+      "unit": "min",
+      "value": "Urban 12 min / Expressway 11 min"
     },
     {
       "clause": "\u00a710.6",
@@ -148,7 +162,8 @@
       "measured": "8.5 h",
       "result": "pass",
       "section": "Vehicle Preconditioning & Soak",
-      "unit": "h"
+      "unit": "h",
+      "value": 8.5
     },
     {
       "clause": "\u00a710.6",
@@ -158,7 +173,8 @@
       "measured": "-5 \u00b0C",
       "result": "pass",
       "section": "Vehicle Preconditioning & Soak",
-      "unit": "\u00b0C"
+      "unit": "\u00b0C",
+      "value": -5
     },
     {
       "clause": "\u00a710.6",
@@ -168,7 +184,8 @@
       "measured": "Temp: -5.0 \u00b0C | Applied: yes",
       "result": "pass",
       "section": "Vehicle Preconditioning & Soak",
-      "unit": "\u00b0C"
+      "unit": "\u00b0C",
+      "value": "Temp: -5.0 \u00b0C | Applied: yes"
     },
     {
       "clause": "\u00a78.1",
@@ -178,7 +195,8 @@
       "measured": "Recorded",
       "result": "pass",
       "section": "Start/End (ICE)",
-      "unit": null
+      "unit": null,
+      "value": "Recorded"
     },
     {
       "clause": "\u00a79.3.4",
@@ -188,7 +206,8 @@
       "measured": "23.8 km/h",
       "result": "pass",
       "section": "Cold-Start Window",
-      "unit": "km/h"
+      "unit": "km/h",
+      "value": 23.8
     },
     {
       "clause": "\u00a73.8.2",
@@ -198,7 +217,8 @@
       "measured": "58.2 km/h",
       "result": "pass",
       "section": "Cold-Start Window",
-      "unit": "km/h"
+      "unit": "km/h",
+      "value": 58.2
     },
     {
       "clause": "\u00a73.8.2",
@@ -208,7 +228,8 @@
       "measured": "12 s",
       "result": "pass",
       "section": "Cold-Start Window",
-      "unit": "s"
+      "unit": "s",
+      "value": 12
     },
     {
       "clause": "\u00a73.8.2",
@@ -218,7 +239,8 @@
       "measured": "64 s",
       "result": "pass",
       "section": "Cold-Start Window",
-      "unit": "s"
+      "unit": "s",
+      "value": 64
     },
     {
       "clause": "\u00a79.2",
@@ -228,7 +250,8 @@
       "measured": "Urban \u2192 Rural \u2192 Expressway",
       "result": "pass",
       "section": "Trip Composition & Timing",
-      "unit": null
+      "unit": null,
+      "value": "Urban \u2192 Rural \u2192 Expressway"
     },
     {
       "clause": "\u00a79.2",
@@ -238,7 +261,8 @@
       "measured": "17.8 km",
       "result": "pass",
       "section": "Trip Composition & Timing",
-      "unit": "km"
+      "unit": "km",
+      "value": 17.8
     },
     {
       "clause": "\u00a79.2",
@@ -248,7 +272,8 @@
       "measured": "14.2 km",
       "result": "fail",
       "section": "Trip Composition & Timing",
-      "unit": "km"
+      "unit": "km",
+      "value": 14.2
     },
     {
       "clause": "\u00a79.3.2",
@@ -258,7 +283,8 @@
       "measured": "52 %",
       "result": "pass",
       "section": "Trip Composition & Timing",
-      "unit": "%"
+      "unit": "%",
+      "value": 52
     },
     {
       "clause": "\u00a79.3.2",
@@ -268,7 +294,8 @@
       "measured": "43 %",
       "result": "pass",
       "section": "Trip Composition & Timing",
-      "unit": "%"
+      "unit": "%",
+      "value": 43
     },
     {
       "clause": "\u00a79.3.3",
@@ -278,7 +305,8 @@
       "measured": "108 min",
       "result": "pass",
       "section": "Trip Composition & Timing",
-      "unit": "min"
+      "unit": "min",
+      "value": 108
     },
     {
       "clause": "\u00a78.1",
@@ -288,7 +316,8 @@
       "measured": "82 m",
       "result": "pass",
       "section": "Trip Composition & Timing",
-      "unit": "m"
+      "unit": "m",
+      "value": 82
     },
     {
       "clause": "\u00a79.3.3",
@@ -298,7 +327,8 @@
       "measured": "Trip 980 / Urban 1305",
       "result": "fail",
       "section": "Trip Composition & Timing",
-      "unit": "m/100 km"
+      "unit": "m/100 km",
+      "value": "Trip 980 / Urban 1305"
     },
     {
       "clause": "\u00a78.1",
@@ -308,7 +338,8 @@
       "measured": "Active \u2013 emissions compliant",
       "result": "pass",
       "section": "Trip Composition & Timing",
-      "unit": null
+      "unit": null,
+      "value": "Active \u2013 emissions compliant"
     },
     {
       "clause": "\u00a74.7",
@@ -318,7 +349,8 @@
       "measured": "1.7 %",
       "result": "pass",
       "section": "GPS Validity",
-      "unit": "%"
+      "unit": "%",
+      "value": 1.7
     },
     {
       "clause": "\u00a76.5",
@@ -328,7 +360,8 @@
       "measured": "94 s",
       "result": "pass",
       "section": "GPS Validity",
-      "unit": "s"
+      "unit": "s",
+      "value": 94
     },
     {
       "clause": "\u00a76.5",
@@ -338,7 +371,8 @@
       "measured": "182 s",
       "result": "pass",
       "section": "GPS Validity",
-      "unit": "s"
+      "unit": "s",
+      "value": 182
     },
     {
       "clause": "\u00a73.1.3.1",
@@ -348,7 +382,8 @@
       "measured": "148",
       "result": "pass",
       "section": "Dynamics & MAW",
-      "unit": "points"
+      "unit": "points",
+      "value": 148
     },
     {
       "clause": "\u00a73.1.3.1",
@@ -358,7 +393,8 @@
       "measured": "84",
       "result": "fail",
       "section": "Dynamics & MAW",
-      "unit": "points"
+      "unit": "points",
+      "value": 84
     },
     {
       "clause": "\u00a74.1.1",
@@ -368,7 +404,8 @@
       "measured": "17.9 m\u00b2/s\u00b3",
       "result": "pass",
       "section": "Dynamics & MAW",
-      "unit": "m\u00b2/s\u00b3"
+      "unit": "m\u00b2/s\u00b3",
+      "value": 17.9
     },
     {
       "clause": "\u00a74.1.2",
@@ -378,7 +415,8 @@
       "measured": "23.6 m\u00b2/s\u00b3",
       "result": "pass",
       "section": "Dynamics & MAW",
-      "unit": "m\u00b2/s\u00b3"
+      "unit": "m\u00b2/s\u00b3",
+      "value": 23.6
     },
     {
       "clause": "\u00a74.1.1",
@@ -388,7 +426,8 @@
       "measured": "0.182 m/s\u00b2",
       "result": "pass",
       "section": "Dynamics & MAW",
-      "unit": "m/s\u00b2"
+      "unit": "m/s\u00b2",
+      "value": 0.182
     },
     {
       "clause": "\u00a74.1.2",
@@ -398,7 +437,8 @@
       "measured": "0.041 m/s\u00b2",
       "result": "fail",
       "section": "Dynamics & MAW",
-      "unit": "m/s\u00b2"
+      "unit": "m/s\u00b2",
+      "value": 0.041
     },
     {
       "clause": "App. 8 \u00a74.5.1.2",
@@ -408,7 +448,8 @@
       "measured": "57 %",
       "result": "pass",
       "section": "CO\u2082 Characteristic Windows (MAW)",
-      "unit": "%"
+      "unit": "%",
+      "value": 57
     },
     {
       "clause": "App. 8 \u00a74.5.1.2",
@@ -418,7 +459,8 @@
       "measured": "48 %",
       "result": "fail",
       "section": "CO\u2082 Characteristic Windows (MAW)",
-      "unit": "%"
+      "unit": "%",
+      "value": 48
     },
     {
       "clause": "\u00a73.1",
@@ -428,7 +470,8 @@
       "measured": "36 mg/km",
       "result": "n/a",
       "section": "Emissions Summary",
-      "unit": "mg/km"
+      "unit": "mg/km",
+      "value": 36
     },
     {
       "clause": "\u00a73.1",
@@ -438,7 +481,8 @@
       "measured": "32 mg/km",
       "result": "n/a",
       "section": "Emissions Summary",
-      "unit": "mg/km"
+      "unit": "mg/km",
+      "value": 32
     },
     {
       "clause": "\u00a73.1",
@@ -448,7 +492,8 @@
       "measured": "3.40e11 #/km",
       "result": "n/a",
       "section": "Emissions Summary",
-      "unit": "#/km"
+      "unit": "#/km",
+      "value": 340000000000.0
     },
     {
       "clause": "\u00a73.1",
@@ -458,7 +503,8 @@
       "measured": "3.20e11 #/km",
       "result": "n/a",
       "section": "Emissions Summary",
-      "unit": "#/km"
+      "unit": "#/km",
+      "value": 320000000000.0
     },
     {
       "clause": "App. 11 \u00a74",
@@ -468,7 +514,8 @@
       "measured": "51.2 mg/km",
       "result": "pass",
       "section": "Final Conformity",
-      "unit": "mg/km"
+      "unit": "mg/km",
+      "value": 51.2
     },
     {
       "clause": "App. 11 \u00a74",
@@ -478,7 +525,8 @@
       "measured": "5.12e11 #/km",
       "result": "pass",
       "section": "Final Conformity",
-      "unit": "#/km"
+      "unit": "#/km",
+      "value": 512000000000.0
     },
     {
       "clause": "App. 11 \u00a74",
@@ -488,7 +536,8 @@
       "measured": "310 mg/km",
       "result": "pass",
       "section": "Final Conformity",
-      "unit": "mg/km"
+      "unit": "mg/km",
+      "value": 310
     },
     {
       "clause": "\u00a76.5",
@@ -498,7 +547,8 @@
       "measured": "0.32 %",
       "result": "pass",
       "section": "Leak Checks & Device Errors",
-      "unit": "%"
+      "unit": "%",
+      "value": 0.32
     },
     {
       "clause": "\u00a74.6",
@@ -508,7 +558,8 @@
       "measured": "22 mbar",
       "result": "pass",
       "section": "Leak Checks & Device Errors",
-      "unit": "mbar"
+      "unit": "mbar",
+      "value": 22
     },
     {
       "clause": "\u00a74.6",
@@ -518,7 +569,8 @@
       "measured": "35.5 mbar",
       "result": "fail",
       "section": "Leak Checks & Device Errors",
-      "unit": "mbar"
+      "unit": "mbar",
+      "value": 35.5
     },
     {
       "clause": "\u00a76.5",
@@ -528,7 +580,8 @@
       "measured": "0",
       "result": "pass",
       "section": "Leak Checks & Device Errors",
-      "unit": "count"
+      "unit": "count",
+      "value": 0
     }
   ],
   "device": {

@@ -404,6 +404,29 @@ if (window.__RDE_APP_JS_LOADED__) {
       return (Array.isArray(list) ? list : []).filter((item) => item && item.section === name);
     }
 
+    const numberFormatter = new Intl.NumberFormat('en-US', { maximumFractionDigits: 3 });
+
+    function normaliseValue(value) {
+      if (value === null || typeof value === 'undefined') {
+        return null;
+      }
+      if (typeof value === 'number') {
+        return Number.isFinite(value) ? value : null;
+      }
+      if (typeof value === 'string') {
+        const trimmed = value.trim();
+        if (!trimmed) {
+          return null;
+        }
+        if (/^[+-]?\d+(?:\.\d+)?(?:e[+-]?\d+)?$/i.test(trimmed)) {
+          const parsed = Number(trimmed);
+          return Number.isFinite(parsed) ? parsed : trimmed;
+        }
+        return trimmed;
+      }
+      return value;
+    }
+
     function resultState(value) {
       if (value === true || String(value).toLowerCase() === 'pass') {
         return 'pass';
@@ -432,15 +455,14 @@ if (window.__RDE_APP_JS_LOADED__) {
     }
 
     function formatValue(value) {
-      if (value === null || typeof value === 'undefined') {
+      const normalised = normaliseValue(value);
+      if (normalised === null || typeof normalised === 'undefined') {
         return 'n/a';
       }
-      if (typeof value === 'number' && Number.isFinite(value)) {
-        const abs = Math.abs(value);
-        const options = { maximumFractionDigits: abs >= 100 ? 1 : 3 };
-        return value.toLocaleString(undefined, options);
+      if (typeof normalised === 'number') {
+        return numberFormatter.format(normalised);
       }
-      return String(value);
+      return String(normalised);
     }
 
     function setOverallStatus(payload) {
@@ -571,7 +593,8 @@ if (window.__RDE_APP_JS_LOADED__) {
 
         const valueCell = document.createElement('td');
         valueCell.className = 'px-4 py-3';
-        valueCell.textContent = formatValue(item && (item.measured || item.value));
+        const rawValue = item ? item.value ?? item.measured ?? null : null;
+        valueCell.textContent = formatValue(rawValue);
 
         const unitCell = document.createElement('td');
         unitCell.className = 'px-4 py-3';
@@ -673,12 +696,21 @@ if (window.__RDE_APP_JS_LOADED__) {
 
         const valueCell = document.createElement('td');
         valueCell.className = 'px-4 py-3';
-        valueCell.textContent = `${formatValue(row.value)} ${row.unit || ''}`.trim();
+        const emissionValue = normaliseValue(row.value);
+        if (typeof emissionValue === 'number' && row.unit && row.unit.includes('#')) {
+          valueCell.textContent = `${emissionValue.toExponential(3)} ${row.unit}`;
+        } else {
+          valueCell.textContent = `${formatValue(emissionValue)} ${row.unit || ''}`.trim();
+        }
 
         const limitCell = document.createElement('td');
         limitCell.className = 'px-4 py-3';
         if (typeof row.limit === 'number') {
-          limitCell.textContent = `≤ ${formatValue(row.limit)} ${row.unit || ''}`.trim();
+          if (row.unit && row.unit.includes('#')) {
+            limitCell.textContent = `≤ ${row.limit.toExponential(3)} ${row.unit}`;
+          } else {
+            limitCell.textContent = `≤ ${formatValue(row.limit)} ${row.unit || ''}`.trim();
+          }
         } else {
           limitCell.textContent = '—';
         }
@@ -746,7 +778,8 @@ if (window.__RDE_APP_JS_LOADED__) {
 
         const valueCell = document.createElement('td');
         valueCell.className = 'px-4 py-3';
-        valueCell.textContent = formatValue(item && (item.value || item.measured));
+        const rawValue = item ? item.value ?? item.measured ?? null : null;
+        valueCell.textContent = formatValue(rawValue);
 
         const unitCell = document.createElement('td');
         unitCell.className = 'px-4 py-3';

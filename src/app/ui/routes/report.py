@@ -40,11 +40,10 @@ def _value_or_na(value: Any, unit: str | None = None) -> str:
             text = f"{value:.2e}".replace("e+", "e")
         else:
             text = f"{value:.2f}".rstrip("0").rstrip(".")
-    elif isinstance(value, int):
-        text = str(value)
-    else:
-        text = str(value)
-    return f"{text} {unit}".strip() if unit else text
+        return f"{text} {unit}".strip() if unit else text
+    if isinstance(value, int):
+        return f"{value} {unit}".strip() if unit else str(value)
+    return str(value)
 
 
 def _card_from_criterion(criterion: Criterion | None, label: str) -> dict[str, Any]:
@@ -55,9 +54,10 @@ def _card_from_criterion(criterion: Criterion | None, label: str) -> dict[str, A
             "status": PassFail.NA.value,
             "tooltip": "",
         }
+    raw_value = criterion.value if criterion.value not in {None, ""} else criterion.measured
     return {
         "label": label,
-        "value": criterion.measured or "n/a",
+        "value": _value_or_na(raw_value, criterion.unit),
         "status": criterion.result.value,
         "tooltip": criterion.limit,
     }

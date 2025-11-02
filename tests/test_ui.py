@@ -107,6 +107,7 @@ def test_analyze_returns_eu7_payload() -> None:
     assert isinstance(criteria, list) and len(criteria) >= 50
     first = criteria[0]
     assert "section" in first and "description" in first and "result" in first
+    assert sum(1 for item in criteria if item.get("value") not in (None, "", "n/a")) >= 40
 
     emissions = payload.get("emissions")
     assert isinstance(emissions, dict)
@@ -132,7 +133,8 @@ def test_analyze_returns_eu7_payload() -> None:
     assert isinstance(final_block, dict)
     assert isinstance(final_block.get("pass"), bool)
     pollutants = final_block.get("pollutants")
-    assert isinstance(pollutants, list)
+    assert isinstance(pollutants, list) and pollutants
+    assert all(p.get("value") not in (None, "", "n/a") for p in pollutants if p.get("result") in {"pass", "fail"})
 
     meta = payload.get("meta")
     assert isinstance(meta, dict)
@@ -170,6 +172,7 @@ def test_results_payload_embedded_in_html() -> None:
     assert isinstance(visual.get("chart", {}).get("series"), list)
 
     assert isinstance(payload.get("criteria"), list) and payload["criteria"]
+    assert sum(1 for item in payload["criteria"] if item.get("value") not in (None, "", "n/a")) >= 40
 
 
 def test_analyze_demo_route_renders_results() -> None:

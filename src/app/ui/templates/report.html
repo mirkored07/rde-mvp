@@ -348,7 +348,7 @@
                   {% if row.clause %}<div style="font-size: 0.75rem; color: #64748b; margin-top: 4px;">{{ row.clause }}</div>{% endif %}
                 </td>
                 <td style="color: #334155;">{{ row.limit }}</td>
-                <td>{{ row.measured or 'n/a' }}</td>
+                <td>{{ (row.value if row.value is not none and row.value != '' else row.measured) or 'n/a' }}</td>
                 <td>{{ row.unit or '—' }}</td>
                 <td>
                   <span class="badge {{ row.result.value|replace('/', '-') }}">{{ row.result.value|upper }}</span>
