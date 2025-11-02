@@ -79,11 +79,8 @@ def render_report(
         raise ValueError(f"Unsupported legislation '{legislation}'.")
 
     base_inputs = dict(data or {})
-    merged_spec = None
-    if spec_override:
-        base_spec = load_spec(legislation)
-        merged_spec = _merge_dict(base_spec, spec_override)
-    return evaluate_eu7_ld(base_inputs, spec_override=merged_spec)
+    _ = spec_override  # retained for compatibility with legacy callers
+    return evaluate_eu7_ld(base_inputs)
 
 
 def build_results_payload(
@@ -100,111 +97,8 @@ def evaluate_eu7_ld(
     *,
     spec_override: Mapping[str, Any] | None = None,
 ) -> Dict[str, Any]:
-    raw_inputs = dict(raw_inputs or {})
-    spec = load_spec("eu7_ld")
-    if spec_override:
-        spec = _merge_dict(spec, spec_override)
-
-    data = {
-        "pn_zero_pre": raw_inputs.get("pn_zero_pre", 0),
-        "urban_km": raw_inputs.get("urban_km", 11.0),
-        "expressway_km": raw_inputs.get("expressway_km", 32.0),
-        "avg_speed_urban_kmh": raw_inputs.get("avg_speed_urban_kmh", 28.0),
-        "gps_max_loss_s": raw_inputs.get("gps_max_loss_s", 1),
-        "gps_total_loss_s": raw_inputs.get("gps_total_loss_s", 3),
-        "nox_mg_per_km": raw_inputs.get("nox_mg_per_km", 9236.0),
-        "pn_per_km": raw_inputs.get("pn_per_km", 1.055e7),
-        "co_mg_per_km": raw_inputs.get("co_mg_per_km", 0.0),
-    }
-
-    sections = [
-        eu7_ld.compute_zero_span(data, spec),
-        eu7_ld.compute_trip_composition(data, spec),
-        eu7_ld.compute_dynamics(data, spec),
-        eu7_ld.compute_gps_validity(data, spec),
-        eu7_ld.compute_emissions_summary(data, spec),
-    ]
-    final = eu7_ld.compute_final_conformity(sections[-1], spec)
-
-    total_distance_km = float(
-        raw_inputs.get("total_distance_km")
-        or data.get("urban_km", 0.0)
-        + data.get("expressway_km", 0.0)
-    )
-    total_time_min = float(raw_inputs.get("total_time_min") or 108.0)
-
-    default_speed_bins = [
-        {
-            "bin": "urban",
-            "time_s": float(raw_inputs.get("urban_time_s") or 4200),
-            "distance_km": float(data.get("urban_km", 0.0)),
-            "pass": True,
-        },
-        {
-            "bin": "rural",
-            "time_s": float(raw_inputs.get("rural_time_s") or 2100),
-            "distance_km": float(raw_inputs.get("rural_km") or 15.0),
-            "pass": True,
-        },
-        {
-            "bin": "motorway",
-            "time_s": float(raw_inputs.get("motorway_time_s") or 1800),
-            "distance_km": float(data.get("expressway_km", 0.0)),
-            "pass": True,
-        },
-    ]
-
-    speed_bin_coverage = raw_inputs.get("speed_bin_coverage")
-    if not isinstance(speed_bin_coverage, list) or not speed_bin_coverage:
-        speed_bin_coverage = default_speed_bins
-
-    visual = {
-        "map": {"center": {"lat": 47.07, "lon": 15.44, "zoom": 10}, "latlngs": []},
-        "chart": {"series": []},
-    }
-    kpi_numbers = [
-        {
-            "key": "nox_mg_per_km",
-            "label": "NOx (mg/km)",
-            "value": data["nox_mg_per_km"],
-            "unit": "mg/km",
-        },
-        {
-            "key": "pn_per_km",
-            "label": "PN (#/km)",
-            "value": data["pn_per_km"],
-            "unit": "#/km",
-        },
-        {
-            "key": "total_distance_km",
-            "label": "Distance (km)",
-            "value": total_distance_km,
-            "unit": "km",
-        },
-        {
-            "key": "total_time_min",
-            "label": "Duration (min)",
-            "value": total_time_min,
-            "unit": "min",
-        },
-    ]
-
-    meta = {
-        "legislation": "EU7 Light-Duty",
-        "total_distance_km": total_distance_km,
-        "total_time_min": total_time_min,
-        "nox_mg_per_km": data["nox_mg_per_km"],
-        "pn_per_km": data["pn_per_km"],
-        "speed_bin_coverage": speed_bin_coverage,
-    }
-
-    return {
-        "visual": visual,
-        "kpi_numbers": kpi_numbers,
-        "sections": sections,
-        "final": final,
-        "meta": meta,
-    }
+    _ = spec_override  # maintained for backward compatibility with legacy signatures
+    return eu7_ld.build_payload(raw_inputs)
 
 
 __all__ = ["build_results_payload", "load_spec", "render_report", "evaluate_eu7_ld"]
