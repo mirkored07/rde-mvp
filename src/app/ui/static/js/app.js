@@ -454,6 +454,19 @@ if (window.__RDE_APP_JS_LOADED__) {
       return badge;
     }
 
+    function readValue(criterion) {
+      if (!criterion || typeof criterion !== 'object') {
+        return 'n/a';
+      }
+      if (criterion.value !== undefined && criterion.value !== null) {
+        return criterion.value;
+      }
+      if (criterion.measured !== undefined && criterion.measured !== null) {
+        return criterion.measured;
+      }
+      return 'n/a';
+    }
+
     function formatValue(value) {
       const normalised = normaliseValue(value);
       if (normalised === null || typeof normalised === 'undefined') {
@@ -593,7 +606,7 @@ if (window.__RDE_APP_JS_LOADED__) {
 
         const valueCell = document.createElement('td');
         valueCell.className = 'px-4 py-3';
-        const rawValue = item ? item.value ?? item.measured ?? null : null;
+        const rawValue = readValue(item);
         valueCell.textContent = formatValue(rawValue);
 
         const unitCell = document.createElement('td');
@@ -778,7 +791,7 @@ if (window.__RDE_APP_JS_LOADED__) {
 
         const valueCell = document.createElement('td');
         valueCell.className = 'px-4 py-3';
-        const rawValue = item ? item.value ?? item.measured ?? null : null;
+        const rawValue = readValue(item);
         valueCell.textContent = formatValue(rawValue);
 
         const unitCell = document.createElement('td');
