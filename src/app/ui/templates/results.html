@@ -115,12 +115,17 @@
   </section>
 </section>
 
+<!-- Inject payload first -->
 <script>
   window.results_payload = {{ payload_json | safe }};
   window.__RDE_RESULT__ = window.results_payload;
   document.dispatchEvent(new Event("rde:payload-ready"));
 </script>
+
+<!-- Then load the bundle -->
 <script src="{{ url_for('static', path='js/app.js') }}"></script>
+
+<!-- (If you use HTMX, keep afterSwap trigger as well) -->
 <script>
   document.addEventListener("htmx:afterSwap", function() {
     document.dispatchEvent(new Event("rde:payload-ready"));

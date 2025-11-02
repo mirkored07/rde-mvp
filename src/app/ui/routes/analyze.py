@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import json
+import os
 import statistics
-from typing import Any, Sequence
+from datetime import datetime, timezone
+from typing import Any, Iterable, Sequence
 
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile
+from fastapi.responses import HTMLResponse
 from starlette.templating import Jinja2Templates
 
 from src.app.data.ingestion.ecu_reader import read_ecu_csv
@@ -18,6 +21,47 @@ from src.app.ui.routes._eu7_payload import build_normalised_payload, enrich_payl
 
 router = APIRouter()
 templates = Jinja2Templates(directory="src/app/ui/templates")
+
+REPORT_DIR = os.getenv("REPORT_DIR", os.path.join(os.getcwd(), "reports"))
+
+
+def _load_sample_payload() -> dict[str, Any]:
+    sample_path = os.path.join(REPORT_DIR, "sample.json")
+    if os.path.exists(sample_path):
+        with open(sample_path, "r", encoding="utf-8") as file:
+            return json.load(file)
+    return {
+        "meta": {
+            "testId": "DEMO_001",
+            "engine": "ICE",
+            "propulsion": "ICE",
+            "legislation": "UN 168 LD – Certification (EU7 LD aligned)",
+            "testStart": "2024-01-01T00:00:00Z",
+            "printout": "2024-01-01T01:00:00Z",
+            "velocitySource": "ECU",
+        },
+        "limits": {
+            "CO_mg_km_WLTP": 1000,
+            "NOx_mg_km_RDE": 60,
+            "PN_hash_km_RDE": 6e11,
+        },
+        "criteria": [],
+        "emissions": {
+            "urban": {
+                "label": "Urban",
+                "NOx_mg_km": 35.0,
+                "PN_hash_km": 1.0e9,
+                "CO_mg_km": 120.0,
+            },
+            "trip": {
+                "label": "Trip",
+                "NOx_mg_km": 28.0,
+                "PN_hash_km": 9.5e8,
+                "CO_mg_km": 80.0,
+            },
+        },
+        "device": {"gasPEMS": "Demo Gas PEMS", "pnPEMS": "Demo PN PEMS"},
+    }
 
 
 async def _as_text(upload: UploadFile | None) -> str | None:
@@ -59,12 +103,31 @@ def _parse_timestamp(raw: Any) -> datetime | None:
     text = str(raw).strip()
     if not text:
         return None
+
     if text.endswith("Z"):
         text = text[:-1] + "+00:00"
+
     try:
         return datetime.fromisoformat(text)
-    except ValueError:
-        return None
+    except Exception:
+        pass
+
+    fmts = [
+        "%Y-%m-%dT%H:%M:%S%z",
+        "%Y-%m-%dT%H:%M:%S.%f%z",
+        "%Y-%m-%d %H:%M:%S%z",
+        "%Y-%m-%dT%H:%M:%S",
+        "%Y-%m-%dT%H:%M:%S.%f",
+    ]
+    for fmt in fmts:
+        try:
+            dt = datetime.strptime(text, fmt)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt
+        except Exception:
+            continue
+    return None
 
 
 def _mean(values: Iterable[float | None]) -> float | None:
@@ -348,23 +411,21 @@ def _build_results_payload(
     return build_normalised_payload(enriched)
 
 
-@router.get("/analyze", include_in_schema=False)
-async def analyze_demo(request: Request, demo: str | None = None):
-    if demo not in {"1", "true", "yes"}:
-        raise HTTPException(status_code=400, detail="Demo flag required for GET /analyze.")
+@router.get("/analyze", include_in_schema=False, response_class=HTMLResponse)
+async def analyze_demo(request: Request, demo: int | None = None):
+    if demo:
+        payload = _load_sample_payload()
+        payload_json = json.dumps(payload, separators=(",", ":"))
+        return templates.TemplateResponse(
+            "results.html",
+            {
+                "request": request,
+                "results_payload": payload,
+                "results_payload_json": payload_json,
+            },
+        )
 
-    pems_rows, gps_rows, ecu_rows = _prepare_demo_rows()
-    engine_inputs, visual_data = _prepare_inputs(pems_rows, gps_rows)
-    row_counts = _build_row_counts(pems_rows, gps_rows, ecu_rows)
-
-    results_payload = _build_results_payload(
-        engine_inputs=engine_inputs,
-        visual_data=visual_data,
-        row_counts=row_counts,
-        meta_overrides={"test_id": "demo-run"},
-    )
-
-    return _render_response(request, results_payload)
+    raise HTTPException(status_code=400, detail="Demo flag required for GET /analyze.")
 
 
 @router.post("/analyze", include_in_schema=False)
