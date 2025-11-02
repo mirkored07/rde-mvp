@@ -31,13 +31,11 @@ def _bool_from_result(result: PassFail | str | None) -> bool | None:
 
 def _criterion_row(item: Criterion) -> dict[str, Any]:
     result_literal = str(item.result)
-    raw_value: Any
-    if item.value is not None:
-        raw_value = item.value
-    elif item.measured not in {None, ""}:
-        raw_value = item.measured
-    else:
-        raw_value = None
+    computed_value: Any = item.value
+    value_text = "n/a" if computed_value is None else str(computed_value)
+    measured_text = item.measured
+    if measured_text in {None, ""}:
+        measured_text = value_text
     return {
         "id": item.id,
         "section": item.section,
@@ -47,8 +45,8 @@ def _criterion_row(item: Criterion) -> dict[str, Any]:
         "description": item.description,
         "condition": item.limit,
         "limit": item.limit,
-        "value": raw_value,
-        "measured": item.measured,
+        "value": value_text,
+        "measured": measured_text,
         "unit": item.unit,
         "result": result_literal,
         "pass": _bool_from_result(result_literal),
