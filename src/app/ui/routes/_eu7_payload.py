@@ -11,10 +11,14 @@ from src.app.utils.payload import ensure_results_payload_defaults
 
 SECTION_TITLES: tuple[str, ...] = (
     "Pre/Post Checks (Zero/Span)",
+    "Span Gas Coverage",
     "Trip Composition & Timing",
-    "Dynamics & MAW",
+    "Cold-Start Window",
     "GPS Validity",
+    "Dynamics & MAW",
+    "CO₂ Characteristic Windows (MAW)",
     "Emissions Summary",
+    "Final Conformity",
 )
 
 
@@ -32,10 +36,9 @@ def _bool_from_result(result: PassFail | str | None) -> bool | None:
 def _criterion_row(item: Criterion) -> dict[str, Any]:
     result_literal = str(item.result)
     computed_value: Any = item.value
-    value_text = "n/a" if computed_value is None else str(computed_value)
     measured_text = item.measured
     if measured_text in {None, ""}:
-        measured_text = value_text
+        measured_text = computed_value
     return {
         "id": item.id,
         "section": item.section,
@@ -45,7 +48,7 @@ def _criterion_row(item: Criterion) -> dict[str, Any]:
         "description": item.description,
         "condition": item.limit,
         "limit": item.limit,
-        "value": value_text,
+        "value": computed_value,
         "measured": measured_text,
         "unit": item.unit,
         "result": result_literal,

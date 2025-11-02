@@ -397,7 +397,7 @@
     <script>
       window.__EU7_REPORT__ = {{ report_payload | tojson | safe }};
       window.__RDE_RESULT__ = window.__EU7_REPORT__;
-      window.dispatchEvent(new Event('rde:payload-ready'));
+      document.dispatchEvent(new Event('rde:payload-ready'));
       (async () => {
         try {
           const response = await fetch(`/api/report/{{ report.meta.testId }}`);
@@ -405,7 +405,7 @@
             const latest = await response.json();
             window.__EU7_REPORT__ = latest;
             window.__RDE_RESULT__ = latest;
-            window.dispatchEvent(new Event('rde:payload-ready'));
+            document.dispatchEvent(new Event('rde:payload-ready'));
           }
         } catch (error) {
           console.warn('Report refresh failed', error);

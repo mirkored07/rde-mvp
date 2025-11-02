@@ -100,7 +100,7 @@ def test_analyze_returns_eu7_payload() -> None:
     limits = payload.get("limits")
     assert isinstance(limits, dict)
     assert limits.get("NOx_mg_km_RDE") == 60.0
-    assert limits.get("PN_hash_km_RDE") == pytest.approx(6.0e11)
+    assert limits.get("PN10_hash_km_RDE") == pytest.approx(6.0e11)
     assert limits.get("CO_mg_km_WLTP") == 1000.0
 
     criteria = payload.get("criteria")
@@ -119,13 +119,17 @@ def test_analyze_returns_eu7_payload() -> None:
     assert device.get("gasPEMS")
 
     sections = payload.get("sections")
-    assert isinstance(sections, list) and len(sections) == 5
+    assert isinstance(sections, list) and len(sections) == 9
     expected_titles = {
         "Pre/Post Checks (Zero/Span)",
+        "Span Gas Coverage",
         "Trip Composition & Timing",
-        "Dynamics & MAW",
+        "Cold-Start Window",
         "GPS Validity",
+        "Dynamics & MAW",
+        "CO₂ Characteristic Windows (MAW)",
         "Emissions Summary",
+        "Final Conformity",
     }
     assert {section.get("title") for section in sections} == expected_titles
 
@@ -134,7 +138,10 @@ def test_analyze_returns_eu7_payload() -> None:
     assert isinstance(final_block.get("pass"), bool)
     pollutants = final_block.get("pollutants")
     assert isinstance(pollutants, list) and pollutants
-    assert all(p.get("value") not in (None, "", "n/a") for p in pollutants if p.get("result") in {"pass", "fail"})
+    assert all(isinstance(p.get("value"), (int, float)) for p in pollutants)
+    final_conformity = payload.get("final_conformity")
+    assert final_conformity["NOx_mg_km"]["limit"] == 60.0
+    assert final_conformity["PN10_hash_km"]["limit"] == pytest.approx(6.0e11)
 
     meta = payload.get("meta")
     assert isinstance(meta, dict)
@@ -172,7 +179,7 @@ def test_results_payload_embedded_in_html() -> None:
     assert isinstance(visual.get("chart", {}).get("series"), list)
 
     assert isinstance(payload.get("criteria"), list) and payload["criteria"]
-    assert sum(1 for item in payload["criteria"] if item.get("value") not in (None, "", "n/a")) >= 40
+    assert sum(1 for item in payload["criteria"] if isinstance(item.get("value"), (int, float))) >= 40
 
 
 def test_analyze_demo_route_renders_results() -> None:
