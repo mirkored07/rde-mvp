@@ -8,7 +8,10 @@ from typing import Any, Iterable, Mapping, Sequence
 from src.app.reporting.eu7ld_report import build_report_data, group_criteria_by_section
 from src.app.reporting.schemas import Criterion, PassFail, ReportData
 from src.app.utils.payload import ensure_results_payload_defaults
-from src.app.regulation.eu7ld_un168_limits import PN10_RDE_FINAL_PER_KM
+from src.app.regulation.eu7ld_un168_limits import (
+    NOX_RDE_FINAL_MG_PER_KM,
+    PN10_RDE_FINAL_PER_KM,
+)
 
 SECTION_TITLES: tuple[str, ...] = (
     "Pre/Post Checks (Zero/Span)",
@@ -70,6 +73,97 @@ def _build_final_block(criteria: Sequence[Criterion]) -> dict[str, Any]:
     pass_values = [row["pass"] for row in rows if row.get("pass") is not None]
     overall = bool(pass_values) and all(pass_values)
     return {"pass": overall, "pollutants": rows}
+
+
+def _clamp_non_negative(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return None
+    return numeric if numeric >= 0.0 else 0.0
+
+
+def _build_final_conformity(
+    *,
+    emissions: Mapping[str, Any] | None,
+    limits: Mapping[str, Any] | None,
+    final_block: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    emissions = emissions or {}
+    limits = limits or {}
+
+    trip = emissions.get("trip") if isinstance(emissions.get("trip"), Mapping) else {}
+
+    def _limit(key: str, default: float) -> float:
+        raw = limits.get(key)
+        try:
+            return float(raw)
+        except (TypeError, ValueError):
+            return float(default)
+
+    final_conformity: dict[str, Any] = {}
+
+    final_nox = _clamp_non_negative(trip.get("NOx_mg_km"))
+    nox_limit = _limit("NOx_mg_km_RDE", NOX_RDE_FINAL_MG_PER_KM)
+    if final_nox is not None:
+        final_conformity["NOx_mg_km"] = {
+            "value": final_nox,
+            "limit": nox_limit,
+            "pass": final_nox <= nox_limit,
+        }
+
+    final_pn = _clamp_non_negative(trip.get("PN10_hash_km") or trip.get("PN_hash_km"))
+    pn_limit = _limit("PN10_hash_km_RDE", PN10_RDE_FINAL_PER_KM)
+    if final_pn is not None:
+        final_conformity["PN10_hash_km"] = {
+            "value": final_pn,
+            "limit": pn_limit,
+            "pass": final_pn <= pn_limit,
+        }
+
+    final_co = _clamp_non_negative(trip.get("CO_mg_km"))
+    if final_co is not None:
+        final_conformity["CO_mg_km"] = {
+            "value": final_co,
+            "limit": None,
+            "pass": True,
+        }
+
+    if final_conformity or not isinstance(final_block, Mapping):
+        return final_conformity
+
+    fallback_rows = final_block.get("pollutants")
+    if isinstance(fallback_rows, Iterable):
+        for item in fallback_rows:
+            if not isinstance(item, Mapping):
+                continue
+            name = str(item.get("name") or item.get("criterion") or item.get("id") or "")
+            if not name:
+                continue
+            value = _clamp_non_negative(item.get("value"))
+            if value is None:
+                continue
+            limit: float | None
+            if "NOx" in name:
+                limit = nox_limit
+                key = "NOx_mg_km"
+            elif "PN" in name:
+                limit = pn_limit
+                key = "PN10_hash_km"
+            elif "CO" in name:
+                limit = None
+                key = "CO_mg_km"
+            else:
+                continue
+            final_conformity[key] = {
+                "value": value,
+                "limit": limit,
+                "pass": True if limit is None else value <= limit,
+            }
+
+    return final_conformity
 
 
 def _timestamp_iso() -> str:
@@ -218,6 +312,11 @@ def build_normalised_payload(payload: Mapping[str, Any] | None) -> dict[str, Any
 
     final_section = grouped.get("Final Conformity", [])
     output["final"] = _build_final_block(final_section)
+    output["final_conformity"] = _build_final_conformity(
+        emissions=output.get("emissions"),
+        limits=output.get("limits"),
+        final_block=output.get("final"),
+    )
 
     return output
 
