@@ -8,6 +8,7 @@ from typing import Any, Iterable, Mapping, Sequence
 from src.app.reporting.eu7ld_report import build_report_data, group_criteria_by_section
 from src.app.reporting.schemas import Criterion, PassFail, ReportData
 from src.app.utils.payload import ensure_results_payload_defaults
+from src.app.regulation.eu7ld_un168_limits import PN10_RDE_FINAL_PER_KM
 
 SECTION_TITLES: tuple[str, ...] = (
     "Pre/Post Checks (Zero/Span)",
@@ -203,7 +204,11 @@ def build_normalised_payload(payload: Mapping[str, Any] | None) -> dict[str, Any
 
     output: dict[str, Any] = dict(normalised)
     output["meta"] = meta_block
-    output["limits"] = canonical.get("limits", {})
+
+    limits_block = dict(canonical.get("limits") or {})
+    limits_block.setdefault("PN_hash_km_RDE", PN10_RDE_FINAL_PER_KM)
+    limits_block["PN10_hash_km_RDE"] = PN10_RDE_FINAL_PER_KM
+    output["limits"] = limits_block
     output["criteria"] = canonical.get("criteria", [])
     output["emissions"] = canonical.get("emissions", {})
     output["device"] = canonical.get("device", {})

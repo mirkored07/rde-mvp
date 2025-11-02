@@ -689,10 +689,11 @@ def _build_trip_rows(inputs: _Inputs) -> list[Dict[str, Any]]:
             clause="UN R168 Annex 7 App.2 §6.4.3",
             description="Cumulative positive elevation (urban)",
             condition=f"≤ {CUM_POS_ELEV_URBAN_M_PER_100KM_MAX:.0f} m/100 km",
-            value=urban.cumulative_positive_elevation_per_100km(),
+            value=urban.cumulative_positive_elevation_per_100km,
             unit="m/100 km",
             result=_result(
-                urban.cumulative_positive_elevation_per_100km() <= CUM_POS_ELEV_URBAN_M_PER_100KM_MAX
+                urban.cumulative_positive_elevation_per_100km
+                <= CUM_POS_ELEV_URBAN_M_PER_100KM_MAX
             ),
         )
     )
