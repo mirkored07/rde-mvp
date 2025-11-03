@@ -8,7 +8,7 @@ import re
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable, Mapping
+from typing import Any, Iterable, Mapping, MutableMapping, Sequence
 
 from src.app.regulation.eu7ld_un168_limits import (
     ACCELERATION_EVENTS_MIN,
@@ -75,6 +75,50 @@ DEFAULT_LIMITS = FinalLimitsEU7LD(
     NOx_mg_km_RDE=FINAL_NOX_MG_KM_LIMIT,
     PN_hash_km_RDE=FINAL_PN_HASH_KM_LIMIT,
 )
+
+
+def _to_float_or_none(x: Any) -> Any:
+    if x is None:
+        return None
+    if isinstance(x, (int, float)):
+        return float(x)
+    if isinstance(x, str):
+        s = x.strip().lower()
+        if s in {"n/a", "na", ""}:
+            return None
+        try:
+            return float(s.replace(",", ""))
+        except ValueError:
+            return x
+    return x
+
+
+def _sanitize(obj: Any) -> Any:
+    """Recursively convert 'n/a' to None and parse numeric-looking strings."""
+    if isinstance(obj, Mapping):
+        return {k: _sanitize(v) for k, v in obj.items()}
+    if isinstance(obj, Sequence) and not isinstance(obj, (str, bytes, bytearray)):
+        return [_sanitize(v) for v in obj]
+    return _to_float_or_none(obj)
+
+
+def _ensure_numeric_emissions(emissions: MutableMapping[str, Any]) -> None:
+    """
+    Force numeric floats for emissions.{urban,rural,motorway,trip}.{NOx_mg_km, PN10_hash_km, CO_mg_km}.
+    Missing/None -> 0.0 to satisfy PDF schema.
+    """
+
+    phases = ("urban", "rural", "motorway", "trip")
+    keys = ("NOx_mg_km", "PN10_hash_km", "CO_mg_km")
+    for ph in phases:
+        block = emissions.get(ph) or {}
+        if isinstance(block, Mapping):
+            block = dict(block)
+        for k in keys:
+            v = _to_float_or_none(block.get(k))
+            block[k] = 0.0 if v is None else float(v)
+        emissions[ph] = block
+
 
 _REPORT_DIR = Path(os.environ.get("REPORT_DIR", "reports"))
 
@@ -1159,21 +1203,49 @@ def _apply_guardrails_inplace(report: ReportData) -> None:
 
 
 def build_report_data(source: Mapping[str, Any]) -> ReportData:
-    if {"meta", "limits", "criteria", "emissions", "device"}.issubset(source.keys()):
-        report = ReportData.model_validate(source)
+    data: dict[str, Any] = dict(source)
+
+    if "device" not in data and "devices" in data:
+        data["device"] = data["devices"]
+
+    data = _sanitize(data)
+
+    if isinstance(data.get("emissions"), Mapping):
+        emissions_block = dict(data["emissions"])  # type: ignore[arg-type]
+        _ensure_numeric_emissions(emissions_block)
+        data["emissions"] = emissions_block
+
+    if isinstance(data.get("final_conformity"), Mapping):
+        final_conf = data["final_conformity"]
+        if isinstance(final_conf, Mapping):
+            final_conf = dict(final_conf)
+        for name in ("NOx_mg_km", "PN10_hash_km"):
+            fc = final_conf.get(name) or {}
+            if isinstance(fc, Mapping):
+                fc = dict(fc)
+            for k in ("value", "limit"):
+                raw = _to_float_or_none(fc.get(k))
+                fc[k] = 0.0 if raw is None else float(raw)
+            if "pass" in fc and not isinstance(fc["pass"], bool):
+                fc["pass"] = bool(fc["pass"])
+            final_conf[name] = fc
+        data["final_conformity"] = final_conf
+
+    if {"meta", "limits", "criteria", "emissions", "device"}.issubset(data.keys()):
+        report = ReportData.model_validate(data)
         _apply_guardrails_inplace(report)
         return report
 
-    meta_block = source.get("meta") if isinstance(source.get("meta"), Mapping) else {}
-    metrics = _extract_metrics(source)
-    emissions = _build_emissions(source)
+    meta_block = data.get("meta") if isinstance(data.get("meta"), Mapping) else {}
+    metrics = _extract_metrics(data)
+    emissions = _build_emissions(data)
     criteria = _build_criteria(metrics, emissions)
     report = ReportData(
         meta=_build_trip_meta(meta_block),
         limits=DEFAULT_LIMITS,
         criteria=criteria,
         emissions=emissions,
-        device=_build_device(source),
+        device=_build_device(data),
     )
     _apply_guardrails_inplace(report)
     return report
