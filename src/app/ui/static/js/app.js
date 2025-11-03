@@ -1,243 +1,272 @@
-if (window.__RDE_APP_JS_LOADED__) {
-  // already initialized
+window.RDE = window.RDE || {};
+if (window.RDE.initialized) {
+  console.debug('[RDE] app.js already initialized');
 } else {
-  window.__RDE_APP_JS_LOADED__ = true;
-  (function RDE_APP_BOOTSTRAP() {
-    'use strict';
+  window.RDE.initialized = true;
 
-    function initDropzones(root) {
-      const context = root || document;
-      try {
-        const zones = Array.from(context.querySelectorAll('[data-dropzone]'));
-        if (!zones.length) {
-          return false;
-        }
+  const significantFormatter = new Intl.NumberFormat('en-US', { maximumSignificantDigits: 4 });
 
-        zones.forEach((zone) => {
-          if (!zone || zone._dropzoneBound) {
-            return;
-          }
-          zone._dropzoneBound = true;
+  const fmt = (value) => {
+    if (value == null || value === 'n/a') return 'n/a';
+    if (typeof value === 'number') {
+      if (!Number.isFinite(value)) return 'n/a';
+      return significantFormatter.format(value);
+    }
+    return String(value);
+  };
 
-          const input = zone.querySelector('input[type="file"]');
-          const feedback = zone.querySelector('[data-file-label]');
-          const errorEl = zone.querySelector('[data-error]');
+  const fmtRange = (min, max, unit = '') => {
+    if (typeof min !== 'number' || typeof max !== 'number') return 'n/a';
+    const unitText = unit ? ` ${unit}` : '';
+    return `${fmt(min)}–${fmt(max)}${unitText}`;
+  };
 
-          const defaultFeedback = feedback ? feedback.textContent : '';
-          if (feedback && !feedback.dataset.defaultLabel) {
-            feedback.dataset.defaultLabel = defaultFeedback;
-          }
+  window.RDE.util = { fmt, fmtRange };
 
-          const allowedRaw = (input && input.dataset && input.dataset.allowed) || '';
-          const allowed = allowedRaw
-            .split(',')
-            .map((value) => value.trim().toLowerCase())
-            .filter(Boolean);
+  function accepts(file, acceptList) {
+    if (!file || !acceptList || !acceptList.length) return true;
+    const name = (file.name || '').toLowerCase();
+    const type = (file.type || '').toLowerCase();
+    return acceptList.some((rule) => {
+      if (!rule) return false;
+      const value = rule.toLowerCase();
+      if (value.startsWith('.')) {
+        return name.endsWith(value);
+      }
+      return type.includes(value);
+    });
+  }
 
-          let maxSizeMb = 0;
-          if (input && input.dataset && input.dataset.maxSizeMb) {
-            const parsed = Number.parseFloat(input.dataset.maxSizeMb);
-            if (!Number.isNaN(parsed) && parsed > 0) {
-              maxSizeMb = parsed;
-            }
-          }
-          const maxSizeBytes = maxSizeMb ? maxSizeMb * 1024 * 1024 : 0;
+  function formatBytes(bytes) {
+    if (!bytes || Number.isNaN(bytes)) return '';
+    if (bytes < 1024) return `${bytes} B`;
+    const kb = bytes / 1024;
+    if (kb < 1024) return `${kb.toFixed(1)} KB`;
+    const mb = kb / 1024;
+    return `${mb.toFixed(1)} MB`;
+  }
 
-          const setFeedback = (message) => {
-            if (feedback) {
-              feedback.textContent = message || feedback.dataset.defaultLabel || '';
-            }
-          };
+  function createFileInput(el, options) {
+    let input = el.querySelector('input[type="file"]');
+    if (input) return input;
 
-          const showError = (message) => {
-            if (zone) {
-              zone.classList.add('has-error');
-              zone.classList.remove('has-file');
-            }
-            if (errorEl) {
-              errorEl.textContent = message || '';
-              errorEl.classList.remove('hidden');
-            }
-            setFeedback(feedback && feedback.dataset ? feedback.dataset.defaultLabel : defaultFeedback);
-          };
-
-          const clearError = () => {
-            if (zone) {
-              zone.classList.remove('has-error');
-            }
-            if (errorEl) {
-              errorEl.textContent = '';
-              errorEl.classList.add('hidden');
-            }
-          };
-
-          const validateFile = (file) => {
-            if (!file) {
-              return { valid: false, reason: '' };
-            }
-
-            if (allowed.length) {
-              const extension = file.name && file.name.includes('.')
-                ? `.${file.name.split('.').pop().toLowerCase()}`
-                : '';
-              const mimeType = (file.type || '').toLowerCase();
-              const matchesExtension = extension && allowed.includes(extension);
-              const matchesMime = mimeType && allowed.includes(mimeType);
-              if (!matchesExtension && !matchesMime) {
-                return {
-                  valid: false,
-                  reason: `File must be one of: ${allowed.join(', ')}`,
-                };
-              }
-            }
-
-            if (maxSizeBytes && file.size > maxSizeBytes) {
-              return {
-                valid: false,
-                reason: `File must be smaller than ${maxSizeMb} MB`,
-              };
-            }
-
-            return { valid: true };
-          };
-
-          const formatSize = (bytes) => {
-            if (!bytes || Number.isNaN(bytes)) {
-              return '';
-            }
-            if (bytes < 1024) {
-              return `${bytes} B`;
-            }
-            const kb = bytes / 1024;
-            if (kb < 1024) {
-              return `${kb.toFixed(1)} KB`;
-            }
-            const mb = kb / 1024;
-            return `${mb.toFixed(1)} MB`;
-          };
-
-          const updateFromInput = () => {
-            const file = input && input.files ? input.files[0] : undefined;
-            if (!file) {
-              if (zone) {
-                zone.classList.remove('has-file');
-              }
-              clearError();
-              setFeedback(defaultFeedback);
-              return;
-            }
-
-            const { valid, reason } = validateFile(file);
-            if (!valid) {
-              if (input) {
-                input.value = '';
-              }
-              showError(reason || 'Invalid file.');
-              return;
-            }
-
-            clearError();
-            if (zone) {
-              zone.classList.add('has-file');
-            }
-            const sizeLabel = formatSize(file.size);
-            setFeedback(sizeLabel ? `${file.name} (${sizeLabel})` : file.name);
-          };
-
-          if (input) {
-            input.addEventListener('change', () => {
-              updateFromInput();
-            });
-          }
-
-          const dragState = { counter: 0 };
-
-          const onDragEnter = (event) => {
-            if (!event) return;
-            event.preventDefault();
-            dragState.counter += 1;
-            zone.classList.add('is-dragover');
-          };
-
-          const onDragOver = (event) => {
-            if (!event) return;
-            event.preventDefault();
-            if (event.dataTransfer) {
-              event.dataTransfer.dropEffect = 'copy';
-            }
-            zone.classList.add('is-dragover');
-          };
-
-          const onDragLeave = (event) => {
-            if (!event) return;
-            dragState.counter = Math.max(0, dragState.counter - 1);
-            if (dragState.counter === 0) {
-              zone.classList.remove('is-dragover');
-            }
-          };
-
-          const onDrop = (event) => {
-            if (!event) return;
-            event.preventDefault();
-            dragState.counter = 0;
-            zone.classList.remove('is-dragover');
-            if (!input) {
-              return;
-            }
-            const files = event.dataTransfer && event.dataTransfer.files;
-            if (!files || !files.length) {
-              return;
-            }
-            const file = files[0];
-            const { valid, reason } = validateFile(file);
-            if (!valid) {
-              showError(reason || 'Invalid file.');
-              return;
-            }
-            clearError();
-            let assigned = false;
-            if (typeof DataTransfer !== 'undefined') {
-              try {
-                const dataTransfer = new DataTransfer();
-                dataTransfer.items.add(file);
-                input.files = dataTransfer.files;
-                assigned = true;
-              } catch (assignError) {
-                console.warn('DataTransfer assignment failed:', assignError);
-              }
-            }
-            if (!assigned) {
-              try {
-                input.files = event.dataTransfer.files;
-                assigned = true;
-              } catch (fallbackError) {
-                console.warn('FileList assignment failed:', fallbackError);
-              }
-            }
-            if (!assigned) {
-              showError('Unable to use dropped file. Please use browse instead.');
-              return;
-            }
-            const changeEvent = new Event('change', { bubbles: true });
-            input.dispatchEvent(changeEvent);
-          };
-
-          zone.addEventListener('dragenter', onDragEnter);
-          zone.addEventListener('dragover', onDragOver);
-          zone.addEventListener('dragleave', onDragLeave);
-          zone.addEventListener('dragend', onDragLeave);
-          zone.addEventListener('drop', onDrop);
-
-          updateFromInput();
-        });
-        return true;
-      } catch (error) {
-        console.warn('Dropzone init failed:', error);
-        return false;
+    input = document.createElement('input');
+    input.type = 'file';
+    input.style.display = 'none';
+    if (options && options.multiple) {
+      input.multiple = true;
+    }
+    if (options && options.name) {
+      input.name = options.name;
+    }
+    if (options && options.required) {
+      input.required = true;
+    }
+    if (options && options.form) {
+      input.setAttribute('form', options.form);
+    }
+    if (options && options.accept && options.accept.length) {
+      const extensions = options.accept.filter((rule) => rule && rule.startsWith('.')).join(',');
+      if (extensions) {
+        input.setAttribute('accept', extensions);
       }
     }
+    el.appendChild(input);
+    return input;
+  }
 
-    window.initDropzones = initDropzones;
+  function assignFilesToInput(input, files) {
+    if (!input) return false;
+    if (!files || !files.length) {
+      input.value = '';
+      return true;
+    }
+    let assigned = false;
+    if (typeof DataTransfer !== 'undefined') {
+      try {
+        const dataTransfer = new DataTransfer();
+        files.forEach((file) => dataTransfer.items.add(file));
+        input.files = dataTransfer.files;
+        assigned = true;
+      } catch (error) {
+        console.warn('[RDE] DataTransfer assignment failed:', error);
+      }
+    }
+    if (!assigned) {
+      try {
+        input.files = files;
+        assigned = true;
+      } catch (error) {
+        console.warn('[RDE] FileList assignment failed:', error);
+      }
+    }
+    if (!assigned) {
+      alert('Unable to use dropped files. Please use the browse button.');
+    }
+    return assigned;
+  }
+
+  function wireDropzone(el, acceptList, onFiles, options = {}) {
+    if (!el || el.dataset.rdeDropzone === 'bound') return;
+    el.dataset.rdeDropzone = 'bound';
+
+    const labelEl = el.querySelector('[data-file-label]');
+    const errorEl = el.querySelector('[data-error]');
+    const defaultLabel = labelEl ? labelEl.textContent : '';
+    const input = createFileInput(el, options);
+    const maxSizeMb = typeof options.maxSizeMb === 'number'
+      ? options.maxSizeMb
+      : Number.parseFloat(el.dataset.maxSizeMb || '') || 0;
+    const maxSizeBytes = maxSizeMb > 0 ? maxSizeMb * 1024 * 1024 : 0;
+
+    const clearError = () => {
+      if (errorEl) {
+        errorEl.textContent = '';
+        errorEl.classList.add('hidden');
+      }
+      el.classList.remove('has-error');
+    };
+
+    const showError = (message) => {
+      if (errorEl) {
+        errorEl.textContent = message || '';
+        errorEl.classList.remove('hidden');
+      }
+      el.classList.add('has-error');
+    };
+
+    const updateLabel = (files) => {
+      if (!labelEl) return;
+      if (!files || !files.length) {
+        labelEl.textContent = defaultLabel;
+        el.classList.remove('has-file');
+        return;
+      }
+      const first = files[0];
+      const sizeLabel = formatBytes(first.size);
+      labelEl.textContent = sizeLabel ? `${first.name} (${sizeLabel})` : first.name;
+      el.classList.add('has-file');
+    };
+
+    const handleSelected = (files) => {
+      if (!files || !files.length) {
+        assignFilesToInput(input, files);
+        updateLabel(files);
+        clearError();
+        onFiles([]);
+        return;
+      }
+      const accepted = files.filter((file) => accepts(file, acceptList));
+      if (!accepted.length) {
+        assignFilesToInput(input, []);
+        updateLabel([]);
+        showError('Unsupported file type.');
+        onFiles([]);
+        return;
+      }
+      if (maxSizeBytes && accepted.some((file) => file.size > maxSizeBytes)) {
+        assignFilesToInput(input, []);
+        updateLabel([]);
+        showError(`File must be smaller than ${fmt(maxSizeMb)} MB.`);
+        onFiles([]);
+        return;
+      }
+      clearError();
+      const selected = accepted.slice(0, options.multiple ? accepted.length : 1);
+      assignFilesToInput(input, selected);
+      updateLabel(selected);
+      onFiles(selected);
+    };
+
+    const prevent = (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+    };
+
+    ['dragenter', 'dragover', 'dragleave', 'drop'].forEach((eventName) => {
+      el.addEventListener(eventName, prevent, { passive: false });
+    });
+
+    el.addEventListener('dragenter', () => {
+      el.classList.add('hover');
+    });
+
+    el.addEventListener('dragover', () => {
+      el.classList.add('hover');
+    });
+
+    el.addEventListener('dragleave', () => {
+      el.classList.remove('hover');
+    });
+
+    el.addEventListener('drop', (event) => {
+      el.classList.remove('hover');
+      const dt = event.dataTransfer;
+      if (!dt || !dt.files || !dt.files.length) {
+        return;
+      }
+      handleSelected(Array.from(dt.files));
+    });
+
+    const browse = el.querySelector('[data-action="browse"]');
+    if (browse) {
+      browse.addEventListener('click', (event) => {
+        event.preventDefault();
+        input.click();
+      });
+    }
+
+    input.addEventListener('change', () => {
+      handleSelected(Array.from(input.files || []));
+    });
+
+    updateLabel(Array.from(input.files || []));
+  }
+
+  function initDropzones() {
+    const zones = [
+      { sel: '#drop-pems', key: 'pems', accept: ['.csv', 'text/csv'], name: 'pems_file', required: true },
+      {
+        sel: '#drop-gps',
+        key: 'gps',
+        accept: ['.csv', '.nmea', '.gpx', '.txt', 'text/csv', 'text/plain', 'application/xml'],
+        name: 'gps_file',
+        required: true,
+      },
+      {
+        sel: '#drop-ecu',
+        key: 'ecu',
+        accept: ['.csv', '.mf4', '.mdf', 'text/csv', 'application/octet-stream'],
+        name: 'ecu_file',
+        required: true,
+      },
+    ];
+
+    zones.forEach((zone) => {
+      const el = document.querySelector(zone.sel);
+      if (!el) {
+        console.warn('[RDE] Dropzone not found:', zone.sel);
+        return;
+      }
+      const maxSizeAttr = Number.parseFloat(el.dataset.maxSizeMb || '') || 0;
+      wireDropzone(el, zone.accept, (files) => handleFiles(zone.key, files), {
+        name: zone.name,
+        required: zone.required,
+        maxSizeMb: maxSizeAttr,
+      });
+    });
+  }
+
+  window.initDropzones = initDropzones;
+
+  async function handleFiles(kind, files) {
+    console.debug('[RDE] Files dropped:', kind, files.map((file) => file.name));
+    window.RDE.uploads = window.RDE.uploads || {};
+    window.RDE.uploads[kind] = files;
+  }
+
+  (function RDE_APP_BOOTSTRAP() {
+    'use strict';
 
     // Patch once
     if (!window.__RDE_SAFE_MAP_PATCHED__) {
@@ -405,16 +434,6 @@ if (window.__RDE_APP_JS_LOADED__) {
     }
 
     const numberFormatter = new Intl.NumberFormat('en-US', { maximumFractionDigits: 3 });
-    const significantFormatter = new Intl.NumberFormat('en-US', { maximumSignificantDigits: 4 });
-
-    const fmt = (v) => {
-      if (v === null || typeof v === 'undefined' || v === 'n/a') return 'n/a';
-      if (typeof v === 'number') {
-        if (!Number.isFinite(v)) return 'n/a';
-        return significantFormatter.format(v);
-      }
-      return String(v);
-    };
 
     const pass = (b) => (b === true ? 'pass' : (b === false ? 'fail' : 'na'));
 
@@ -598,12 +617,15 @@ if (window.__RDE_APP_JS_LOADED__) {
       const orderActual = Array.isArray(block.order) && block.order.length ? block.order.join(' → ') : 'n/a';
       const urbanRange = Array.isArray(shareRanges.urban) ? shareRanges.urban : [];
       const motorwayRange = Array.isArray(shareRanges.motorway) ? shareRanges.motorway : [];
+      const durationLabel = durationRange.length >= 2 ? fmtRange(durationRange[0], durationRange[1], 'min') : 'n/a';
+      const urbanLabel = urbanRange.length >= 2 ? fmtRange(urbanRange[0], urbanRange[1], '%') : 'n/a';
+      const motorwayLabel = motorwayRange.length >= 2 ? fmtRange(motorwayRange[0], motorwayRange[1], '%') : 'n/a';
       return [
         ['§7.1', 'Urban distance', `≥ ${fmt(distanceMin.urban)} km`, block.urban_km, 'km', typeof block.urban_km === 'number' ? block.urban_km >= (distanceMin.urban || 0) : null],
         ['§7.1', 'Motorway distance', `≥ ${fmt(distanceMin.motorway)} km`, block.motorway_km, 'km', typeof block.motorway_km === 'number' ? block.motorway_km >= (distanceMin.motorway || 0) : null],
-        ['§7.1', 'Trip duration', fmtRange(durationRange, ' min'), block.duration_min, 'min', typeof block.duration_min === 'number' && durationRange.length >= 2 ? block.duration_min >= durationRange[0] && block.duration_min <= durationRange[1] : null],
-        ['§7.1', 'Urban share', fmtRange(urbanRange, ' %'), `${fmt(block.urban_share_pct)}%`, '%', typeof block.urban_share_pct === 'number' && urbanRange.length >= 2 ? block.urban_share_pct >= urbanRange[0] && block.urban_share_pct <= urbanRange[1] : null],
-        ['§7.1', 'Motorway share', fmtRange(motorwayRange, ' %'), `${fmt(block.motorway_share_pct)}%`, '%', typeof block.motorway_share_pct === 'number' && motorwayRange.length >= 2 ? block.motorway_share_pct >= motorwayRange[0] && block.motorway_share_pct <= motorwayRange[1] : null],
+        ['§7.1', 'Trip duration', durationLabel, block.duration_min, 'min', typeof block.duration_min === 'number' && durationRange.length >= 2 ? block.duration_min >= durationRange[0] && block.duration_min <= durationRange[1] : null],
+        ['§7.1', 'Urban share', urbanLabel, `${fmt(block.urban_share_pct)}%`, '%', typeof block.urban_share_pct === 'number' && urbanRange.length >= 2 ? block.urban_share_pct >= urbanRange[0] && block.urban_share_pct <= urbanRange[1] : null],
+        ['§7.1', 'Motorway share', motorwayLabel, `${fmt(block.motorway_share_pct)}%`, '%', typeof block.motorway_share_pct === 'number' && motorwayRange.length >= 2 ? block.motorway_share_pct >= motorwayRange[0] && block.motorway_share_pct <= motorwayRange[1] : null],
         ['§7.1', 'Phase order', orderExpected, orderActual, '', Array.isArray(block.order) && Array.isArray(block.order_expected) ? block.order.join('|') === block.order_expected.join('|') : null],
       ];
     }
@@ -1165,15 +1187,6 @@ if (window.__RDE_APP_JS_LOADED__) {
       return true;
     }
 
-    const fmtRange = (range, suffix) => {
-      if (!Array.isArray(range) || range.length < 2) return 'n/a';
-      const left = fmt(range[0]);
-      const right = fmt(range[1]);
-      const unit = suffix ? suffix : '';
-      if (left === 'n/a' && right === 'n/a') return 'n/a';
-      return `${left}${unit}–${right}${unit}`;
-    };
-
     function normaliseValue(value) {
       if (value === null || typeof value === 'undefined') {
         return null;
@@ -1245,25 +1258,6 @@ if (window.__RDE_APP_JS_LOADED__) {
       }
       return String(normalised);
     }
-
-    const fmtRange = (range, suffix) => {
-      if (!Array.isArray(range) || range.length < 2) return 'n/a';
-      const left = fmt(range[0]);
-      const right = fmt(range[1]);
-      const unit = suffix ? suffix : '';
-      if (left === 'n/a' && right === 'n/a') return 'n/a';
-      return `${left}${unit}–${right}${unit}`;
-    };
-    const significantFormatter = new Intl.NumberFormat('en-US', { maximumSignificantDigits: 4 });
-
-    const fmt = (v) => {
-      if (v === null || typeof v === 'undefined' || v === 'n/a') return 'n/a';
-      if (typeof v === 'number') {
-        if (!Number.isFinite(v)) return 'n/a';
-        return significantFormatter.format(v);
-      }
-      return String(v);
-    };
 
     const pass = (b) => (b === true ? 'pass' : (b === false ? 'fail' : 'na'));
 
@@ -1677,9 +1671,9 @@ if (window.__RDE_APP_JS_LOADED__) {
     });
 
     // ==== RDE UI: required HTMX swap hook (must match test literal) ====
-    document.addEventListener("htmx:afterSwap", (event) => {
+    document.addEventListener("htmx:afterSwap", () => {
       try {
-        initDropzones(event && event.target ? event.target : document);
+        initDropzones();
       } catch (error) {
         console.warn('htmx swap handler failed:', error);
       }
@@ -1746,7 +1740,7 @@ if (window.__RDE_APP_JS_LOADED__) {
     window.populateExportForms = populateExportForms;
 
     document.addEventListener('DOMContentLoaded', () => {
-      initDropzones(document);
+      initDropzones();
       populateExportForms(getResultsPayload());
     });
   })();
