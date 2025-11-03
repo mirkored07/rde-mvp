@@ -4,11 +4,14 @@ from __future__ import annotations
 
 from typing import Any, Iterable
 
+import json
+
 from fastapi import APIRouter, HTTPException, Request
 from starlette.templating import Jinja2Templates
 
 from src.app.reporting.eu7ld_report import group_criteria_by_section, load_report
 from src.app.reporting.schemas import Criterion, PassFail, ReportData
+from src.app.ui.routes._eu7_payload import build_normalised_payload
 
 
 router = APIRouter()
@@ -110,6 +113,10 @@ def report_view(request: Request, test_id: str):
     grouped = group_criteria_by_section(report.criteria)
     quick_cards = _build_quick_cards(report)
     overall = _overall_result(report.criteria)
+    payload = build_normalised_payload(report.model_dump(mode="json"))
+    payload_json = json.dumps(payload, ensure_ascii=False)
+    final_block = payload.get("final", {}) if isinstance(payload.get("final"), dict) else {}
+    overall_pass = final_block.get("pass") if isinstance(final_block.get("pass"), bool) else None
     return templates.TemplateResponse(
         "report.html",
         {
@@ -118,7 +125,9 @@ def report_view(request: Request, test_id: str):
             "grouped_criteria": grouped,
             "quick_cards": quick_cards,
             "overall_result": overall,
-            "report_payload": report.model_dump(mode="json"),
+            "results_payload": payload,
+            "results_payload_json": payload_json,
+            "overall_pass": overall_pass,
         },
     )
 

@@ -405,6 +405,774 @@ if (window.__RDE_APP_JS_LOADED__) {
     }
 
     const numberFormatter = new Intl.NumberFormat('en-US', { maximumFractionDigits: 3 });
+    const significantFormatter = new Intl.NumberFormat('en-US', { maximumSignificantDigits: 4 });
+
+    const fmt = (v) => {
+      if (v === null || typeof v === 'undefined' || v === 'n/a') return 'n/a';
+      if (typeof v === 'number') {
+        if (!Number.isFinite(v)) return 'n/a';
+        return significantFormatter.format(v);
+      }
+      return String(v);
+    };
+
+    const pass = (b) => (b === true ? 'pass' : (b === false ? 'fail' : 'na'));
+
+    const resultLabel = (state) => {
+      if (state === 'pass') return 'PASS';
+      if (state === 'fail') return 'FAIL';
+      return 'n/a'.toUpperCase();
+    };
+
+    function buildKpis(payload) {
+      const el = document.getElementById('kpis');
+      if (!el) return false;
+      const fc = (payload && payload.final_conformity) || {};
+      const emissions = (payload && payload.emissions) || {};
+      const trip = emissions.trip || {};
+      const maw = (payload && payload.maw_coverage) || {};
+      const gps = (payload && payload.gps) || {};
+      const elevation = (payload && payload.elevation) || {};
+      const tiles = [
+        {
+          label: 'NOx Final',
+          value: fc.NOx_mg_km && fc.NOx_mg_km.value,
+          unit: 'mg/km',
+          pass: fc.NOx_mg_km && fc.NOx_mg_km.pass,
+          goto: '#final-conformity',
+        },
+        {
+          label: 'PN10 Final',
+          value: fc.PN10_hash_km && fc.PN10_hash_km.value,
+          unit: '#/km',
+          pass: fc.PN10_hash_km && fc.PN10_hash_km.pass,
+          goto: '#final-conformity',
+        },
+        {
+          label: 'CO Trip',
+          value: trip.CO_mg_km,
+          unit: 'mg/km',
+          goto: '#emissions-summary',
+        },
+        {
+          label: 'CO Urban',
+          value: (emissions.urban && emissions.urban.CO_mg_km) || null,
+          unit: 'mg/km',
+          goto: '#emissions-summary',
+        },
+        {
+          label: 'Duration',
+          value: payload && payload.trip_shares ? payload.trip_shares.duration_min : null,
+          unit: 'min',
+          goto: '#trip-shares',
+        },
+        {
+          label: 'GPS gaps',
+          value: gps.total_gaps_s,
+          unit: 's',
+          goto: '#gps',
+        },
+        {
+          label: 'Δh',
+          value: elevation.start_end_abs_m,
+          unit: 'm',
+          goto: '#elevation',
+        },
+        {
+          label: 'MAW Low/High',
+          value: maw.low_pct != null && maw.high_pct != null ? `${fmt(maw.low_pct)}% / ${fmt(maw.high_pct)}%` : 'n/a',
+          unit: '',
+          goto: '#maw-coverage',
+        },
+      ];
+
+      el.innerHTML = tiles
+        .map((t) => {
+          const state = pass(t.pass);
+          const stateClass = state ? ` result ${state}` : '';
+          const valueText = typeof t.value === 'number' ? fmt(t.value) : (t.value || 'n/a');
+          return `
+    <div class="tile${stateClass}" data-goto="${t.goto || ''}">
+      <div class="label">${t.label}</div>
+      <div class="value">${valueText} <span class="unit">${t.unit || ''}</span></div>
+    </div>`;
+        })
+        .join('');
+
+      Array.from(el.querySelectorAll('.tile')).forEach((tile) => {
+        const target = tile.dataset.goto;
+        if (target) {
+          tile.addEventListener('click', () => {
+            const section = document.querySelector(target);
+            if (section) {
+              section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
+          });
+        }
+      });
+      return true;
+    }
+
+    function renderRows(tbodyId, rows) {
+      const tbody = document.getElementById(tbodyId);
+      if (!tbody) return;
+      const safeRows = Array.isArray(rows) ? rows : [];
+      tbody.innerHTML = safeRows
+        .map((row) => {
+          const [ref, criterion, condition, value, unit, result] = row;
+          const displayValue = typeof value === 'number' ? fmt(value) : (value || 'n/a');
+          const displayUnit = unit || '';
+          const resultStateValue = typeof result === 'string' ? result : pass(result);
+          return `
+        <tr>
+          <td>${ref || '—'}</td>
+          <td>${criterion || '—'}</td>
+          <td>${condition || '—'}</td>
+          <td>${displayValue}</td>
+          <td>${displayUnit}</td>
+          <td class="result ${resultStateValue}">${resultLabel(resultStateValue)}</td>
+        </tr>`;
+        })
+        .join('');
+    }
+
+    function rowsPreconSoak(payload) {
+      const block = (payload && payload.precon_soak) || {};
+      const drive = block.drive_10min_each || {};
+      const durationRange = block.soak_duration_range || [6, 72];
+      const tempRange = block.soak_temperature_range || [-7, 38];
+      const durationText = [fmt(drive.urban_min_s), fmt(drive.rural_min_s), fmt(drive.motorway_min_s)].join(' / ');
+      const soakDuration = block.soak_duration_h;
+      const minDuration = Array.isArray(durationRange) ? durationRange[0] : null;
+      const maxDuration = Array.isArray(durationRange) ? durationRange[1] : null;
+      return [
+        ['§8.3', '≥10 min each operation', '≥ 600 s (urban/rural/motorway)', durationText, 's', pass(drive.ok)],
+        [
+          '§10.6',
+          'Soak duration',
+          `${fmt(minDuration)}–${fmt(maxDuration)} h`,
+          soakDuration,
+          'h',
+          typeof soakDuration === 'number' && minDuration != null && maxDuration != null
+            ? soakDuration >= minDuration && soakDuration <= maxDuration
+            : null,
+        ],
+        [
+          '§10.6',
+          'Soak temperature range',
+          `${fmt(tempRange[0])}…${fmt(tempRange[1])} °C`,
+          `${fmt(block.soak_temp_min_c)}–${fmt(block.soak_temp_max_c)}`,
+          '°C',
+          'na',
+        ],
+        [
+          '§10.6',
+          'Extended temp multiplier',
+          'Applied when last 3h in range',
+          block.extended_temp_flag ? `applied (${fmt(block.extended_last_temp_c)} °C)` : 'not applied',
+          '',
+          block.extended_temp_flag ? 'pass' : 'na',
+        ],
+      ];
+    }
+
+    function rowsColdStart(payload) {
+      const block = (payload && payload.cold_start) || {};
+      const moveLimit = typeof block.duration_limit_s === 'number' ? block.duration_limit_s : 120;
+      const stopLimit = 180;
+      return [
+        ['§8.3', 'Start/End logged', 'Documentation available', block.start_end_logged ? 'logged' : 'missing', '', pass(block.start_end_logged)],
+        ['§8.3', 'Vehicle moves within limit', `≤ ${fmt(moveLimit)} s`, block.move_within_s, 's', typeof block.move_within_s === 'number' ? block.move_within_s <= moveLimit : null],
+        ['§8.3', 'Total stop time', `≤ ${fmt(stopLimit)} s`, block.stop_total_s, 's', typeof block.stop_total_s === 'number' ? block.stop_total_s <= stopLimit : null],
+        ['§8.3', 'Average / max speed', '≤ 40 / ≤ 60 km/h', `${fmt(block.avg_speed_kmh)} / ${fmt(block.max_speed_kmh)}`, 'km/h', 'na'],
+        ['§10.6', 'Multiplier applied', '1.6 when ambient in range', block.multiplier_applied ? `applied (${fmt(block.ambient_temp_c)} °C)` : 'not applied', '', block.multiplier_applied ? 'pass' : 'na'],
+      ];
+    }
+
+    function rowsTripShares(payload) {
+      const block = (payload && payload.trip_shares) || {};
+      const distanceMin = block.distance_min_km || {};
+      const shareRanges = block.share_ranges || {};
+      const durationRange = block.duration_range || [];
+      const orderExpected = Array.isArray(block.order_expected) ? block.order_expected.join(' → ') : 'n/a';
+      const orderActual = Array.isArray(block.order) && block.order.length ? block.order.join(' → ') : 'n/a';
+      const urbanRange = Array.isArray(shareRanges.urban) ? shareRanges.urban : [];
+      const motorwayRange = Array.isArray(shareRanges.motorway) ? shareRanges.motorway : [];
+      return [
+        ['§7.1', 'Urban distance', `≥ ${fmt(distanceMin.urban)} km`, block.urban_km, 'km', typeof block.urban_km === 'number' ? block.urban_km >= (distanceMin.urban || 0) : null],
+        ['§7.1', 'Motorway distance', `≥ ${fmt(distanceMin.motorway)} km`, block.motorway_km, 'km', typeof block.motorway_km === 'number' ? block.motorway_km >= (distanceMin.motorway || 0) : null],
+        ['§7.1', 'Trip duration', fmtRange(durationRange, ' min'), block.duration_min, 'min', typeof block.duration_min === 'number' && durationRange.length >= 2 ? block.duration_min >= durationRange[0] && block.duration_min <= durationRange[1] : null],
+        ['§7.1', 'Urban share', fmtRange(urbanRange, ' %'), `${fmt(block.urban_share_pct)}%`, '%', typeof block.urban_share_pct === 'number' && urbanRange.length >= 2 ? block.urban_share_pct >= urbanRange[0] && block.urban_share_pct <= urbanRange[1] : null],
+        ['§7.1', 'Motorway share', fmtRange(motorwayRange, ' %'), `${fmt(block.motorway_share_pct)}%`, '%', typeof block.motorway_share_pct === 'number' && motorwayRange.length >= 2 ? block.motorway_share_pct >= motorwayRange[0] && block.motorway_share_pct <= motorwayRange[1] : null],
+        ['§7.1', 'Phase order', orderExpected, orderActual, '', Array.isArray(block.order) && Array.isArray(block.order_expected) ? block.order.join('|') === block.order_expected.join('|') : null],
+      ];
+    }
+
+    function rowsElevation(payload) {
+      const block = (payload && payload.elevation) || {};
+      const startLimit = block.start_end_limit_m;
+      const tripLimit = block.trip_limit_m_per_100km;
+      const urbanLimit = block.urban_limit_m_per_100km;
+      const delta = block.start_end_delta_m;
+      return [
+        ['§7.2', 'Start/end elevation delta', `≤ ${fmt(startLimit)} m`, delta, 'm', typeof delta === 'number' && typeof startLimit === 'number' ? Math.abs(delta) <= startLimit : null],
+        ['§7.2', 'Trip cumulative elevation', `≤ ${fmt(tripLimit)} m/100km`, block.trip_cumulative_m_per_100km, 'm/100km', typeof block.trip_cumulative_m_per_100km === 'number' && typeof tripLimit === 'number' ? block.trip_cumulative_m_per_100km <= tripLimit : null],
+        ['§7.2', 'Urban cumulative elevation', `≤ ${fmt(urbanLimit)} m/100km`, block.urban_cumulative_m_per_100km, 'm/100km', typeof block.urban_cumulative_m_per_100km === 'number' && typeof urbanLimit === 'number' ? block.urban_cumulative_m_per_100km <= urbanLimit : null],
+        ['§7.2', 'Extended conditions active', 'Declared when thresholds exceeded', block.extended_active ? 'extended' : 'normal', '', block.extended_active ? 'pass' : 'na'],
+        ['§7.2', 'Extended emissions valid', 'If extended, emissions must pass', block.extended_emissions_valid ? 'valid' : 'invalid', '', pass(block.extended_emissions_valid)],
+      ];
+    }
+
+    function rowsGps(payload) {
+      const block = (payload && payload.gps) || {};
+      return [
+        ['§7.3', 'Distance delta', `≤ ${fmt(block.delta_limit_pct)} %`, `${fmt(block.distance_delta_pct)} %`, '%', typeof block.distance_delta_pct === 'number' && typeof block.delta_limit_pct === 'number' ? Math.abs(block.distance_delta_pct) <= block.delta_limit_pct : null],
+        ['§7.3', 'Max gap', `≤ ${fmt(block.max_gap_limit_s)} s`, block.max_gap_s, 's', typeof block.max_gap_s === 'number' && typeof block.max_gap_limit_s === 'number' ? block.max_gap_s <= block.max_gap_limit_s : null],
+        ['§7.3', 'Total gaps', `≤ ${fmt(block.total_gaps_limit_s)} s`, block.total_gaps_s, 's', typeof block.total_gaps_s === 'number' && typeof block.total_gaps_limit_s === 'number' ? block.total_gaps_s <= block.total_gaps_limit_s : null],
+        ['§7.3', 'Gap events', 'Descriptive', (block.gaps || []).length ? `${(block.gaps || []).length} gap(s)` : 'no gaps', '', (block.gaps || []).length ? 'na' : 'pass'],
+      ];
+    }
+
+    function rowsSpanZero(payload) {
+      const block = (payload && payload.span_zero) || {};
+      const zero = block.zero || {};
+      const span = block.span || {};
+      const coverage = block.coverage || {};
+      const limits = block.limits || {};
+      return [
+        ['§6.1', 'CO₂ zero drift', `≤ ${fmt(limits.co2_zero_ppm)} ppm`, zero.co2_ppm, 'ppm', typeof zero.co2_ppm === 'number' && typeof limits.co2_zero_ppm === 'number' ? Math.abs(zero.co2_ppm) <= limits.co2_zero_ppm : null],
+        ['§6.1', 'CO zero drift', `≤ ${fmt(limits.co_zero_ppm)} ppm`, zero.co_ppm, 'ppm', typeof zero.co_ppm === 'number' && typeof limits.co_zero_ppm === 'number' ? Math.abs(zero.co_ppm) <= limits.co_zero_ppm : null],
+        ['§6.1', 'NOx zero drift', `≤ ${fmt(limits.nox_zero_ppm)} ppm`, zero.nox_ppm, 'ppm', typeof zero.nox_ppm === 'number' && typeof limits.nox_zero_ppm === 'number' ? Math.abs(zero.nox_ppm) <= limits.nox_zero_ppm : null],
+        ['§6.1', 'PN zero', `≤ ${fmt(limits.pn_zero_hash_cm3)} #/cm³`, zero.pn_hash_cm3, '#/cm³', typeof zero.pn_hash_cm3 === 'number' && typeof limits.pn_zero_hash_cm3 === 'number' ? zero.pn_hash_cm3 <= limits.pn_zero_hash_cm3 : null],
+        ['§6.3', 'CO₂ span drift', `≤ ${fmt(limits.co2_span_ppm)} ppm`, span.co2_ppm, 'ppm', typeof span.co2_ppm === 'number' && typeof limits.co2_span_ppm === 'number' ? Math.abs(span.co2_ppm) <= limits.co2_span_ppm : null],
+        ['§6.3', 'CO span drift', `≤ ${fmt(limits.co_span_ppm)} ppm`, span.co_ppm, 'ppm', typeof span.co_ppm === 'number' && typeof limits.co_span_ppm === 'number' ? Math.abs(span.co_ppm) <= limits.co_span_ppm : null],
+        ['§6.3', 'NOx span drift', `≤ ${fmt(limits.nox_span_ppm)} ppm`, span.nox_ppm, 'ppm', typeof span.nox_ppm === 'number' && typeof limits.nox_span_ppm === 'number' ? Math.abs(span.nox_ppm) <= limits.nox_span_ppm : null],
+        ['§6.3', 'CO₂ span coverage', `≥ ${fmt(limits.coverage_min_pct)} %`, `${fmt(coverage.co2_pct)} %`, '%', typeof coverage.co2_pct === 'number' && typeof limits.coverage_min_pct === 'number' ? coverage.co2_pct >= limits.coverage_min_pct : null],
+        ['§6.3', 'CO span coverage', `≥ ${fmt(limits.coverage_min_pct)} %`, `${fmt(coverage.co_pct)} %`, '%', typeof coverage.co_pct === 'number' && typeof limits.coverage_min_pct === 'number' ? coverage.co_pct >= limits.coverage_min_pct : null],
+        ['§6.3', 'NOx span coverage', `≥ ${fmt(limits.coverage_min_pct)} %`, `${fmt(coverage.nox_pct)} %`, '%', typeof coverage.nox_pct === 'number' && typeof limits.coverage_min_pct === 'number' ? coverage.nox_pct >= limits.coverage_min_pct : null],
+        ['§6.3', 'CO₂ between span and 2×span', `≤ ${fmt(limits.two_x_pct)} %`, `${fmt(coverage.co2_mid_pct)} %`, '%', typeof coverage.co2_mid_pct === 'number' && typeof limits.two_x_pct === 'number' ? coverage.co2_mid_pct <= limits.two_x_pct : null],
+        ['§6.3', 'CO₂ >2×span events', `≤ ${fmt(limits.exceed_count)}`, coverage.co2_over_limit, 'count', typeof coverage.co2_over_limit === 'number' && typeof limits.exceed_count === 'number' ? coverage.co2_over_limit <= limits.exceed_count : null],
+      ];
+    }
+
+    function rowsDevices(payload) {
+      const block = (payload && payload.devices) || {};
+      const limits = block.limits || {};
+      return [
+        ['§4.6', 'Gas PEMS', 'Identifier', block.gas_pems || 'n/a', '', 'na'],
+        ['§4.6', 'PN PEMS', 'Identifier', block.pn_pems || 'n/a', '', 'na'],
+        ['§4.6', 'EFM', 'Identifier', block.efm || 'n/a', '', 'na'],
+        ['§4.6', 'Gas PEMS leak rate', `≤ ${fmt(limits.leak_rate_pct)} %`, block.leak_rate_pct, '%', typeof block.leak_rate_pct === 'number' && typeof limits.leak_rate_pct === 'number' ? block.leak_rate_pct <= limits.leak_rate_pct : null],
+        ['§4.6', 'PN dilute pressure rise', `≤ ${fmt(limits.pn_dilute_pressure_mbar)} mbar`, block.pn_dilute_pressure_mbar, 'mbar', typeof block.pn_dilute_pressure_mbar === 'number' && typeof limits.pn_dilute_pressure_mbar === 'number' ? block.pn_dilute_pressure_mbar <= limits.pn_dilute_pressure_mbar : null],
+        ['§4.6', 'PN sample pressure rise', `≤ ${fmt(limits.pn_sample_pressure_mbar)} mbar`, block.pn_sample_pressure_mbar, 'mbar', typeof block.pn_sample_pressure_mbar === 'number' && typeof limits.pn_sample_pressure_mbar === 'number' ? block.pn_sample_pressure_mbar <= limits.pn_sample_pressure_mbar : null],
+        ['§4.6', 'Device errors', `≤ ${fmt(limits.device_errors)}`, block.device_errors, 'count', typeof block.device_errors === 'number' && typeof limits.device_errors === 'number' ? block.device_errors <= limits.device_errors : null],
+      ];
+    }
+
+    function rowsDynamics(payload) {
+      const block = (payload && payload.dynamics) || {};
+      const urban = block.urban || {};
+      const motorway = block.motorway || {};
+      const limits = block.limits || {};
+      const speeds = block.avg_speeds_kmh || {};
+      const vaLimits = limits.va_pos95 || {};
+      const rpaLimits = limits.rpa_min || {};
+      return [
+        ['§7.4', '<span class="swatch" style="background:var(--urban);"></span>Urban v̄', 'Descriptive', fmt(speeds.urban), 'km/h', 'na'],
+        ['§7.4', '<span class="swatch" style="background:var(--urban);"></span>Urban a⁺95', `≤ ${fmt(vaLimits.urban)} m²/s³`, urban.va_pos95, 'm²/s³', typeof urban.va_pos95 === 'number' && typeof vaLimits.urban === 'number' ? urban.va_pos95 <= vaLimits.urban : null],
+        ['§7.4', '<span class="swatch" style="background:var(--urban);"></span>Urban RPA', `≥ ${fmt(rpaLimits.urban)} m/s²`, urban.rpa, 'm/s²', typeof urban.rpa === 'number' && typeof rpaLimits.urban === 'number' ? urban.rpa >= rpaLimits.urban : null],
+        ['§7.4', '<span class="swatch" style="background:var(--motorway);"></span>Motorway v̄', 'Descriptive', fmt(speeds.motorway), 'km/h', 'na'],
+        ['§7.4', '<span class="swatch" style="background:var(--motorway);"></span>Motorway a⁺95', `≤ ${fmt(vaLimits.motorway)} m²/s³`, motorway.va_pos95, 'm²/s³', typeof motorway.va_pos95 === 'number' && typeof vaLimits.motorway === 'number' ? motorway.va_pos95 <= vaLimits.motorway : null],
+        ['§7.4', '<span class="swatch" style="background:var(--motorway);"></span>Motorway RPA', `≥ ${fmt(rpaLimits.motorway)} m/s²`, motorway.rpa, 'm/s²', typeof motorway.rpa === 'number' && typeof rpaLimits.motorway === 'number' ? motorway.rpa >= rpaLimits.motorway : null],
+        ['§7.4', 'Acceleration points (urban / motorway)', 'Descriptive', `${fmt(urban.accel_points)} / ${fmt(motorway.accel_points)}`, '', 'na'],
+      ];
+    }
+
+    function rowsMawCoverage(payload) {
+      const block = (payload && payload.maw_coverage) || {};
+      return [
+        ['§7.5', 'Low speed coverage', `≥ ${fmt(block.low_limit_pct)} %`, `${fmt(block.low_pct)} %`, '%', typeof block.low_pct === 'number' && typeof block.low_limit_pct === 'number' ? block.low_pct >= block.low_limit_pct : null],
+        ['§7.5', 'High speed coverage', `≥ ${fmt(block.high_limit_pct)} %`, `${fmt(block.high_pct)} %`, '%', typeof block.high_pct === 'number' && typeof block.high_limit_pct === 'number' ? block.high_pct >= block.high_limit_pct : null],
+        ['§7.5', 'Windows analysed', 'Descriptive', Array.isArray(block.windows) && block.windows.length ? `${block.windows.length} windows` : 'n/a', '', 'na'],
+      ];
+    }
+
+    function rowsEmissionsSummary(payload) {
+      const block = (payload && payload.emissions_summary) || {};
+      const phases = block.phases || {};
+      const rows = [];
+      Object.keys(phases).forEach((key) => {
+        const data = phases[key] || {};
+        const label = data.label || key;
+        const final = (payload && payload.final_conformity) || {};
+        let tripState = 'na';
+        if (key === 'trip') {
+          const checks = [];
+          if (final.NOx_mg_km && typeof final.NOx_mg_km.pass === 'boolean') checks.push(final.NOx_mg_km.pass);
+          if (final.PN10_hash_km && typeof final.PN10_hash_km.pass === 'boolean') checks.push(final.PN10_hash_km.pass);
+          if (checks.length) {
+            tripState = pass(checks.every(Boolean));
+          }
+        }
+        rows.push([
+          label,
+          data.NOx_mg_km != null ? `${fmt(data.NOx_mg_km)} mg/km` : 'n/a',
+          data.PN10_hash_km != null ? `${fmt(data.PN10_hash_km)} #/km` : 'n/a',
+          data.CO_mg_km != null ? `${fmt(data.CO_mg_km)} mg/km` : 'n/a',
+          data.CO2_g_km != null ? `${fmt(data.CO2_g_km)} g/km` : 'n/a',
+          key === 'trip' ? tripState : 'na',
+        ]);
+      });
+      return rows;
+    }
+
+    function rowsFinalConformity(payload) {
+      const fc = (payload && payload.final_conformity) || {};
+      const limits = (payload && payload.limits) || {};
+      const entries = [];
+      if (fc.NOx_mg_km) {
+        entries.push(['NOx', `≤ ${fmt(fc.NOx_mg_km.limit || limits.NOx_mg_km_RDE)} mg/km`, fc.NOx_mg_km.value, 'mg/km', fc.NOx_mg_km.pass]);
+      }
+      if (fc.PN10_hash_km) {
+        const limit = fc.PN10_hash_km.limit || limits.PN10_hash_km_RDE || limits.PN_hash_km_RDE;
+        entries.push(['PN10', `≤ ${fmt(limit)} #/km`, fc.PN10_hash_km.value, '#/km', fc.PN10_hash_km.pass]);
+      }
+      if (fc.CO_mg_km) {
+        entries.push(['CO', 'Informative', fc.CO_mg_km.value, 'mg/km', fc.CO_mg_km.pass]);
+      }
+      if (!entries.length) {
+        entries.push(['n/a', 'Limits unavailable', 'n/a', '', 'na']);
+      }
+      return entries;
+    }
+
+    function renderModernTables(payload) {
+      renderRows('tbl-precon-soak', rowsPreconSoak(payload));
+      renderRows('tbl-cold-start', rowsColdStart(payload));
+      renderRows('tbl-trip-shares', rowsTripShares(payload));
+      renderRows('tbl-elevation', rowsElevation(payload));
+      renderRows('tbl-gps', rowsGps(payload));
+      renderRows('tbl-span-zero', rowsSpanZero(payload));
+      renderRows('tbl-devices', rowsDevices(payload));
+      renderRows('tbl-dynamics', rowsDynamics(payload));
+      renderRows('tbl-maw-coverage', rowsMawCoverage(payload));
+      renderRows('tbl-emissions-summary', rowsEmissionsSummary(payload));
+      renderRows('tbl-final-conformity', rowsFinalConformity(payload));
+    }
+
+    function setupCanvas(canvas) {
+      if (!canvas) return null;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return null;
+      const dpr = window.devicePixelRatio || 1;
+      const width = canvas.clientWidth || 340;
+      const height = canvas.clientHeight || 240;
+      if (canvas.width !== width * dpr || canvas.height !== height * dpr) {
+        canvas.width = width * dpr;
+        canvas.height = height * dpr;
+      }
+      if (ctx.resetTransform) {
+        ctx.resetTransform();
+      } else {
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+      }
+      ctx.scale(dpr, dpr);
+      ctx.clearRect(0, 0, width, height);
+      return { ctx, width, height };
+    }
+
+    function renderOverviewChart(payload) {
+      const canvas = document.getElementById('chart-overview');
+      if (!canvas) return;
+      if (canvas.dataset.rendered) return;
+      const visual = (payload && payload.visual && payload.visual.chart) || {};
+      const series = Array.isArray(visual.series) ? visual.series : [];
+      const datasets = series.map((item, idx) => ({
+        name: item && item.name ? item.name : `Series ${idx + 1}`,
+        values: (item && item.values) || [],
+        color: idx === 0 ? '#38bdf8' : '#fbbf24',
+      }));
+      const setup = setupCanvas(canvas);
+      if (!setup) return;
+      const { ctx, width, height } = setup;
+      ctx.fillStyle = 'rgba(15,23,42,0.7)';
+      ctx.fillRect(0, 0, width, height);
+      datasets.forEach((dataset, idx) => {
+        const values = dataset.values.filter((v) => typeof v === 'number');
+        if (!values.length) return;
+        const min = Math.min.apply(null, values);
+        const max = Math.max.apply(null, values);
+        const span = max - min || 1;
+        ctx.beginPath();
+        ctx.strokeStyle = dataset.color;
+        ctx.lineWidth = 2;
+        values.forEach((value, i) => {
+          const x = (i / Math.max(1, values.length - 1)) * (width - 20) + 10;
+          const norm = (value - min) / span;
+          const y = height - 20 - norm * (height - 40);
+          if (i === 0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+        });
+        ctx.stroke();
+      });
+      ctx.fillStyle = 'rgba(255,255,255,0.7)';
+      ctx.font = '12px Inter, sans-serif';
+      datasets.forEach((dataset, idx) => {
+        ctx.fillText(dataset.name, 12, 18 + idx * 14);
+      });
+      canvas.dataset.rendered = '1';
+    }
+
+    function renderEmissionsChart(payload) {
+      const canvas = document.getElementById('chart-emissions');
+      if (!canvas) return;
+      if (canvas.dataset.rendered) return;
+      const block = (payload && payload.emissions_summary && payload.emissions_summary.phases) || {};
+      const phases = ['urban', 'rural', 'motorway', 'trip'];
+      const pollutants = [
+        { key: 'NOx_mg_km', label: 'NOx', color: '#38bdf8' },
+        { key: 'PN10_hash_km', label: 'PN10', color: '#f97316' },
+        { key: 'CO_mg_km', label: 'CO', color: '#22c55e' },
+      ];
+      const values = pollutants.map((pollutant) => (
+        phases.map((phase) => {
+          const data = block[phase] || {};
+          const raw = data[pollutant.key];
+          return typeof raw === 'number' ? raw : null;
+        })
+      ));
+      const maxima = values.map((list) => {
+        const numeric = list.filter((v) => typeof v === 'number');
+        if (!numeric.length) return 0;
+        return Math.max.apply(null, numeric);
+      });
+      const setup = setupCanvas(canvas);
+      if (!setup) return;
+      const { ctx, width, height } = setup;
+      ctx.fillStyle = 'rgba(15,23,42,0.7)';
+      ctx.fillRect(0, 0, width, height);
+      const chartHeight = height - 50;
+      const groupWidth = (width - 40) / phases.length;
+      phases.forEach((phase, idx) => {
+        pollutants.forEach((pollutant, pIdx) => {
+          const value = values[pIdx][idx];
+          if (typeof value !== 'number' || maxima[pIdx] <= 0) return;
+          const ratio = value / maxima[pIdx];
+          const barHeight = ratio * chartHeight;
+          const barWidth = (groupWidth / pollutants.length) * 0.7;
+          const x = 20 + idx * groupWidth + pIdx * (groupWidth / pollutants.length);
+          const y = height - 30 - barHeight;
+          ctx.fillStyle = pollutant.color;
+          ctx.fillRect(x, y, barWidth, barHeight);
+        });
+        ctx.fillStyle = 'rgba(255,255,255,0.7)';
+        ctx.font = '12px Inter, sans-serif';
+        ctx.fillText(phase.toUpperCase(), 20 + idx * groupWidth, height - 10);
+      });
+      canvas.dataset.rendered = '1';
+    }
+
+    function renderDynamicsChart(payload) {
+      const canvas = document.getElementById('chart-dynamics');
+      if (!canvas) return;
+      if (canvas.dataset.rendered) return;
+      const block = (payload && payload.dynamics) || {};
+      const urban = block.urban || {};
+      const rural = block.rural || {};
+      const motorway = block.motorway || {};
+      const points = [
+        { label: 'Urban', data: urban, color: '#00b3b3' },
+        { label: 'Rural', data: rural, color: '#5865f2' },
+        { label: 'Motorway', data: motorway, color: '#9b5de5' },
+      ];
+      const setup = setupCanvas(canvas);
+      if (!setup) return;
+      const { ctx, width, height } = setup;
+      ctx.fillStyle = 'rgba(15,23,42,0.7)';
+      ctx.fillRect(0, 0, width, height);
+      const mid = height / 2;
+
+      const drawScatter = (values, originX, originY, title) => {
+        const widthSpan = width / 2 - 20;
+        const heightSpan = height / 2 - 40;
+        ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+        ctx.strokeRect(originX, originY, widthSpan, heightSpan);
+        ctx.fillStyle = 'rgba(255,255,255,0.6)';
+        ctx.font = '12px Inter, sans-serif';
+        ctx.fillText(title, originX, originY - 6);
+        const maxV = Math.max.apply(null, values.map((item) => (item && typeof item.v === 'number' ? item.v : 0)).concat([1]));
+        const maxY = Math.max.apply(null, values.map((item) => (item && typeof item.y === 'number' ? item.y : 0)).concat([1]));
+        values.forEach((item) => {
+          if (!item || typeof item.v !== 'number' || typeof item.y !== 'number') return;
+          const x = originX + (item.v / maxV) * (widthSpan - 20) + 10;
+          const y = originY + heightSpan - (item.y / maxY) * (heightSpan - 20) - 10;
+          ctx.fillStyle = item.color;
+          ctx.beginPath();
+          ctx.arc(x, y, 4, 0, Math.PI * 2);
+          ctx.fill();
+        });
+      };
+
+      const vaValues = points.map((item) => ({
+        v: typeof item.data.avg_speed_kmh === 'number' ? item.data.avg_speed_kmh : 0,
+        y: typeof item.data.va_pos95 === 'number' ? item.data.va_pos95 : 0,
+        color: item.color,
+      }));
+      const rpaValues = points.map((item) => ({
+        v: typeof item.data.avg_speed_kmh === 'number' ? item.data.avg_speed_kmh : 0,
+        y: typeof item.data.rpa === 'number' ? item.data.rpa : 0,
+        color: item.color,
+      }));
+
+      drawScatter(vaValues, 10, mid - 30, 'va⁺95 vs v̄');
+      drawScatter(rpaValues, mid + 10, mid - 30, 'RPA vs v̄');
+      canvas.dataset.rendered = '1';
+    }
+
+    function renderMawChart(payload) {
+      const canvas = document.getElementById('chart-maw');
+      if (!canvas) return;
+      if (canvas.dataset.rendered) return;
+      const block = (payload && payload.maw_coverage) || {};
+      const setup = setupCanvas(canvas);
+      if (!setup) return;
+      const { ctx, width, height } = setup;
+      ctx.fillStyle = 'rgba(15,23,42,0.7)';
+      ctx.fillRect(0, 0, width, height);
+      const values = [
+        { label: 'Low speed', value: block.low_pct, limit: block.low_limit_pct, color: '#38bdf8' },
+        { label: 'High speed', value: block.high_pct, limit: block.high_limit_pct, color: '#f97316' },
+      ];
+      const maxValue = Math.max.apply(null, values.map((item) => (typeof item.value === 'number' ? item.value : 0)).concat([100]));
+      const barWidth = (width - 60) / values.length;
+      values.forEach((item, idx) => {
+        if (typeof item.value !== 'number' || maxValue <= 0) return;
+        const barHeight = (item.value / maxValue) * (height - 60);
+        const x = 30 + idx * barWidth;
+        const y = height - 30 - barHeight;
+        ctx.fillStyle = item.color;
+        ctx.fillRect(x, y, barWidth * 0.6, barHeight);
+        if (typeof item.limit === 'number') {
+          const limitHeight = (item.limit / maxValue) * (height - 60);
+          const limitY = height - 30 - limitHeight;
+          ctx.strokeStyle = 'rgba(248,113,113,0.6)';
+          ctx.beginPath();
+          ctx.moveTo(x - 4, limitY);
+          ctx.lineTo(x + barWidth * 0.6 + 4, limitY);
+          ctx.stroke();
+        }
+        ctx.fillStyle = 'rgba(255,255,255,0.8)';
+        ctx.font = '12px Inter, sans-serif';
+        ctx.fillText(`${item.label}: ${fmt(item.value)}%`, x, height - 8);
+      });
+      canvas.dataset.rendered = '1';
+    }
+
+    function renderAmbientChart(payload) {
+      const canvas = document.getElementById('chart-ambient');
+      if (!canvas) return;
+      if (canvas.dataset.rendered) return;
+      const setup = setupCanvas(canvas);
+      if (!setup) return;
+      const { ctx, width, height } = setup;
+      ctx.fillStyle = 'rgba(15,23,42,0.7)';
+      ctx.fillRect(0, 0, width, height);
+      ctx.fillStyle = 'rgba(255,255,255,0.6)';
+      ctx.font = '14px Inter, sans-serif';
+      ctx.fillText('Ambient / QA data unavailable', 20, height / 2);
+      canvas.dataset.rendered = '1';
+    }
+
+    function renderRegressionCharts(payload) {
+      const container = document.getElementById('qa-regressions');
+      if (!container) return;
+      if (container.dataset.rendered) return;
+      const regressions = (payload && payload.regressions) || {};
+      const efmCanvas = document.getElementById('chart-efm');
+      const fuelCanvas = document.getElementById('chart-fuel');
+
+      const drawMessage = (canvas, label) => {
+        if (!canvas) return;
+        const setup = setupCanvas(canvas);
+        if (!setup) return;
+        const { ctx, width, height } = setup;
+        ctx.fillStyle = 'rgba(15,23,42,0.7)';
+        ctx.fillRect(0, 0, width, height);
+        ctx.fillStyle = 'rgba(255,255,255,0.6)';
+        ctx.font = '13px Inter, sans-serif';
+        ctx.fillText(`${label}: no data`, 20, height / 2);
+      };
+
+      if (regressions.efm && Array.isArray(regressions.efm.points)) {
+        const setup = setupCanvas(efmCanvas);
+        if (setup) {
+          const { ctx, width, height } = setup;
+          ctx.fillStyle = 'rgba(15,23,42,0.7)';
+          ctx.fillRect(0, 0, width, height);
+          ctx.fillStyle = '#38bdf8';
+          regressions.efm.points.slice(0, 100).forEach((point) => {
+            if (!point) return;
+            const x = typeof point.x === 'number' ? point.x : 0;
+            const y = typeof point.y === 'number' ? point.y : 0;
+            ctx.beginPath();
+            ctx.arc(20 + (x % (width - 40)), height - 20 - (y % (height - 40)), 3, 0, Math.PI * 2);
+            ctx.fill();
+          });
+        }
+      } else {
+        drawMessage(efmCanvas, 'EFM regression');
+      }
+
+      if (regressions.fuel && Array.isArray(regressions.fuel.points)) {
+        const setup = setupCanvas(fuelCanvas);
+        if (setup) {
+          const { ctx, width, height } = setup;
+          ctx.fillStyle = 'rgba(15,23,42,0.7)';
+          ctx.fillRect(0, 0, width, height);
+          ctx.fillStyle = '#f97316';
+          regressions.fuel.points.slice(0, 100).forEach((point) => {
+            if (!point) return;
+            const x = typeof point.x === 'number' ? point.x : 0;
+            const y = typeof point.y === 'number' ? point.y : 0;
+            ctx.beginPath();
+            ctx.arc(20 + (x % (width - 40)), height - 20 - (y % (height - 40)), 3, 0, Math.PI * 2);
+            ctx.fill();
+          });
+        }
+      } else {
+        drawMessage(fuelCanvas, 'Fuel regression');
+      }
+
+      container.dataset.rendered = '1';
+    }
+
+    function initVizTabs(payload) {
+      const container = document.getElementById('viz');
+      if (!container || container.dataset.bound) return;
+      const buttons = Array.from(container.querySelectorAll('nav button'));
+      const overview = document.getElementById('chart-overview');
+      const emissions = document.getElementById('chart-emissions');
+      const dynamics = document.getElementById('chart-dynamics');
+      const maw = document.getElementById('chart-maw');
+      const map = document.getElementById('map');
+      const ambient = document.getElementById('chart-ambient');
+      const regressions = document.getElementById('qa-regressions');
+
+      const hideAll = () => {
+        [overview, emissions, dynamics, maw, map, ambient].forEach((el) => {
+          if (el) el.hidden = true;
+        });
+        if (regressions) regressions.hidden = true;
+      };
+
+      buttons.forEach((button) => {
+        button.addEventListener('click', () => {
+          buttons.forEach((btn) => btn.classList.remove('active'));
+          button.classList.add('active');
+          const target = button.dataset.tab;
+          hideAll();
+          if (target === 'overview' && overview) {
+            overview.hidden = false;
+            renderOverviewChart(payload);
+          } else if (target === 'emissions' && emissions) {
+            emissions.hidden = false;
+            renderEmissionsChart(payload);
+          } else if (target === 'dynamics' && dynamics) {
+            dynamics.hidden = false;
+            renderDynamicsChart(payload);
+          } else if (target === 'maw' && maw) {
+            maw.hidden = false;
+            renderMawChart(payload);
+          } else if (target === 'map' && map) {
+            map.hidden = false;
+            safeInitMap(payload, map);
+          } else if (target === 'ambient' && ambient) {
+            ambient.hidden = false;
+            renderAmbientChart(payload);
+            if (regressions) {
+              regressions.hidden = false;
+              renderRegressionCharts(payload);
+            }
+          }
+        });
+      });
+
+      hideAll();
+      if (overview) {
+        overview.hidden = false;
+        renderOverviewChart(payload);
+      }
+      if (buttons[0]) {
+        buttons[0].classList.add('active');
+      }
+      container.dataset.bound = '1';
+    }
+
+    function renderModernCharts(payload) {
+      renderOverviewChart(payload);
+      renderEmissionsChart(payload);
+      renderDynamicsChart(payload);
+      renderMawChart(payload);
+      renderAmbientChart(payload);
+      renderRegressionCharts(payload);
+      initVizTabs(payload);
+    }
+
+    function bindModernActions(payload) {
+      const runBtn = document.getElementById('run-analysis');
+      if (runBtn && !runBtn.dataset.bound) {
+        runBtn.dataset.bound = '1';
+        runBtn.addEventListener('click', () => {
+          window.location.href = '/analyze?demo=1';
+        });
+      }
+      const pdfBtn = document.getElementById('download-pdf');
+      if (pdfBtn && !pdfBtn.dataset.bound) {
+        pdfBtn.dataset.bound = '1';
+        pdfBtn.addEventListener('click', (event) => {
+          event.preventDefault();
+          downloadCurrentPdf();
+        });
+      }
+      const jsonBtn = document.getElementById('download-json');
+      if (jsonBtn && !jsonBtn.dataset.bound) {
+        jsonBtn.dataset.bound = '1';
+        jsonBtn.addEventListener('click', () => {
+          try {
+            const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'eu7_report.json';
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            URL.revokeObjectURL(url);
+          } catch (error) {
+            console.warn('JSON download failed:', error);
+          }
+        });
+      }
+      buildKpis(payload);
+    }
+
+    function renderModernReport(payload) {
+      const container = document.getElementById('kpis');
+      if (!container) return false;
+      renderModernTables(payload);
+      renderModernCharts(payload);
+      bindModernActions(payload);
+      return true;
+    }
+
+    const fmtRange = (range, suffix) => {
+      if (!Array.isArray(range) || range.length < 2) return 'n/a';
+      const left = fmt(range[0]);
+      const right = fmt(range[1]);
+      const unit = suffix ? suffix : '';
+      if (left === 'n/a' && right === 'n/a') return 'n/a';
+      return `${left}${unit}–${right}${unit}`;
+    };
 
     function normaliseValue(value) {
       if (value === null || typeof value === 'undefined') {
@@ -477,6 +1245,33 @@ if (window.__RDE_APP_JS_LOADED__) {
       }
       return String(normalised);
     }
+
+    const fmtRange = (range, suffix) => {
+      if (!Array.isArray(range) || range.length < 2) return 'n/a';
+      const left = fmt(range[0]);
+      const right = fmt(range[1]);
+      const unit = suffix ? suffix : '';
+      if (left === 'n/a' && right === 'n/a') return 'n/a';
+      return `${left}${unit}–${right}${unit}`;
+    };
+    const significantFormatter = new Intl.NumberFormat('en-US', { maximumSignificantDigits: 4 });
+
+    const fmt = (v) => {
+      if (v === null || typeof v === 'undefined' || v === 'n/a') return 'n/a';
+      if (typeof v === 'number') {
+        if (!Number.isFinite(v)) return 'n/a';
+        return significantFormatter.format(v);
+      }
+      return String(v);
+    };
+
+    const pass = (b) => (b === true ? 'pass' : (b === false ? 'fail' : 'na'));
+
+    const resultLabel = (state) => {
+      if (state === 'pass') return 'PASS';
+      if (state === 'fail') return 'FAIL';
+      return 'n/a'.toUpperCase();
+    };
 
     function setOverallStatus(payload) {
       const badge = document.getElementById('overall-result-badge');
@@ -822,10 +1617,8 @@ if (window.__RDE_APP_JS_LOADED__) {
     window.renderEmissionsSummary = renderEmissionsSummary;
     window.renderFinalConformity = renderFinalConformity;
 
-    // ==== RDE UI: required ready hook (must match test literal) ====
-    document.addEventListener("rde:payload-ready", () => {
+    function renderLegacyReport(payload) {
       try {
-        const payload = getResultsPayload();
         setOverallStatus(payload);
         renderQuickVerdicts(payload);
         renderSectionTable('#section-zero-span', filterBySection(payload.criteria, 'Pre/Post Checks (Zero/Span)'));
@@ -848,12 +1641,38 @@ if (window.__RDE_APP_JS_LOADED__) {
             downloadCurrentPdf();
           });
         }
-
-        populateExportForms(payload);
       } catch (error) {
         console.warn('Payload render failed:', error);
         return false;
       }
+      return true;
+    }
+
+    // ==== RDE UI: required ready hook (must match test literal) ====
+    document.addEventListener("rde:payload-ready", () => {
+      let payload;
+      try {
+        payload = getResultsPayload();
+      } catch (error) {
+        console.warn('Payload retrieval failed:', error);
+        return false;
+      }
+
+      try {
+        const handled = renderModernReport(payload);
+        if (!handled) {
+          renderLegacyReport(payload);
+        }
+      } catch (error) {
+        console.warn('Payload render failed:', error);
+      }
+
+      try {
+        populateExportForms(payload);
+      } catch (error) {
+        console.warn('Export form population failed:', error);
+      }
+
       return true;
     });
 
