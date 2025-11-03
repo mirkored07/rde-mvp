@@ -133,7 +133,7 @@
                   enctype="multipart/form-data"
                 >
                   <div class="grid gap-5 md:grid-cols-2 lg:grid-cols-3">
-                    <div class="dropzone group flex flex-col rounded-2xl border border-slate-200 bg-white/70 p-5 shadow-sm transition dark:border-slate-800 dark:bg-slate-900/60" data-dropzone>
+                    <div id="drop-pems" class="dropzone group flex flex-col rounded-2xl border border-slate-200 bg-white/70 p-5 shadow-sm transition dark:border-slate-800 dark:bg-slate-900/60" data-dropzone data-max-size-mb="{{ max_upload_mb }}">
                       <div class="flex items-center gap-3">
                         <div class="flex h-12 w-12 items-center justify-center rounded-xl bg-sky-500/10 text-sky-600 dark:bg-sky-500/15 dark:text-sky-200">
                           <svg class="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
@@ -148,16 +148,15 @@
                         </div>
                       </div>
                       <div class="mt-5 flex flex-1 flex-col">
-                        <label class="flex flex-1 cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-slate-300 bg-slate-50/80 px-3 py-6 text-center text-sm font-medium text-slate-600 transition hover:border-sky-500 hover:text-sky-600 dark:border-slate-700 dark:bg-slate-800/60 dark:text-slate-300 dark:hover:border-indigo-400 dark:hover:text-indigo-200">
-                          <input type="file" class="sr-only" name="pems_file" id="pems_file" accept=".csv" required data-allowed=".csv" data-max-size-mb="{{ max_upload_mb }}" />
-                          <span>Drop file here or <span class="text-sky-600 underline underline-offset-2 dark:text-indigo-200">browse</span></span>
+                        <div class="flex flex-1 flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-slate-300 bg-slate-50/80 px-3 py-6 text-center text-sm font-medium text-slate-600 transition hover:border-sky-500 hover:text-sky-600 dark:border-slate-700 dark:bg-slate-800/60 dark:text-slate-300 dark:hover:border-indigo-400 dark:hover:text-indigo-200">
+                          <span>Drop file here or <a href="#" data-action="browse" class="text-sky-600 underline underline-offset-2 dark:text-indigo-200">browse</a></span>
                           <span class="text-xs text-slate-400 dark:text-slate-500">.csv</span>
-                        </label>
+                        </div>
                         <p data-file-label class="mt-3 text-sm text-slate-500 dark:text-slate-400">No file selected</p>
                         <p data-error class="mt-2 hidden text-sm font-medium text-rose-600 dark:text-rose-400"></p>
                       </div>
                     </div>
-                    <div class="dropzone group flex flex-col rounded-2xl border border-slate-200 bg-white/70 p-5 shadow-sm transition dark:border-slate-800 dark:bg-slate-900/60" data-dropzone>
+                    <div id="drop-gps" class="dropzone group flex flex-col rounded-2xl border border-slate-200 bg-white/70 p-5 shadow-sm transition dark:border-slate-800 dark:bg-slate-900/60" data-dropzone data-max-size-mb="{{ max_upload_mb }}">
                       <div class="flex items-center gap-3">
                         <div class="flex h-12 w-12 items-center justify-center rounded-xl bg-sky-500/10 text-sky-600 dark:bg-sky-500/15 dark:text-sky-200">
                           <svg class="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
@@ -172,16 +171,15 @@
                         </div>
                       </div>
                       <div class="mt-5 flex flex-1 flex-col">
-                        <label class="flex flex-1 cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-slate-300 bg-slate-50/80 px-3 py-6 text-center text-sm font-medium text-slate-600 transition hover:border-sky-500 hover:text-sky-600 dark:border-slate-700 dark:bg-slate-800/60 dark:text-slate-300 dark:hover:border-indigo-400 dark:hover:text-indigo-200">
-                          <input type="file" class="sr-only" name="gps_file" id="gps_file" accept=".csv,.nmea,.gpx,.txt" required data-allowed=".csv,.nmea,.gpx,.txt" data-max-size-mb="{{ max_upload_mb }}" />
-                          <span>Drop file here or <span class="text-sky-600 underline underline-offset-2 dark:text-indigo-200">browse</span></span>
+                        <div class="flex flex-1 flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-slate-300 bg-slate-50/80 px-3 py-6 text-center text-sm font-medium text-slate-600 transition hover:border-sky-500 hover:text-sky-600 dark:border-slate-700 dark:bg-slate-800/60 dark:text-slate-300 dark:hover:border-indigo-400 dark:hover:text-indigo-200">
+                          <span>Drop file here or <a href="#" data-action="browse" class="text-sky-600 underline underline-offset-2 dark:text-indigo-200">browse</a></span>
                           <span class="text-xs text-slate-400 dark:text-slate-500">.csv · .nmea · .gpx · .txt</span>
-                        </label>
+                        </div>
                         <p data-file-label class="mt-3 text-sm text-slate-500 dark:text-slate-400">No file selected</p>
                         <p data-error class="mt-2 hidden text-sm font-medium text-rose-600 dark:text-rose-400"></p>
                       </div>
                     </div>
-                    <div class="dropzone group flex flex-col rounded-2xl border border-slate-200 bg-white/70 p-5 shadow-sm transition dark:border-slate-800 dark:bg-slate-900/60" data-dropzone>
+                    <div id="drop-ecu" class="dropzone group flex flex-col rounded-2xl border border-slate-200 bg-white/70 p-5 shadow-sm transition dark:border-slate-800 dark:bg-slate-900/60" data-dropzone data-max-size-mb="{{ max_upload_mb }}">
                       <div class="flex items-center gap-3">
                         <div class="flex h-12 w-12 items-center justify-center rounded-xl bg-sky-500/10 text-sky-600 dark:bg-sky-500/15 dark:text-sky-200">
                           <svg class="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
@@ -197,11 +195,10 @@
                         </div>
                       </div>
                       <div class="mt-5 flex flex-1 flex-col">
-                        <label class="flex flex-1 cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-slate-300 bg-slate-50/80 px-3 py-6 text-center text-sm font-medium text-slate-600 transition hover:border-sky-500 hover:text-sky-600 dark:border-slate-700 dark:bg-slate-800/60 dark:text-slate-300 dark:hover:border-indigo-400 dark:hover:text-indigo-200">
-                          <input type="file" class="sr-only" name="ecu_file" id="ecu_file" accept=".csv,.mf4,.mdf" required data-allowed=".csv,.mf4,.mdf" data-max-size-mb="{{ max_upload_mb }}" />
-                          <span>Drop file here or <span class="text-sky-600 underline underline-offset-2 dark:text-indigo-200">browse</span></span>
+                        <div class="flex flex-1 flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-slate-300 bg-slate-50/80 px-3 py-6 text-center text-sm font-medium text-slate-600 transition hover:border-sky-500 hover:text-sky-600 dark:border-slate-700 dark:bg-slate-800/60 dark:text-slate-300 dark:hover:border-indigo-400 dark:hover:text-indigo-200">
+                          <span>Drop file here or <a href="#" data-action="browse" class="text-sky-600 underline underline-offset-2 dark:text-indigo-200">browse</a></span>
                           <span class="text-xs text-slate-400 dark:text-slate-500">.csv · .mf4 · .mdf</span>
-                        </label>
+                        </div>
                         <p data-file-label class="mt-3 text-sm text-slate-500 dark:text-slate-400">No file selected</p>
                         <p data-error class="mt-2 hidden text-sm font-medium text-rose-600 dark:text-rose-400"></p>
                       </div>
