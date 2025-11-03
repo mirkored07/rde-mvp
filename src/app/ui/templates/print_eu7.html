@@ -4,7 +4,6 @@
 <meta charset="utf-8">
 <title>EU7 Report</title>
 <style>
-  /* A4, portrait; WeasyPrint-friendly (no external CSS/fonts) */
   @page { size: A4; margin: 18mm 16mm 18mm 16mm; }
   * { box-sizing: border-box; }
   body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; color: #0f172a; font-size: 11px; }
@@ -15,187 +14,291 @@
   .muted { color: #475569; }
   .small { font-size: 10px; }
   .pill { padding: 2px 8px; border-radius: 999px; font-weight: 600; font-size: 10px; display: inline-block; }
-  .pass { background: #d1fae5; color: #065f46; }
-  .fail { background: #fee2e2; color: #991b1b; }
-  .pending { background: #fde68a; color: #92400e; }
-  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-  .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
-  .card { border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px; }
-  .metrics { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 8px; }
-  .metric { border: 1px solid #e2e8f0; border-radius: 6px; padding: 8px; }
-  .metric dt { font-size: 10px; color: #475569; margin-bottom: 2px; }
-  .metric dd { font-weight: 700; font-size: 12px; }
-  table { width: 100%; border-collapse: collapse; }
+  .pill.pass { background: #d1fae5; color: #065f46; }
+  .pill.fail { background: #fee2e2; color: #991b1b; }
+  .pill.pending { background: #e2e8f0; color: #475569; }
+  table { width: 100%; border-collapse: collapse; margin-top: 6px; }
   thead th { background: #f1f5f9; color: #334155; font-weight: 700; font-size: 10px; text-align: left; padding: 6px 8px; border-bottom: 1px solid #e2e8f0; }
   tbody td { padding: 6px 8px; border-bottom: 1px solid #e2e8f0; vertical-align: top; }
   .nowrap { white-space: nowrap; }
-  .note { color: #64748b; }
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .card { border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px; margin-top: 10px; }
+  .metric { border: 1px solid #e2e8f0; border-radius: 6px; padding: 8px; }
+  .metric dt { font-size: 10px; color: #475569; margin-bottom: 2px; }
+  .metric dd { font-weight: 700; font-size: 12px; }
   footer { position: fixed; bottom: 10mm; left: 16mm; right: 16mm; font-size: 10px; color: #475569; display: flex; justify-content: space-between; }
   .page-num:after { content: counter(page) " / " counter(pages); }
 </style>
 </head>
 <body>
 {% set p = results_payload or {} %}
-{% set final = p.final or {} %}
-{% set sections = p.sections or [] %}
-{% set kpis = p.kpi_numbers or [] %}
-{% set verdict = final.pass %}
-{% macro pill(val) -%}
-  {%- if val is sameas true -%}<span class="pill pass">PASS</span>
-  {%- elif val is sameas false -%}<span class="pill fail">FAIL</span>
-  {%- else -%}<span class="pill pending">PENDING</span>
+{% set meta = p.meta or {} %}
+{% set fc = p.final_conformity or {} %}
+{% set precon = p.precon_soak or {} %}
+{% set cold = p.cold_start or {} %}
+{% set shares = p.trip_shares or {} %}
+{% set elev = p.elevation or {} %}
+{% set gps = p.gps or {} %}
+{% set span_zero = p.span_zero or {} %}
+{% set devices = p.devices or {} %}
+{% set dyn = p.dynamics or {} %}
+{% set maw = p.maw_coverage or {} %}
+{% set emissions = (p.emissions_summary and p.emissions_summary.phases) or p.emissions or {} %}
+{% macro fmt(value) -%}
+  {%- if value is number -%}{{ '%.3g' % value }}{%- elif value is string and value|length > 0 -%}{{ value }}{%- else -%}n/a{%- endif -%}
+{%- endmacro %}
+{% macro pill(state) -%}
+  {%- if state is sameas true or state == 'pass' -%}<span class="pill pass">PASS</span>
+  {%- elif state is sameas false or state == 'fail' -%}<span class="pill fail">FAIL</span>
+  {%- else -%}<span class="pill pending">N/A</span>
   {%- endif -%}
 {%- endmacro %}
-{% macro fmt(x) -%}
-  {%- if x is number -%}{{"{:,.3g}".format(x)}}{%- else -%}{{ x or "n/a" }}{%- endif -%}
+{% macro range_text(rng, suffix) -%}
+  {%- if rng is sequence and rng|length >= 2 -%}{{ fmt(rng[0]) }}{{ suffix }}–{{ fmt(rng[1]) }}{{ suffix }}{%- else -%}n/a{%- endif -%}
 {%- endmacro %}
-
+{% macro row(ref, crit, cond, value, unit, result) -%}
+<tr>
+  <td class="nowrap">{{ ref }}</td>
+  <td>{{ crit }}</td>
+  <td>{{ cond }}</td>
+  <td class="nowrap">{{ value }}</td>
+  <td class="nowrap">{{ unit }}</td>
+  <td>{{ pill(result) }}</td>
+</tr>
+{%- endmacro %}
+{% macro result_state(value) -%}
+  {%- if value is sameas true or value == 'pass' -%}pass{%- elif value is sameas false or value == 'fail' -%}fail{%- else -%}na{%- endif -%}
+{%- endmacro %}
+{% set final_pass = fc.NOx_mg_km and fc.NOx_mg_km.pass and (fc.PN10_hash_km is not none and fc.PN10_hash_km.pass) %}
 <header>
   <div class="grid-2">
     <div>
       <h1>EU7 Light-Duty – Compliance Report</h1>
-      <div class="muted small">{{ p.meta.legislation or "EU7 Light-Duty" }}</div>
+      <div class="muted small">{{ meta.legislation or "EU7 Light-Duty" }}</div>
+      <div class="small muted">Test {{ meta.testId or 'n/a' }} · Velocity {{ meta.velocitySource or 'n/a' }}</div>
     </div>
     <div style="text-align:right;">
       <div class="small muted">Overall verdict</div>
-      {{ pill(verdict) }}
+      {{ pill(final_pass) }}
     </div>
   </div>
 </header>
 
-<section class="card" style="margin-top:10px;">
-  <div class="metrics">
-    <div class="metric">
-      <dt>Total distance</dt>
-      <dd>{{ fmt(p.meta.total_distance_km) }} km</dd>
-    </div>
-    <div class="metric">
-      <dt>Duration</dt>
-      <dd>{{ fmt(p.meta.total_time_min) }} min</dd>
-    </div>
-    <div class="metric">
-      <dt>NOx (mg/km)</dt>
-      <dd>{{ fmt(p.meta.nox_mg_per_km) }}</dd>
-    </div>
-    <div class="metric">
-      <dt>PN (1/km)</dt>
-      <dd>{{ fmt(p.meta.pn_per_km) }}</dd>
-    </div>
+<section class="card">
+  <div class="grid-3">
+    <div class="metric"><dt>NOx final</dt><dd>{{ fmt(fc.NOx_mg_km.value if fc.NOx_mg_km else None) }} mg/km</dd></div>
+    <div class="metric"><dt>PN10 final</dt><dd>{{ fmt(fc.PN10_hash_km.value if fc.PN10_hash_km else None) }} #/km</dd></div>
+    <div class="metric"><dt>CO trip</dt><dd>{{ fmt((p.emissions.trip.CO_mg_km) if p.emissions and p.emissions.trip else None) }} mg/km</dd></div>
+    <div class="metric"><dt>Duration</dt><dd>{{ fmt(shares.duration_min) }} min</dd></div>
+    <div class="metric"><dt>GPS gaps</dt><dd>{{ fmt(gps.total_gaps_s) }} s</dd></div>
+    <div class="metric"><dt>Δh</dt><dd>{{ fmt(elev.start_end_abs_m) }} m</dd></div>
   </div>
 </section>
 
-<section class="grid-2" style="margin-top:10px;">
-  <div class="card">
-    <h2>Speed-bin coverage</h2>
-    <table>
-      <thead><tr>
-        <th class="nowrap">Bin</th>
-        <th class="nowrap">Time (s)</th>
-        <th class="nowrap">Distance (km)</th>
-        <th class="nowrap">Status</th>
-      </tr></thead>
-      <tbody>
-        {% for row in (p.meta.speed_bin_coverage or []) %}
-        <tr>
-          <td>{{ row.bin or '–' }}</td>
-          <td class="nowrap">{{ fmt(row.time_s) }}</td>
-          <td class="nowrap">{{ fmt(row.distance_km) }}</td>
-          <td>{{ pill(row.pass) }}</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-
-  <div class="card">
-    <h2>KPIs (selection)</h2>
-    <table>
-      <thead><tr>
-        <th>Key</th><th>Value</th><th>Unit</th>
-      </tr></thead>
-      <tbody>
-        {% for k in kpis %}
-        <tr>
-          <td>{{ k.key or 'KPI' }}</td>
-          <td class="nowrap">{{ fmt(k.value) }}</td>
-          <td class="nowrap">{{ k.unit or '' }}</td>
-        </tr>
-        {% else %}
-        <tr><td colspan="3" class="note">No KPIs configured.</td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-</section>
-
-<section class="card" style="margin-top:10px;">
-  <h2>Rule evidence</h2>
-  {% for block in sections %}
-    {% set criteria = block.criteria or [] %}
-    <h3>{{ block.title }}</h3>
-    <table>
-      <thead><tr>
-        <th class="nowrap">Ref</th>
-        <th>Criterion</th>
-        <th>Condition</th>
-        <th class="nowrap">Value</th>
-        <th class="nowrap">Unit</th>
-        <th class="nowrap">Result</th>
-      </tr></thead>
-      <tbody>
-        {% for r in criteria %}
-        <tr>
-          <td class="nowrap">{{ r.ref or '—' }}</td>
-          <td>{{ r.criterion or '—' }}</td>
-          <td>{{ r.condition or '—' }}</td>
-          <td class="nowrap">{{ fmt(r.value) }}</td>
-          <td class="nowrap">{{ r.unit or '' }}</td>
-          <td>{{ pill(r.pass) }}</td>
-        </tr>
-        {% else %}
-        <tr><td colspan="6" class="note">No criteria available.</td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  {% endfor %}
-</section>
-
-<section class="card" style="margin-top:10px;">
-  <h2>Final Conformity</h2>
-  <div style="margin-bottom:6px;">Overall: {{ pill(verdict) }}</div>
+<section>
+  <h2>Preconditioning &amp; Soak</h2>
+  {% set drive = precon.drive_10min_each or {} %}
+  {% set soak_range = precon.soak_duration_range or [6,72] %}
+  {% set soak_pass = drive.ok if drive.ok is not none else ((precon.soak_duration_h is number) and (precon.soak_duration_h >= soak_range[0]) and (precon.soak_duration_h <= soak_range[1])) %}
   <table>
-    <thead><tr>
-      <th>Pollutant</th>
-      <th>Condition</th>
-      <th class="nowrap">Value</th>
-      <th class="nowrap">Unit</th>
-      <th class="nowrap">Result</th>
-    </tr></thead>
+    <thead><tr><th>REF</th><th>CRITERION</th><th>CONDITION</th><th>VALUE</th><th>UNIT</th><th>RESULT</th></tr></thead>
     <tbody>
-      {% for pol in (final.pollutants or []) %}
-      <tr>
-        <td>{{ pol.criterion or '—' }}</td>
-        <td>{{ pol.condition or '—' }}</td>
-        <td class="nowrap">{{ fmt(pol.value) }}</td>
-        <td class="nowrap">{{ pol.unit or '' }}</td>
-        <td>{{ pill(pol.pass) }}</td>
-      </tr>
-      {% else %}
-      <tr><td colspan="5" class="note">Emission limits not fully configured.</td></tr>
+      {{ row('§8.3', '≥10 min each operation', '≥ 600 s (urban/rural/motorway)', fmt(drive.urban_min_s) ~ '/' ~ fmt(drive.rural_min_s) ~ '/' ~ fmt(drive.motorway_min_s), 's', result_state(drive.ok)) }}
+      {% set dur_pass = (precon.soak_duration_h is number) and (soak_range|length >= 2) and (precon.soak_duration_h >= soak_range[0]) and (precon.soak_duration_h <= soak_range[1]) %}
+      {{ row('§10.6', 'Soak duration', range_text(soak_range, ' h'), fmt(precon.soak_duration_h), 'h', result_state(dur_pass)) }}
+      {{ row('§10.6', 'Soak temperature range', range_text(precon.soak_temperature_range or [-7,38], ' °C'), fmt(precon.soak_temp_min_c) ~ '–' ~ fmt(precon.soak_temp_max_c), '°C', 'na') }}
+      {{ row('§10.6', 'Extended temp multiplier', 'Applied when last 3h in range', precon.extended_temp_flag and precon.extended_last_temp_c is number and (precon.extended_last_temp_c|string) ~ ' °C' or 'not applied', '', result_state(precon.extended_temp_flag)) }}
+    </tbody>
+  </table>
+</section>
+
+<section>
+  <h2>Cold Start</h2>
+  {% set move_limit = cold.duration_limit_s or 120 %}
+  {% set move_pass = (cold.move_within_s is number) and (cold.move_within_s <= move_limit) %}
+  {% set stop_pass = (cold.stop_total_s is number) and (cold.stop_total_s <= 180) %}
+  <table>
+    <thead><tr><th>REF</th><th>CRITERION</th><th>CONDITION</th><th>VALUE</th><th>UNIT</th><th>RESULT</th></tr></thead>
+    <tbody>
+      {{ row('§8.3', 'Start/End logged', 'Documentation available', cold.start_end_logged and 'logged' or 'missing', '', result_state(cold.start_end_logged)) }}
+      {{ row('§8.3', 'Vehicle moves within limit', '≤ ' ~ fmt(move_limit) ~ ' s', fmt(cold.move_within_s), 's', result_state(move_pass)) }}
+      {{ row('§8.3', 'Total stop time', '≤ 180 s', fmt(cold.stop_total_s), 's', result_state(stop_pass)) }}
+      {{ row('§8.3', 'Average / max speed', '≤ 40 / ≤ 60 km/h', fmt(cold.avg_speed_kmh) ~ ' / ' ~ fmt(cold.max_speed_kmh), 'km/h', 'na') }}
+      {{ row('§10.6', 'Multiplier applied', '1.6 when ambient in range', cold.multiplier_applied and ('applied (' ~ fmt(cold.ambient_temp_c) ~ ' °C)') or 'not applied', '', result_state(cold.multiplier_applied)) }}
+    </tbody>
+  </table>
+</section>
+
+<section>
+  <h2>Trip Shares &amp; Duration</h2>
+  {% set dist_min = shares.distance_min_km or {} %}
+  {% set share_rng = shares.share_ranges or {} %}
+  <table>
+    <thead><tr><th>REF</th><th>CRITERION</th><th>CONDITION</th><th>VALUE</th><th>UNIT</th><th>RESULT</th></tr></thead>
+    <tbody>
+      {{ row('§7.1', 'Urban distance', '≥ ' ~ fmt(dist_min.urban) ~ ' km', fmt(shares.urban_km), 'km', result_state((shares.urban_km is number) and dist_min.urban is number and shares.urban_km >= dist_min.urban)) }}
+      {{ row('§7.1', 'Motorway distance', '≥ ' ~ fmt(dist_min.motorway) ~ ' km', fmt(shares.motorway_km), 'km', result_state((shares.motorway_km is number) and dist_min.motorway is number and shares.motorway_km >= dist_min.motorway)) }}
+      {% set dur_rng = shares.duration_range or [90, 120] %}
+      {{ row('§7.1', 'Trip duration', range_text(dur_rng, ' min'), fmt(shares.duration_min), 'min', result_state((shares.duration_min is number) and (dur_rng|length >= 2) and shares.duration_min >= dur_rng[0] and shares.duration_min <= dur_rng[1])) }}
+      {% set urban_rng = share_rng.urban or [34, 66] %}
+      {% set mway_rng = share_rng.motorway or [34, 66] %}
+      {{ row('§7.1', 'Urban share', range_text(urban_rng, ' %'), fmt(shares.urban_share_pct) ~ ' %', '%', result_state((shares.urban_share_pct is number) and (urban_rng|length >= 2) and shares.urban_share_pct >= urban_rng[0] and shares.urban_share_pct <= urban_rng[1])) }}
+      {{ row('§7.1', 'Motorway share', range_text(mway_rng, ' %'), fmt(shares.motorway_share_pct) ~ ' %', '%', result_state((shares.motorway_share_pct is number) and (mway_rng|length >= 2) and shares.motorway_share_pct >= mway_rng[0] and shares.motorway_share_pct <= mway_rng[1])) }}
+      {% set order_expected = shares.order_expected or [] %}
+      {% set order_actual = shares.order or [] %}
+      {{ row('§7.1', 'Phase order', order_expected|join(' → '), order_actual|join(' → ') or 'n/a', '', result_state(order_actual|join('|') == order_expected|join('|'))) }}
+    </tbody>
+  </table>
+</section>
+
+<section>
+  <h2>Elevation &amp; Extended Conditions</h2>
+  <table>
+    <thead><tr><th>REF</th><th>CRITERION</th><th>CONDITION</th><th>VALUE</th><th>UNIT</th><th>RESULT</th></tr></thead>
+    <tbody>
+      {{ row('§7.2', 'Start/end elevation delta', '≤ ' ~ fmt(elev.start_end_limit_m) ~ ' m', fmt(elev.start_end_delta_m), 'm', result_state((elev.start_end_delta_m is number) and (elev.start_end_limit_m is number) and (elev.start_end_delta_m|abs <= elev.start_end_limit_m))) }}
+      {{ row('§7.2', 'Trip cumulative elevation', '≤ ' ~ fmt(elev.trip_limit_m_per_100km) ~ ' m/100km', fmt(elev.trip_cumulative_m_per_100km), 'm/100km', result_state((elev.trip_cumulative_m_per_100km is number) and (elev.trip_limit_m_per_100km is number) and (elev.trip_cumulative_m_per_100km <= elev.trip_limit_m_per_100km))) }}
+      {{ row('§7.2', 'Urban cumulative elevation', '≤ ' ~ fmt(elev.urban_limit_m_per_100km) ~ ' m/100km', fmt(elev.urban_cumulative_m_per_100km), 'm/100km', result_state((elev.urban_cumulative_m_per_100km is number) and (elev.urban_limit_m_per_100km is number) and (elev.urban_cumulative_m_per_100km <= elev.urban_limit_m_per_100km))) }}
+      {{ row('§7.2', 'Extended conditions active', 'Declared when thresholds exceeded', elev.extended_active and 'extended' or 'normal', '', result_state(elev.extended_active)) }}
+      {{ row('§7.2', 'Extended emissions valid', 'If extended, emissions must pass', elev.extended_emissions_valid and 'valid' or 'invalid', '', result_state(elev.extended_emissions_valid)) }}
+    </tbody>
+  </table>
+</section>
+
+<section>
+  <h2>GPS Integrity</h2>
+  <table>
+    <thead><tr><th>REF</th><th>CRITERION</th><th>CONDITION</th><th>VALUE</th><th>UNIT</th><th>RESULT</th></tr></thead>
+    <tbody>
+      {{ row('§7.3', 'Distance delta', '≤ ' ~ fmt(gps.delta_limit_pct) ~ ' %', fmt(gps.distance_delta_pct) ~ ' %', '%', result_state((gps.distance_delta_pct is number) and (gps.delta_limit_pct is number) and (gps.distance_delta_pct|abs <= gps.delta_limit_pct))) }}
+      {{ row('§7.3', 'Max gap', '≤ ' ~ fmt(gps.max_gap_limit_s) ~ ' s', fmt(gps.max_gap_s), 's', result_state((gps.max_gap_s is number) and (gps.max_gap_limit_s is number) and (gps.max_gap_s <= gps.max_gap_limit_s))) }}
+      {{ row('§7.3', 'Total gaps', '≤ ' ~ fmt(gps.total_gaps_limit_s) ~ ' s', fmt(gps.total_gaps_s), 's', result_state((gps.total_gaps_s is number) and (gps.total_gaps_limit_s is number) and (gps.total_gaps_s <= gps.total_gaps_limit_s))) }}
+      {{ row('§7.3', 'Gap events', 'Descriptive', gps.gaps and (gps.gaps|length|string ~ ' gap(s)') or 'no gaps', '', gps.gaps and 'na' or 'pass') }}
+    </tbody>
+  </table>
+</section>
+
+<section>
+  <h2>Zero/Span &amp; Coverage</h2>
+  {% set zero = span_zero.zero or {} %}
+  {% set span = span_zero.span or {} %}
+  {% set cover = span_zero.coverage or {} %}
+  {% set lim = span_zero.limits or {} %}
+  <table>
+    <thead><tr><th>REF</th><th>CRITERION</th><th>CONDITION</th><th>VALUE</th><th>UNIT</th><th>RESULT</th></tr></thead>
+    <tbody>
+      {{ row('§6.1', 'CO₂ zero drift', '≤ ' ~ fmt(lim.co2_zero_ppm) ~ ' ppm', fmt(zero.co2_ppm), 'ppm', result_state((zero.co2_ppm is number) and (lim.co2_zero_ppm is number) and (zero.co2_ppm|abs <= lim.co2_zero_ppm))) }}
+      {{ row('§6.1', 'CO zero drift', '≤ ' ~ fmt(lim.co_zero_ppm) ~ ' ppm', fmt(zero.co_ppm), 'ppm', result_state((zero.co_ppm is number) and (lim.co_zero_ppm is number) and (zero.co_ppm|abs <= lim.co_zero_ppm))) }}
+      {{ row('§6.1', 'NOx zero drift', '≤ ' ~ fmt(lim.nox_zero_ppm) ~ ' ppm', fmt(zero.nox_ppm), 'ppm', result_state((zero.nox_ppm is number) and (lim.nox_zero_ppm is number) and (zero.nox_ppm|abs <= lim.nox_zero_ppm))) }}
+      {{ row('§6.1', 'PN zero', '≤ ' ~ fmt(lim.pn_zero_hash_cm3) ~ ' #/cm³', fmt(zero.pn_hash_cm3), '#/cm³', result_state((zero.pn_hash_cm3 is number) and (lim.pn_zero_hash_cm3 is number) and (zero.pn_hash_cm3 <= lim.pn_zero_hash_cm3))) }}
+      {{ row('§6.3', 'CO₂ span drift', '≤ ' ~ fmt(lim.co2_span_ppm) ~ ' ppm', fmt(span.co2_ppm), 'ppm', result_state((span.co2_ppm is number) and (lim.co2_span_ppm is number) and (span.co2_ppm|abs <= lim.co2_span_ppm))) }}
+      {{ row('§6.3', 'CO span drift', '≤ ' ~ fmt(lim.co_span_ppm) ~ ' ppm', fmt(span.co_ppm), 'ppm', result_state((span.co_ppm is number) and (lim.co_span_ppm is number) and (span.co_ppm|abs <= lim.co_span_ppm))) }}
+      {{ row('§6.3', 'NOx span drift', '≤ ' ~ fmt(lim.nox_span_ppm) ~ ' ppm', fmt(span.nox_ppm), 'ppm', result_state((span.nox_ppm is number) and (lim.nox_span_ppm is number) and (span.nox_ppm|abs <= lim.nox_span_ppm))) }}
+      {{ row('§6.3', 'CO₂ span coverage', '≥ ' ~ fmt(lim.coverage_min_pct) ~ ' %', fmt(cover.co2_pct) ~ ' %', '%', result_state((cover.co2_pct is number) and (lim.coverage_min_pct is number) and (cover.co2_pct >= lim.coverage_min_pct))) }}
+      {{ row('§6.3', 'CO span coverage', '≥ ' ~ fmt(lim.coverage_min_pct) ~ ' %', fmt(cover.co_pct) ~ ' %', '%', result_state((cover.co_pct is number) and (lim.coverage_min_pct is number) and (cover.co_pct >= lim.coverage_min_pct))) }}
+      {{ row('§6.3', 'NOx span coverage', '≥ ' ~ fmt(lim.coverage_min_pct) ~ ' %', fmt(cover.nox_pct) ~ ' %', '%', result_state((cover.nox_pct is number) and (lim.coverage_min_pct is number) and (cover.nox_pct >= lim.coverage_min_pct))) }}
+      {{ row('§6.3', 'CO₂ between span and 2×span', '≤ ' ~ fmt(lim.two_x_pct) ~ ' %', fmt(cover.co2_mid_pct) ~ ' %', '%', result_state((cover.co2_mid_pct is number) and (lim.two_x_pct is number) and (cover.co2_mid_pct <= lim.two_x_pct))) }}
+      {{ row('§6.3', 'CO₂ >2×span events', '≤ ' ~ fmt(lim.exceed_count), fmt(cover.co2_over_limit), 'count', result_state((cover.co2_over_limit is number) and (lim.exceed_count is number) and (cover.co2_over_limit <= lim.exceed_count))) }}
+    </tbody>
+  </table>
+</section>
+
+<section>
+  <h2>Devices &amp; Integrity</h2>
+  {% set lim_dev = devices.limits or {} %}
+  <table>
+    <thead><tr><th>REF</th><th>CRITERION</th><th>CONDITION</th><th>VALUE</th><th>UNIT</th><th>RESULT</th></tr></thead>
+    <tbody>
+      {{ row('§4.6', 'Gas PEMS', 'Identifier', devices.gas_pems or 'n/a', '', 'na') }}
+      {{ row('§4.6', 'PN PEMS', 'Identifier', devices.pn_pems or 'n/a', '', 'na') }}
+      {{ row('§4.6', 'EFM', 'Identifier', devices.efm or 'n/a', '', 'na') }}
+      {{ row('§4.6', 'Gas PEMS leak rate', '≤ ' ~ fmt(lim_dev.leak_rate_pct) ~ ' %', fmt(devices.leak_rate_pct) ~ ' %', '%', result_state((devices.leak_rate_pct is number) and (lim_dev.leak_rate_pct is number) and (devices.leak_rate_pct <= lim_dev.leak_rate_pct))) }}
+      {{ row('§4.6', 'PN dilute pressure rise', '≤ ' ~ fmt(lim_dev.pn_dilute_pressure_mbar) ~ ' mbar', fmt(devices.pn_dilute_pressure_mbar), 'mbar', result_state((devices.pn_dilute_pressure_mbar is number) and (lim_dev.pn_dilute_pressure_mbar is number) and (devices.pn_dilute_pressure_mbar <= lim_dev.pn_dilute_pressure_mbar))) }}
+      {{ row('§4.6', 'PN sample pressure rise', '≤ ' ~ fmt(lim_dev.pn_sample_pressure_mbar) ~ ' mbar', fmt(devices.pn_sample_pressure_mbar), 'mbar', result_state((devices.pn_sample_pressure_mbar is number) and (lim_dev.pn_sample_pressure_mbar is number) and (devices.pn_sample_pressure_mbar <= lim_dev.pn_sample_pressure_mbar))) }}
+      {{ row('§4.6', 'Device errors', '≤ ' ~ fmt(lim_dev.device_errors), fmt(devices.device_errors), 'count', result_state((devices.device_errors is number) and (lim_dev.device_errors is number) and (devices.device_errors <= lim_dev.device_errors))) }}
+    </tbody>
+  </table>
+</section>
+
+<section>
+  <h2>Dynamics</h2>
+  {% set dlim = dyn.limits or {} %}
+  {% set speeds = dyn.avg_speeds_kmh or {} %}
+  <table>
+    <thead><tr><th>REF</th><th>CRITERION</th><th>CONDITION</th><th>VALUE</th><th>UNIT</th><th>RESULT</th></tr></thead>
+    <tbody>
+      {{ row('§7.4', 'Urban v̄', 'Descriptive', fmt(speeds.urban), 'km/h', 'na') }}
+      {{ row('§7.4', 'Urban a⁺95', '≤ ' ~ fmt(dlim.va_pos95.urban if dlim.va_pos95 else None) ~ ' m²/s³', fmt((dyn.urban or {}).va_pos95), 'm²/s³', result_state((dyn.urban and dyn.urban.va_pos95 is number) and (dlim.va_pos95 and dlim.va_pos95.urban is number) and (dyn.urban.va_pos95 <= dlim.va_pos95.urban))) }}
+      {{ row('§7.4', 'Urban RPA', '≥ ' ~ fmt(dlim.rpa_min.urban if dlim.rpa_min else None) ~ ' m/s²', fmt((dyn.urban or {}).rpa), 'm/s²', result_state((dyn.urban and dyn.urban.rpa is number) and (dlim.rpa_min and dlim.rpa_min.urban is number) and (dyn.urban.rpa >= dlim.rpa_min.urban))) }}
+      {{ row('§7.4', 'Motorway v̄', 'Descriptive', fmt(speeds.motorway), 'km/h', 'na') }}
+      {{ row('§7.4', 'Motorway a⁺95', '≤ ' ~ fmt(dlim.va_pos95.motorway if dlim.va_pos95 else None) ~ ' m²/s³', fmt((dyn.motorway or {}).va_pos95), 'm²/s³', result_state((dyn.motorway and dyn.motorway.va_pos95 is number) and (dlim.va_pos95 and dlim.va_pos95.motorway is number) and (dyn.motorway.va_pos95 <= dlim.va_pos95.motorway))) }}
+      {{ row('§7.4', 'Motorway RPA', '≥ ' ~ fmt(dlim.rpa_min.motorway if dlim.rpa_min else None) ~ ' m/s²', fmt((dyn.motorway or {}).rpa), 'm/s²', result_state((dyn.motorway and dyn.motorway.rpa is number) and (dlim.rpa_min and dlim.rpa_min.motorway is number) and (dyn.motorway.rpa >= dlim.rpa_min.motorway))) }}
+      {{ row('§7.4', 'Acceleration points (u/m)', 'Descriptive', fmt((dyn.urban or {}).accel_points) ~ ' / ' ~ fmt((dyn.motorway or {}).accel_points), '', 'na') }}
+    </tbody>
+  </table>
+</section>
+
+<section>
+  <h2>MAW Coverage</h2>
+  <table>
+    <thead><tr><th>REF</th><th>CRITERION</th><th>CONDITION</th><th>VALUE</th><th>UNIT</th><th>RESULT</th></tr></thead>
+    <tbody>
+      {{ row('§7.5', 'Low speed coverage', '≥ ' ~ fmt(maw.low_limit_pct) ~ ' %', fmt(maw.low_pct) ~ ' %', '%', result_state((maw.low_pct is number) and (maw.low_limit_pct is number) and (maw.low_pct >= maw.low_limit_pct))) }}
+      {{ row('§7.5', 'High speed coverage', '≥ ' ~ fmt(maw.high_limit_pct) ~ ' %', fmt(maw.high_pct) ~ ' %', '%', result_state((maw.high_pct is number) and (maw.high_limit_pct is number) and (maw.high_pct >= maw.high_limit_pct))) }}
+      {{ row('§7.5', 'Windows analysed', 'Descriptive', maw.windows and (maw.windows|length|string ~ ' windows') or 'n/a', '', 'na') }}
+    </tbody>
+  </table>
+</section>
+
+<section>
+  <h2>Emissions Summary</h2>
+  <table>
+    <thead><tr><th>PHASE</th><th>NOx</th><th>PN10</th><th>CO</th><th>CO₂</th><th>RESULT</th></tr></thead>
+    <tbody>
+      {% for key, data in emissions.items() %}
+        {% set label = data.label or key %}
+        {% set state = 'na' %}
+        {% if key == 'trip' %}
+          {% set checks = [] %}
+          {% if fc.NOx_mg_km and fc.NOx_mg_km.pass is not none %}{% set _ = checks.append(fc.NOx_mg_km.pass) %}{% endif %}
+          {% if fc.PN10_hash_km and fc.PN10_hash_km.pass is not none %}{% set _ = checks.append(fc.PN10_hash_km.pass) %}{% endif %}
+          {% if checks %}{% set state = result_state(checks|select('equalto', True)|list|length == checks|length) %}{% endif %}
+        {% endif %}
+        <tr>
+          <td>{{ label }}</td>
+          <td class="nowrap">{{ fmt(data.NOx_mg_km) }} mg/km</td>
+          <td class="nowrap">{{ fmt(data.PN10_hash_km or data.PN_hash_km) }} #/km</td>
+          <td class="nowrap">{{ fmt(data.CO_mg_km) }} mg/km</td>
+          <td class="nowrap">{{ fmt(data.CO2_g_km) }} g/km</td>
+          <td>{{ pill(state) }}</td>
+        </tr>
       {% endfor %}
     </tbody>
   </table>
-  {% if (final.notes or []) %}
-    <div class="note small" style="margin-top:6px;">
-      {{ final.notes | join('; ') }}
-    </div>
-  {% endif %}
+</section>
+
+<section>
+  <h2>Final Conformity</h2>
+  <table>
+    <thead><tr><th>POLLUTANT</th><th>LIMIT</th><th>VALUE</th><th>UNIT</th><th>RESULT</th></tr></thead>
+    <tbody>
+      {% if fc.NOx_mg_km %}
+      <tr><td>NOx</td><td>≤ {{ fmt(fc.NOx_mg_km.limit or p.limits.NOx_mg_km_RDE) }} mg/km</td><td>{{ fmt(fc.NOx_mg_km.value) }}</td><td>mg/km</td><td>{{ pill(result_state(fc.NOx_mg_km.pass)) }}</td></tr>
+      {% endif %}
+      {% if fc.PN10_hash_km %}
+      <tr><td>PN10</td><td>≤ {{ fmt(fc.PN10_hash_km.limit or p.limits.PN10_hash_km_RDE or p.limits.PN_hash_km_RDE) }} #/km</td><td>{{ fmt(fc.PN10_hash_km.value) }}</td><td>#/km</td><td>{{ pill(result_state(fc.PN10_hash_km.pass)) }}</td></tr>
+      {% endif %}
+      {% if fc.CO_mg_km %}
+      <tr><td>CO</td><td>Informative</td><td>{{ fmt(fc.CO_mg_km.value) }}</td><td>mg/km</td><td>{{ pill(result_state(fc.CO_mg_km.pass)) }}</td></tr>
+      {% endif %}
+    </tbody>
+  </table>
 </section>
 
 <footer>
   <div>Generated by EU7 engine</div>
   <div class="page-num"></div>
 </footer>
-
 </body>
 </html>
