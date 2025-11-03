@@ -120,6 +120,56 @@ def _ensure_numeric_emissions(emissions: MutableMapping[str, Any]) -> None:
         emissions[ph] = block
 
 
+CRITERIA_RESULT_ENUM = {"pass", "fail", "n/a"}
+
+
+def _to_result_enum(x) -> str:
+    """Normalize booleans/strings/None to the expected result enum."""
+
+    if isinstance(x, bool):
+        return "pass" if x else "fail"
+    if isinstance(x, str):
+        s = x.strip().lower()
+        if s in CRITERIA_RESULT_ENUM:
+            return s
+        if s in {"ok", "true", "yes"}:
+            return "pass"
+        if s in {"ko", "false", "no"}:
+            return "fail"
+    return "n/a"
+
+
+def _to_str_or_empty(v) -> str:
+    if v is None:
+        return ""
+    if isinstance(v, (int, float)):
+        return f"{v:.4g}"
+    return str(v)
+
+
+def _normalize_criteria_rows(data: dict) -> None:
+    """Ensure criteria rows match the PDF schema expectations."""
+
+    items = data.get("criteria")
+    if not isinstance(items, list):
+        return
+    normed = []
+    for row in items:
+        if not isinstance(row, dict):
+            continue
+        r = dict(row)
+        r["result"] = _to_result_enum(r.get("result"))
+        if "measured" in r:
+            r["measured"] = _to_str_or_empty(r.get("measured"))
+        if "limit" in r:
+            r["limit"] = _to_str_or_empty(r.get("limit"))
+        for k in ("condition", "unit", "description", "clause", "ref", "id", "section"):
+            if k in r:
+                r[k] = _to_str_or_empty(r.get(k))
+        normed.append(r)
+    data["criteria"] = normed
+
+
 _REPORT_DIR = Path(os.environ.get("REPORT_DIR", "reports"))
 
 
@@ -1230,6 +1280,8 @@ def build_report_data(source: Mapping[str, Any]) -> ReportData:
                 fc["pass"] = bool(fc["pass"])
             final_conf[name] = fc
         data["final_conformity"] = final_conf
+
+    _normalize_criteria_rows(data)
 
     if {"meta", "limits", "criteria", "emissions", "device"}.issubset(data.keys()):
         report = ReportData.model_validate(data)
