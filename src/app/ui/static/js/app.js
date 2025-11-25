@@ -429,6 +429,8 @@ if (window.RDE.initialized) {
       return window.results_payload || window.__RDE_RESULT__ || {};
     }
 
+    window.getResultsPayload = getResultsPayload;
+
     function filterBySection(list, name) {
       return (Array.isArray(list) ? list : []).filter((item) => item && item.section === name);
     }
@@ -1670,15 +1672,6 @@ if (window.RDE.initialized) {
       return true;
     });
 
-    // ==== RDE UI: required HTMX swap hook (must match test literal) ====
-    document.addEventListener("htmx:afterSwap", () => {
-      try {
-        initDropzones();
-      } catch (error) {
-        console.warn('htmx swap handler failed:', error);
-      }
-    });
-
     function renderSummaryMarkdown(container, target) {
       const dataEl = container.querySelector('#summary-data');
       if (!dataEl) return;
@@ -1745,3 +1738,22 @@ if (window.RDE.initialized) {
     });
   })();
 }
+
+function rehydrateUI() {
+  // Each called function should internally avoid double-binding
+  if (typeof initDropzones === "function") initDropzones();
+  if (typeof bindTabsAndCharts === "function") bindTabsAndCharts();
+  if (typeof wireKpiDeepLinks === "function") wireKpiDeepLinks();
+  if (typeof getResultsPayload === "function" && typeof populateExportForms === "function") {
+    populateExportForms(getResultsPayload());
+  }
+}
+
+document.addEventListener("rde:payload-ready", () => {
+  rehydrateUI();
+});
+
+// DO NOT MODIFY THIS LINE: CI asserts this exact substring exists
+document.addEventListener("htmx:afterSwap", (event) => {
+  try { rehydrateUI(); } catch (e) { console.error("[RDE] rehydrate afterSwap failed", e); }
+});
