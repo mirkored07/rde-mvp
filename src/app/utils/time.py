@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
+
 import numpy as np
 import pandas as pd
 
 
-def to_utc_series(ts: pd.Series) -> pd.Series:
+def to_utc_series(ts: pd.Series | Iterable[object]) -> pd.Series:
     """
     Robustly convert a pandas Series of timestamps to tz-aware UTC datetimes.
     Accepts:
@@ -14,6 +16,9 @@ def to_utc_series(ts: pd.Series) -> pd.Series:
       - naive datetimes (assumed UTC)
     Any unparsable element becomes NaT.
     """
+
+    if not isinstance(ts, pd.Series):
+        ts = pd.Series(ts)
 
     # Fast path: already datetime dtype
     if pd.api.types.is_datetime64_any_dtype(ts):
