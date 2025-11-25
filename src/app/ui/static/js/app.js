@@ -1,269 +1,89 @@
 window.RDE = window.RDE || {};
+
+// --- Utilities namespace ---
+window.RDE.util = window.RDE.util || {};
+
+if (!window.RDE.util.fmt) {
+  window.RDE.util.fmt = (v) =>
+    v == null || v === "n/a"
+      ? "n/a"
+      : (typeof v === "number"
+          ? new Intl.NumberFormat("en-US", { maximumSignificantDigits: 4 }).format(v)
+          : String(v));
+}
+
+if (!window.RDE.util.fmtRange) {
+  window.RDE.util.fmtRange = (min, max, unit = "") =>
+    [min, max].every((x) => typeof x === "number")
+      ? `${window.RDE.util.fmt(min)}–${window.RDE.util.fmt(max)}${unit ? " " + unit : ""}`
+      : "n/a";
+}
+
 if (window.RDE.initialized) {
   console.debug('[RDE] app.js already initialized');
 } else {
   window.RDE.initialized = true;
 
-  const significantFormatter = new Intl.NumberFormat('en-US', { maximumSignificantDigits: 4 });
-
-  const fmt = (value) => {
-    if (value == null || value === 'n/a') return 'n/a';
-    if (typeof value === 'number') {
-      if (!Number.isFinite(value)) return 'n/a';
-      return significantFormatter.format(value);
-    }
-    return String(value);
-  };
-
-  const fmtRange = (min, max, unit = '') => {
-    if (typeof min !== 'number' || typeof max !== 'number') return 'n/a';
-    const unitText = unit ? ` ${unit}` : '';
-    return `${fmt(min)}–${fmt(max)}${unitText}`;
-  };
-
-  window.RDE.util = { fmt, fmtRange };
-
-  function accepts(file, acceptList) {
-    if (!file || !acceptList || !acceptList.length) return true;
-    const name = (file.name || '').toLowerCase();
-    const type = (file.type || '').toLowerCase();
-    return acceptList.some((rule) => {
-      if (!rule) return false;
-      const value = rule.toLowerCase();
-      if (value.startsWith('.')) {
-        return name.endsWith(value);
-      }
-      return type.includes(value);
-    });
-  }
-
-  function formatBytes(bytes) {
-    if (!bytes || Number.isNaN(bytes)) return '';
-    if (bytes < 1024) return `${bytes} B`;
-    const kb = bytes / 1024;
-    if (kb < 1024) return `${kb.toFixed(1)} KB`;
-    const mb = kb / 1024;
-    return `${mb.toFixed(1)} MB`;
-  }
-
-  function createFileInput(el, options) {
-    let input = el.querySelector('input[type="file"]');
-    if (input) return input;
-
-    input = document.createElement('input');
-    input.type = 'file';
-    input.style.display = 'none';
-    if (options && options.multiple) {
-      input.multiple = true;
-    }
-    if (options && options.name) {
-      input.name = options.name;
-    }
-    if (options && options.required) {
-      input.required = true;
-    }
-    if (options && options.form) {
-      input.setAttribute('form', options.form);
-    }
-    if (options && options.accept && options.accept.length) {
-      const extensions = options.accept.filter((rule) => rule && rule.startsWith('.')).join(',');
-      if (extensions) {
-        input.setAttribute('accept', extensions);
-      }
-    }
-    el.appendChild(input);
-    return input;
-  }
-
-  function assignFilesToInput(input, files) {
-    if (!input) return false;
-    if (!files || !files.length) {
-      input.value = '';
-      return true;
-    }
-    let assigned = false;
-    if (typeof DataTransfer !== 'undefined') {
-      try {
-        const dataTransfer = new DataTransfer();
-        files.forEach((file) => dataTransfer.items.add(file));
-        input.files = dataTransfer.files;
-        assigned = true;
-      } catch (error) {
-        console.warn('[RDE] DataTransfer assignment failed:', error);
-      }
-    }
-    if (!assigned) {
-      try {
-        input.files = files;
-        assigned = true;
-      } catch (error) {
-        console.warn('[RDE] FileList assignment failed:', error);
-      }
-    }
-    if (!assigned) {
-      alert('Unable to use dropped files. Please use the browse button.');
-    }
-    return assigned;
-  }
-
-  function wireDropzone(el, acceptList, onFiles, options = {}) {
-    if (!el || el.dataset.rdeDropzone === 'bound') return;
-    el.dataset.rdeDropzone = 'bound';
-
-    const labelEl = el.querySelector('[data-file-label]');
-    const errorEl = el.querySelector('[data-error]');
-    const defaultLabel = labelEl ? labelEl.textContent : '';
-    const input = createFileInput(el, options);
-    const maxSizeMb = typeof options.maxSizeMb === 'number'
-      ? options.maxSizeMb
-      : Number.parseFloat(el.dataset.maxSizeMb || '') || 0;
-    const maxSizeBytes = maxSizeMb > 0 ? maxSizeMb * 1024 * 1024 : 0;
-
-    const clearError = () => {
-      if (errorEl) {
-        errorEl.textContent = '';
-        errorEl.classList.add('hidden');
-      }
-      el.classList.remove('has-error');
-    };
-
-    const showError = (message) => {
-      if (errorEl) {
-        errorEl.textContent = message || '';
-        errorEl.classList.remove('hidden');
-      }
-      el.classList.add('has-error');
-    };
-
-    const updateLabel = (files) => {
-      if (!labelEl) return;
-      if (!files || !files.length) {
-        labelEl.textContent = defaultLabel;
-        el.classList.remove('has-file');
-        return;
-      }
-      const first = files[0];
-      const sizeLabel = formatBytes(first.size);
-      labelEl.textContent = sizeLabel ? `${first.name} (${sizeLabel})` : first.name;
-      el.classList.add('has-file');
-    };
-
-    const handleSelected = (files) => {
-      if (!files || !files.length) {
-        assignFilesToInput(input, files);
-        updateLabel(files);
-        clearError();
-        onFiles([]);
-        return;
-      }
-      const accepted = files.filter((file) => accepts(file, acceptList));
-      if (!accepted.length) {
-        assignFilesToInput(input, []);
-        updateLabel([]);
-        showError('Unsupported file type.');
-        onFiles([]);
-        return;
-      }
-      if (maxSizeBytes && accepted.some((file) => file.size > maxSizeBytes)) {
-        assignFilesToInput(input, []);
-        updateLabel([]);
-        showError(`File must be smaller than ${fmt(maxSizeMb)} MB.`);
-        onFiles([]);
-        return;
-      }
-      clearError();
-      const selected = accepted.slice(0, options.multiple ? accepted.length : 1);
-      assignFilesToInput(input, selected);
-      updateLabel(selected);
-      onFiles(selected);
-    };
-
-    const prevent = (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-    };
-
-    ['dragenter', 'dragover', 'dragleave', 'drop'].forEach((eventName) => {
-      el.addEventListener(eventName, prevent, { passive: false });
-    });
-
-    el.addEventListener('dragenter', () => {
-      el.classList.add('hover');
-    });
-
-    el.addEventListener('dragover', () => {
-      el.classList.add('hover');
-    });
-
-    el.addEventListener('dragleave', () => {
-      el.classList.remove('hover');
-    });
-
-    el.addEventListener('drop', (event) => {
-      el.classList.remove('hover');
-      const dt = event.dataTransfer;
-      if (!dt || !dt.files || !dt.files.length) {
-        return;
-      }
-      handleSelected(Array.from(dt.files));
-    });
-
-    const browse = el.querySelector('[data-action="browse"]');
-    if (browse) {
-      browse.addEventListener('click', (event) => {
-        event.preventDefault();
-        input.click();
-      });
-    }
-
-    input.addEventListener('change', () => {
-      handleSelected(Array.from(input.files || []));
-    });
-
-    updateLabel(Array.from(input.files || []));
+  function accepts(file, acceptList){
+    const name = file.name.toLowerCase();
+    const type = (file.type || "").toLowerCase();
+    return acceptList.some(a => a.startsWith(".") ? name.endsWith(a) : type.includes(a));
   }
 
   function initDropzones() {
     const zones = [
-      { sel: '#drop-pems', key: 'pems', accept: ['.csv', 'text/csv'], name: 'pems_file', required: true },
-      {
-        sel: '#drop-gps',
-        key: 'gps',
-        accept: ['.csv', '.nmea', '.gpx', '.txt', 'text/csv', 'text/plain', 'application/xml'],
-        name: 'gps_file',
-        required: true,
-      },
-      {
-        sel: '#drop-ecu',
-        key: 'ecu',
-        accept: ['.csv', '.mf4', '.mdf', 'text/csv', 'application/octet-stream'],
-        name: 'ecu_file',
-        required: true,
-      },
+      { sel: "#drop-pems", key: "pems", accept: [".csv", "text/csv"], inputName: "pems_file" },
+      { sel: "#drop-gps",  key: "gps",  accept: [".csv",".nmea",".gpx","text/csv","text/plain","application/xml"], inputName: "gps_file" },
+      { sel: "#drop-ecu",  key: "ecu",  accept: [".csv",".mf4",".mdf","text/csv","application/octet-stream"], inputName: "ecu_file" },
     ];
-
-    zones.forEach((zone) => {
-      const el = document.querySelector(zone.sel);
-      if (!el) {
-        console.warn('[RDE] Dropzone not found:', zone.sel);
-        return;
-      }
-      const maxSizeAttr = Number.parseFloat(el.dataset.maxSizeMb || '') || 0;
-      wireDropzone(el, zone.accept, (files) => handleFiles(zone.key, files), {
-        name: zone.name,
-        required: zone.required,
-        maxSizeMb: maxSizeAttr,
-      });
+    zones.forEach(z => {
+      const el = document.querySelector(z.sel);
+      if (!el) return;
+      wireDropzone(el, z.accept, files => handleFiles(z.key, files), z.inputName);
     });
   }
 
-  window.initDropzones = initDropzones;
+  function wireDropzone(el, acceptList, onFiles, inputName){
+    if (!el || el.dataset.rdeDropzone === 'bound') return;
+    el.dataset.rdeDropzone = 'bound';
 
-  async function handleFiles(kind, files) {
-    console.debug('[RDE] Files dropped:', kind, files.map((file) => file.name));
+    const stop = e => { e.preventDefault(); e.stopPropagation(); };
+    ["dragenter","dragover","dragleave","drop"].forEach(ev => el.addEventListener(ev, stop, {passive:false}));
+    el.addEventListener("dragover", () => el.classList.add("hover"));
+    el.addEventListener("dragleave", () => el.classList.remove("hover"));
+    el.addEventListener("drop", (e) => {
+      el.classList.remove("hover");
+      const files = Array.from(e.dataTransfer?.files || []).filter(f => accepts(f, acceptList));
+      if (files.length) onFiles(files);
+    });
+
+    // hidden input + Open/Browse button
+    let input = el.querySelector('input[type="file"]');
+    if (!input){
+      input = document.createElement("input");
+      input.type = "file";
+      input.multiple = true;
+      input.style.display = "none";
+      if (inputName) input.name = inputName;
+      const exts = acceptList.filter(a => a.startsWith(".")).join(",");
+      if (exts) input.setAttribute("accept", exts);
+      el.appendChild(input);
+    } else if (inputName && !input.name) {
+      input.name = inputName;
+    }
+    const btn = el.querySelector('[data-action="browse"]');
+    if (btn) btn.addEventListener("click", (e) => { e.preventDefault(); input.click(); });
+    input.onchange = () => { if (input.files?.length) onFiles(Array.from(input.files)); };
+  }
+
+  async function handleFiles(kind, files){
+    console.debug("[RDE] dropped:", kind, files.map(f => f.name));
     window.RDE.uploads = window.RDE.uploads || {};
     window.RDE.uploads[kind] = files;
+    // TODO: call your upload/analyze API if needed
   }
+
+  window.initDropzones = initDropzones;
 
   (function RDE_APP_BOOTSTRAP() {
     'use strict';
@@ -501,7 +321,7 @@ if (window.RDE.initialized) {
         },
         {
           label: 'MAW Low/High',
-          value: maw.low_pct != null && maw.high_pct != null ? `${fmt(maw.low_pct)}% / ${fmt(maw.high_pct)}%` : 'n/a',
+          value: maw.low_pct != null && maw.high_pct != null ? `${window.RDE.util.fmt(maw.low_pct)}% / ${window.RDE.util.fmt(maw.high_pct)}%` : 'n/a',
           unit: '',
           goto: '#maw-coverage',
         },
@@ -511,7 +331,7 @@ if (window.RDE.initialized) {
         .map((t) => {
           const state = pass(t.pass);
           const stateClass = state ? ` result ${state}` : '';
-          const valueText = typeof t.value === 'number' ? fmt(t.value) : (t.value || 'n/a');
+          const valueText = typeof t.value === 'number' ? window.RDE.util.fmt(t.value) : (t.value || 'n/a');
           return `
     <div class="tile${stateClass}" data-goto="${t.goto || ''}">
       <div class="label">${t.label}</div>
@@ -541,7 +361,7 @@ if (window.RDE.initialized) {
       tbody.innerHTML = safeRows
         .map((row) => {
           const [ref, criterion, condition, value, unit, result] = row;
-          const displayValue = typeof value === 'number' ? fmt(value) : (value || 'n/a');
+          const displayValue = typeof value === 'number' ? window.RDE.util.fmt(value) : (value || 'n/a');
           const displayUnit = unit || '';
           const resultStateValue = typeof result === 'string' ? result : pass(result);
           return `
@@ -562,7 +382,7 @@ if (window.RDE.initialized) {
       const drive = block.drive_10min_each || {};
       const durationRange = block.soak_duration_range || [6, 72];
       const tempRange = block.soak_temperature_range || [-7, 38];
-      const durationText = [fmt(drive.urban_min_s), fmt(drive.rural_min_s), fmt(drive.motorway_min_s)].join(' / ');
+      const durationText = [window.RDE.util.fmt(drive.urban_min_s), window.RDE.util.fmt(drive.rural_min_s), window.RDE.util.fmt(drive.motorway_min_s)].join(' / ');
       const soakDuration = block.soak_duration_h;
       const minDuration = Array.isArray(durationRange) ? durationRange[0] : null;
       const maxDuration = Array.isArray(durationRange) ? durationRange[1] : null;
@@ -571,7 +391,7 @@ if (window.RDE.initialized) {
         [
           '§10.6',
           'Soak duration',
-          `${fmt(minDuration)}–${fmt(maxDuration)} h`,
+          `${window.RDE.util.fmt(minDuration)}–${window.RDE.util.fmt(maxDuration)} h`,
           soakDuration,
           'h',
           typeof soakDuration === 'number' && minDuration != null && maxDuration != null
@@ -581,8 +401,8 @@ if (window.RDE.initialized) {
         [
           '§10.6',
           'Soak temperature range',
-          `${fmt(tempRange[0])}…${fmt(tempRange[1])} °C`,
-          `${fmt(block.soak_temp_min_c)}–${fmt(block.soak_temp_max_c)}`,
+          `${window.RDE.util.fmt(tempRange[0])}…${window.RDE.util.fmt(tempRange[1])} °C`,
+          `${window.RDE.util.fmt(block.soak_temp_min_c)}–${window.RDE.util.fmt(block.soak_temp_max_c)}`,
           '°C',
           'na',
         ],
@@ -590,7 +410,7 @@ if (window.RDE.initialized) {
           '§10.6',
           'Extended temp multiplier',
           'Applied when last 3h in range',
-          block.extended_temp_flag ? `applied (${fmt(block.extended_last_temp_c)} °C)` : 'not applied',
+          block.extended_temp_flag ? `applied (${window.RDE.util.fmt(block.extended_last_temp_c)} °C)` : 'not applied',
           '',
           block.extended_temp_flag ? 'pass' : 'na',
         ],
@@ -603,10 +423,10 @@ if (window.RDE.initialized) {
       const stopLimit = 180;
       return [
         ['§8.3', 'Start/End logged', 'Documentation available', block.start_end_logged ? 'logged' : 'missing', '', pass(block.start_end_logged)],
-        ['§8.3', 'Vehicle moves within limit', `≤ ${fmt(moveLimit)} s`, block.move_within_s, 's', typeof block.move_within_s === 'number' ? block.move_within_s <= moveLimit : null],
-        ['§8.3', 'Total stop time', `≤ ${fmt(stopLimit)} s`, block.stop_total_s, 's', typeof block.stop_total_s === 'number' ? block.stop_total_s <= stopLimit : null],
-        ['§8.3', 'Average / max speed', '≤ 40 / ≤ 60 km/h', `${fmt(block.avg_speed_kmh)} / ${fmt(block.max_speed_kmh)}`, 'km/h', 'na'],
-        ['§10.6', 'Multiplier applied', '1.6 when ambient in range', block.multiplier_applied ? `applied (${fmt(block.ambient_temp_c)} °C)` : 'not applied', '', block.multiplier_applied ? 'pass' : 'na'],
+        ['§8.3', 'Vehicle moves within limit', `≤ ${window.RDE.util.fmt(moveLimit)} s`, block.move_within_s, 's', typeof block.move_within_s === 'number' ? block.move_within_s <= moveLimit : null],
+        ['§8.3', 'Total stop time', `≤ ${window.RDE.util.fmt(stopLimit)} s`, block.stop_total_s, 's', typeof block.stop_total_s === 'number' ? block.stop_total_s <= stopLimit : null],
+        ['§8.3', 'Average / max speed', '≤ 40 / ≤ 60 km/h', `${window.RDE.util.fmt(block.avg_speed_kmh)} / ${window.RDE.util.fmt(block.max_speed_kmh)}`, 'km/h', 'na'],
+        ['§10.6', 'Multiplier applied', '1.6 when ambient in range', block.multiplier_applied ? `applied (${window.RDE.util.fmt(block.ambient_temp_c)} °C)` : 'not applied', '', block.multiplier_applied ? 'pass' : 'na'],
       ];
     }
 
@@ -619,15 +439,15 @@ if (window.RDE.initialized) {
       const orderActual = Array.isArray(block.order) && block.order.length ? block.order.join(' → ') : 'n/a';
       const urbanRange = Array.isArray(shareRanges.urban) ? shareRanges.urban : [];
       const motorwayRange = Array.isArray(shareRanges.motorway) ? shareRanges.motorway : [];
-      const durationLabel = durationRange.length >= 2 ? fmtRange(durationRange[0], durationRange[1], 'min') : 'n/a';
-      const urbanLabel = urbanRange.length >= 2 ? fmtRange(urbanRange[0], urbanRange[1], '%') : 'n/a';
-      const motorwayLabel = motorwayRange.length >= 2 ? fmtRange(motorwayRange[0], motorwayRange[1], '%') : 'n/a';
+      const durationLabel = durationRange.length >= 2 ? window.RDE.util.fmtRange(durationRange[0], durationRange[1], 'min') : 'n/a';
+      const urbanLabel = urbanRange.length >= 2 ? window.RDE.util.fmtRange(urbanRange[0], urbanRange[1], '%') : 'n/a';
+      const motorwayLabel = motorwayRange.length >= 2 ? window.RDE.util.fmtRange(motorwayRange[0], motorwayRange[1], '%') : 'n/a';
       return [
-        ['§7.1', 'Urban distance', `≥ ${fmt(distanceMin.urban)} km`, block.urban_km, 'km', typeof block.urban_km === 'number' ? block.urban_km >= (distanceMin.urban || 0) : null],
-        ['§7.1', 'Motorway distance', `≥ ${fmt(distanceMin.motorway)} km`, block.motorway_km, 'km', typeof block.motorway_km === 'number' ? block.motorway_km >= (distanceMin.motorway || 0) : null],
+        ['§7.1', 'Urban distance', `≥ ${window.RDE.util.fmt(distanceMin.urban)} km`, block.urban_km, 'km', typeof block.urban_km === 'number' ? block.urban_km >= (distanceMin.urban || 0) : null],
+        ['§7.1', 'Motorway distance', `≥ ${window.RDE.util.fmt(distanceMin.motorway)} km`, block.motorway_km, 'km', typeof block.motorway_km === 'number' ? block.motorway_km >= (distanceMin.motorway || 0) : null],
         ['§7.1', 'Trip duration', durationLabel, block.duration_min, 'min', typeof block.duration_min === 'number' && durationRange.length >= 2 ? block.duration_min >= durationRange[0] && block.duration_min <= durationRange[1] : null],
-        ['§7.1', 'Urban share', urbanLabel, `${fmt(block.urban_share_pct)}%`, '%', typeof block.urban_share_pct === 'number' && urbanRange.length >= 2 ? block.urban_share_pct >= urbanRange[0] && block.urban_share_pct <= urbanRange[1] : null],
-        ['§7.1', 'Motorway share', motorwayLabel, `${fmt(block.motorway_share_pct)}%`, '%', typeof block.motorway_share_pct === 'number' && motorwayRange.length >= 2 ? block.motorway_share_pct >= motorwayRange[0] && block.motorway_share_pct <= motorwayRange[1] : null],
+        ['§7.1', 'Urban share', urbanLabel, `${window.RDE.util.fmt(block.urban_share_pct)}%`, '%', typeof block.urban_share_pct === 'number' && urbanRange.length >= 2 ? block.urban_share_pct >= urbanRange[0] && block.urban_share_pct <= urbanRange[1] : null],
+        ['§7.1', 'Motorway share', motorwayLabel, `${window.RDE.util.fmt(block.motorway_share_pct)}%`, '%', typeof block.motorway_share_pct === 'number' && motorwayRange.length >= 2 ? block.motorway_share_pct >= motorwayRange[0] && block.motorway_share_pct <= motorwayRange[1] : null],
         ['§7.1', 'Phase order', orderExpected, orderActual, '', Array.isArray(block.order) && Array.isArray(block.order_expected) ? block.order.join('|') === block.order_expected.join('|') : null],
       ];
     }
@@ -639,9 +459,9 @@ if (window.RDE.initialized) {
       const urbanLimit = block.urban_limit_m_per_100km;
       const delta = block.start_end_delta_m;
       return [
-        ['§7.2', 'Start/end elevation delta', `≤ ${fmt(startLimit)} m`, delta, 'm', typeof delta === 'number' && typeof startLimit === 'number' ? Math.abs(delta) <= startLimit : null],
-        ['§7.2', 'Trip cumulative elevation', `≤ ${fmt(tripLimit)} m/100km`, block.trip_cumulative_m_per_100km, 'm/100km', typeof block.trip_cumulative_m_per_100km === 'number' && typeof tripLimit === 'number' ? block.trip_cumulative_m_per_100km <= tripLimit : null],
-        ['§7.2', 'Urban cumulative elevation', `≤ ${fmt(urbanLimit)} m/100km`, block.urban_cumulative_m_per_100km, 'm/100km', typeof block.urban_cumulative_m_per_100km === 'number' && typeof urbanLimit === 'number' ? block.urban_cumulative_m_per_100km <= urbanLimit : null],
+        ['§7.2', 'Start/end elevation delta', `≤ ${window.RDE.util.fmt(startLimit)} m`, delta, 'm', typeof delta === 'number' && typeof startLimit === 'number' ? Math.abs(delta) <= startLimit : null],
+        ['§7.2', 'Trip cumulative elevation', `≤ ${window.RDE.util.fmt(tripLimit)} m/100km`, block.trip_cumulative_m_per_100km, 'm/100km', typeof block.trip_cumulative_m_per_100km === 'number' && typeof tripLimit === 'number' ? block.trip_cumulative_m_per_100km <= tripLimit : null],
+        ['§7.2', 'Urban cumulative elevation', `≤ ${window.RDE.util.fmt(urbanLimit)} m/100km`, block.urban_cumulative_m_per_100km, 'm/100km', typeof block.urban_cumulative_m_per_100km === 'number' && typeof urbanLimit === 'number' ? block.urban_cumulative_m_per_100km <= urbanLimit : null],
         ['§7.2', 'Extended conditions active', 'Declared when thresholds exceeded', block.extended_active ? 'extended' : 'normal', '', block.extended_active ? 'pass' : 'na'],
         ['§7.2', 'Extended emissions valid', 'If extended, emissions must pass', block.extended_emissions_valid ? 'valid' : 'invalid', '', pass(block.extended_emissions_valid)],
       ];
@@ -650,9 +470,9 @@ if (window.RDE.initialized) {
     function rowsGps(payload) {
       const block = (payload && payload.gps) || {};
       return [
-        ['§7.3', 'Distance delta', `≤ ${fmt(block.delta_limit_pct)} %`, `${fmt(block.distance_delta_pct)} %`, '%', typeof block.distance_delta_pct === 'number' && typeof block.delta_limit_pct === 'number' ? Math.abs(block.distance_delta_pct) <= block.delta_limit_pct : null],
-        ['§7.3', 'Max gap', `≤ ${fmt(block.max_gap_limit_s)} s`, block.max_gap_s, 's', typeof block.max_gap_s === 'number' && typeof block.max_gap_limit_s === 'number' ? block.max_gap_s <= block.max_gap_limit_s : null],
-        ['§7.3', 'Total gaps', `≤ ${fmt(block.total_gaps_limit_s)} s`, block.total_gaps_s, 's', typeof block.total_gaps_s === 'number' && typeof block.total_gaps_limit_s === 'number' ? block.total_gaps_s <= block.total_gaps_limit_s : null],
+        ['§7.3', 'Distance delta', `≤ ${window.RDE.util.fmt(block.delta_limit_pct)} %`, `${window.RDE.util.fmt(block.distance_delta_pct)} %`, '%', typeof block.distance_delta_pct === 'number' && typeof block.delta_limit_pct === 'number' ? Math.abs(block.distance_delta_pct) <= block.delta_limit_pct : null],
+        ['§7.3', 'Max gap', `≤ ${window.RDE.util.fmt(block.max_gap_limit_s)} s`, block.max_gap_s, 's', typeof block.max_gap_s === 'number' && typeof block.max_gap_limit_s === 'number' ? block.max_gap_s <= block.max_gap_limit_s : null],
+        ['§7.3', 'Total gaps', `≤ ${window.RDE.util.fmt(block.total_gaps_limit_s)} s`, block.total_gaps_s, 's', typeof block.total_gaps_s === 'number' && typeof block.total_gaps_limit_s === 'number' ? block.total_gaps_s <= block.total_gaps_limit_s : null],
         ['§7.3', 'Gap events', 'Descriptive', (block.gaps || []).length ? `${(block.gaps || []).length} gap(s)` : 'no gaps', '', (block.gaps || []).length ? 'na' : 'pass'],
       ];
     }
@@ -664,18 +484,18 @@ if (window.RDE.initialized) {
       const coverage = block.coverage || {};
       const limits = block.limits || {};
       return [
-        ['§6.1', 'CO₂ zero drift', `≤ ${fmt(limits.co2_zero_ppm)} ppm`, zero.co2_ppm, 'ppm', typeof zero.co2_ppm === 'number' && typeof limits.co2_zero_ppm === 'number' ? Math.abs(zero.co2_ppm) <= limits.co2_zero_ppm : null],
-        ['§6.1', 'CO zero drift', `≤ ${fmt(limits.co_zero_ppm)} ppm`, zero.co_ppm, 'ppm', typeof zero.co_ppm === 'number' && typeof limits.co_zero_ppm === 'number' ? Math.abs(zero.co_ppm) <= limits.co_zero_ppm : null],
-        ['§6.1', 'NOx zero drift', `≤ ${fmt(limits.nox_zero_ppm)} ppm`, zero.nox_ppm, 'ppm', typeof zero.nox_ppm === 'number' && typeof limits.nox_zero_ppm === 'number' ? Math.abs(zero.nox_ppm) <= limits.nox_zero_ppm : null],
-        ['§6.1', 'PN zero', `≤ ${fmt(limits.pn_zero_hash_cm3)} #/cm³`, zero.pn_hash_cm3, '#/cm³', typeof zero.pn_hash_cm3 === 'number' && typeof limits.pn_zero_hash_cm3 === 'number' ? zero.pn_hash_cm3 <= limits.pn_zero_hash_cm3 : null],
-        ['§6.3', 'CO₂ span drift', `≤ ${fmt(limits.co2_span_ppm)} ppm`, span.co2_ppm, 'ppm', typeof span.co2_ppm === 'number' && typeof limits.co2_span_ppm === 'number' ? Math.abs(span.co2_ppm) <= limits.co2_span_ppm : null],
-        ['§6.3', 'CO span drift', `≤ ${fmt(limits.co_span_ppm)} ppm`, span.co_ppm, 'ppm', typeof span.co_ppm === 'number' && typeof limits.co_span_ppm === 'number' ? Math.abs(span.co_ppm) <= limits.co_span_ppm : null],
-        ['§6.3', 'NOx span drift', `≤ ${fmt(limits.nox_span_ppm)} ppm`, span.nox_ppm, 'ppm', typeof span.nox_ppm === 'number' && typeof limits.nox_span_ppm === 'number' ? Math.abs(span.nox_ppm) <= limits.nox_span_ppm : null],
-        ['§6.3', 'CO₂ span coverage', `≥ ${fmt(limits.coverage_min_pct)} %`, `${fmt(coverage.co2_pct)} %`, '%', typeof coverage.co2_pct === 'number' && typeof limits.coverage_min_pct === 'number' ? coverage.co2_pct >= limits.coverage_min_pct : null],
-        ['§6.3', 'CO span coverage', `≥ ${fmt(limits.coverage_min_pct)} %`, `${fmt(coverage.co_pct)} %`, '%', typeof coverage.co_pct === 'number' && typeof limits.coverage_min_pct === 'number' ? coverage.co_pct >= limits.coverage_min_pct : null],
-        ['§6.3', 'NOx span coverage', `≥ ${fmt(limits.coverage_min_pct)} %`, `${fmt(coverage.nox_pct)} %`, '%', typeof coverage.nox_pct === 'number' && typeof limits.coverage_min_pct === 'number' ? coverage.nox_pct >= limits.coverage_min_pct : null],
-        ['§6.3', 'CO₂ between span and 2×span', `≤ ${fmt(limits.two_x_pct)} %`, `${fmt(coverage.co2_mid_pct)} %`, '%', typeof coverage.co2_mid_pct === 'number' && typeof limits.two_x_pct === 'number' ? coverage.co2_mid_pct <= limits.two_x_pct : null],
-        ['§6.3', 'CO₂ >2×span events', `≤ ${fmt(limits.exceed_count)}`, coverage.co2_over_limit, 'count', typeof coverage.co2_over_limit === 'number' && typeof limits.exceed_count === 'number' ? coverage.co2_over_limit <= limits.exceed_count : null],
+        ['§6.1', 'CO₂ zero drift', `≤ ${window.RDE.util.fmt(limits.co2_zero_ppm)} ppm`, zero.co2_ppm, 'ppm', typeof zero.co2_ppm === 'number' && typeof limits.co2_zero_ppm === 'number' ? Math.abs(zero.co2_ppm) <= limits.co2_zero_ppm : null],
+        ['§6.1', 'CO zero drift', `≤ ${window.RDE.util.fmt(limits.co_zero_ppm)} ppm`, zero.co_ppm, 'ppm', typeof zero.co_ppm === 'number' && typeof limits.co_zero_ppm === 'number' ? Math.abs(zero.co_ppm) <= limits.co_zero_ppm : null],
+        ['§6.1', 'NOx zero drift', `≤ ${window.RDE.util.fmt(limits.nox_zero_ppm)} ppm`, zero.nox_ppm, 'ppm', typeof zero.nox_ppm === 'number' && typeof limits.nox_zero_ppm === 'number' ? Math.abs(zero.nox_ppm) <= limits.nox_zero_ppm : null],
+        ['§6.1', 'PN zero', `≤ ${window.RDE.util.fmt(limits.pn_zero_hash_cm3)} #/cm³`, zero.pn_hash_cm3, '#/cm³', typeof zero.pn_hash_cm3 === 'number' && typeof limits.pn_zero_hash_cm3 === 'number' ? zero.pn_hash_cm3 <= limits.pn_zero_hash_cm3 : null],
+        ['§6.3', 'CO₂ span drift', `≤ ${window.RDE.util.fmt(limits.co2_span_ppm)} ppm`, span.co2_ppm, 'ppm', typeof span.co2_ppm === 'number' && typeof limits.co2_span_ppm === 'number' ? Math.abs(span.co2_ppm) <= limits.co2_span_ppm : null],
+        ['§6.3', 'CO span drift', `≤ ${window.RDE.util.fmt(limits.co_span_ppm)} ppm`, span.co_ppm, 'ppm', typeof span.co_ppm === 'number' && typeof limits.co_span_ppm === 'number' ? Math.abs(span.co_ppm) <= limits.co_span_ppm : null],
+        ['§6.3', 'NOx span drift', `≤ ${window.RDE.util.fmt(limits.nox_span_ppm)} ppm`, span.nox_ppm, 'ppm', typeof span.nox_ppm === 'number' && typeof limits.nox_span_ppm === 'number' ? Math.abs(span.nox_ppm) <= limits.nox_span_ppm : null],
+        ['§6.3', 'CO₂ span coverage', `≥ ${window.RDE.util.fmt(limits.coverage_min_pct)} %`, `${window.RDE.util.fmt(coverage.co2_pct)} %`, '%', typeof coverage.co2_pct === 'number' && typeof limits.coverage_min_pct === 'number' ? coverage.co2_pct >= limits.coverage_min_pct : null],
+        ['§6.3', 'CO span coverage', `≥ ${window.RDE.util.fmt(limits.coverage_min_pct)} %`, `${window.RDE.util.fmt(coverage.co_pct)} %`, '%', typeof coverage.co_pct === 'number' && typeof limits.coverage_min_pct === 'number' ? coverage.co_pct >= limits.coverage_min_pct : null],
+        ['§6.3', 'NOx span coverage', `≥ ${window.RDE.util.fmt(limits.coverage_min_pct)} %`, `${window.RDE.util.fmt(coverage.nox_pct)} %`, '%', typeof coverage.nox_pct === 'number' && typeof limits.coverage_min_pct === 'number' ? coverage.nox_pct >= limits.coverage_min_pct : null],
+        ['§6.3', 'CO₂ between span and 2×span', `≤ ${window.RDE.util.fmt(limits.two_x_pct)} %`, `${window.RDE.util.fmt(coverage.co2_mid_pct)} %`, '%', typeof coverage.co2_mid_pct === 'number' && typeof limits.two_x_pct === 'number' ? coverage.co2_mid_pct <= limits.two_x_pct : null],
+        ['§6.3', 'CO₂ >2×span events', `≤ ${window.RDE.util.fmt(limits.exceed_count)}`, coverage.co2_over_limit, 'count', typeof coverage.co2_over_limit === 'number' && typeof limits.exceed_count === 'number' ? coverage.co2_over_limit <= limits.exceed_count : null],
       ];
     }
 
@@ -686,10 +506,10 @@ if (window.RDE.initialized) {
         ['§4.6', 'Gas PEMS', 'Identifier', block.gas_pems || 'n/a', '', 'na'],
         ['§4.6', 'PN PEMS', 'Identifier', block.pn_pems || 'n/a', '', 'na'],
         ['§4.6', 'EFM', 'Identifier', block.efm || 'n/a', '', 'na'],
-        ['§4.6', 'Gas PEMS leak rate', `≤ ${fmt(limits.leak_rate_pct)} %`, block.leak_rate_pct, '%', typeof block.leak_rate_pct === 'number' && typeof limits.leak_rate_pct === 'number' ? block.leak_rate_pct <= limits.leak_rate_pct : null],
-        ['§4.6', 'PN dilute pressure rise', `≤ ${fmt(limits.pn_dilute_pressure_mbar)} mbar`, block.pn_dilute_pressure_mbar, 'mbar', typeof block.pn_dilute_pressure_mbar === 'number' && typeof limits.pn_dilute_pressure_mbar === 'number' ? block.pn_dilute_pressure_mbar <= limits.pn_dilute_pressure_mbar : null],
-        ['§4.6', 'PN sample pressure rise', `≤ ${fmt(limits.pn_sample_pressure_mbar)} mbar`, block.pn_sample_pressure_mbar, 'mbar', typeof block.pn_sample_pressure_mbar === 'number' && typeof limits.pn_sample_pressure_mbar === 'number' ? block.pn_sample_pressure_mbar <= limits.pn_sample_pressure_mbar : null],
-        ['§4.6', 'Device errors', `≤ ${fmt(limits.device_errors)}`, block.device_errors, 'count', typeof block.device_errors === 'number' && typeof limits.device_errors === 'number' ? block.device_errors <= limits.device_errors : null],
+        ['§4.6', 'Gas PEMS leak rate', `≤ ${window.RDE.util.fmt(limits.leak_rate_pct)} %`, block.leak_rate_pct, '%', typeof block.leak_rate_pct === 'number' && typeof limits.leak_rate_pct === 'number' ? block.leak_rate_pct <= limits.leak_rate_pct : null],
+        ['§4.6', 'PN dilute pressure rise', `≤ ${window.RDE.util.fmt(limits.pn_dilute_pressure_mbar)} mbar`, block.pn_dilute_pressure_mbar, 'mbar', typeof block.pn_dilute_pressure_mbar === 'number' && typeof limits.pn_dilute_pressure_mbar === 'number' ? block.pn_dilute_pressure_mbar <= limits.pn_dilute_pressure_mbar : null],
+        ['§4.6', 'PN sample pressure rise', `≤ ${window.RDE.util.fmt(limits.pn_sample_pressure_mbar)} mbar`, block.pn_sample_pressure_mbar, 'mbar', typeof block.pn_sample_pressure_mbar === 'number' && typeof limits.pn_sample_pressure_mbar === 'number' ? block.pn_sample_pressure_mbar <= limits.pn_sample_pressure_mbar : null],
+        ['§4.6', 'Device errors', `≤ ${window.RDE.util.fmt(limits.device_errors)}`, block.device_errors, 'count', typeof block.device_errors === 'number' && typeof limits.device_errors === 'number' ? block.device_errors <= limits.device_errors : null],
       ];
     }
 
@@ -702,21 +522,21 @@ if (window.RDE.initialized) {
       const vaLimits = limits.va_pos95 || {};
       const rpaLimits = limits.rpa_min || {};
       return [
-        ['§7.4', '<span class="swatch" style="background:var(--urban);"></span>Urban v̄', 'Descriptive', fmt(speeds.urban), 'km/h', 'na'],
-        ['§7.4', '<span class="swatch" style="background:var(--urban);"></span>Urban a⁺95', `≤ ${fmt(vaLimits.urban)} m²/s³`, urban.va_pos95, 'm²/s³', typeof urban.va_pos95 === 'number' && typeof vaLimits.urban === 'number' ? urban.va_pos95 <= vaLimits.urban : null],
-        ['§7.4', '<span class="swatch" style="background:var(--urban);"></span>Urban RPA', `≥ ${fmt(rpaLimits.urban)} m/s²`, urban.rpa, 'm/s²', typeof urban.rpa === 'number' && typeof rpaLimits.urban === 'number' ? urban.rpa >= rpaLimits.urban : null],
-        ['§7.4', '<span class="swatch" style="background:var(--motorway);"></span>Motorway v̄', 'Descriptive', fmt(speeds.motorway), 'km/h', 'na'],
-        ['§7.4', '<span class="swatch" style="background:var(--motorway);"></span>Motorway a⁺95', `≤ ${fmt(vaLimits.motorway)} m²/s³`, motorway.va_pos95, 'm²/s³', typeof motorway.va_pos95 === 'number' && typeof vaLimits.motorway === 'number' ? motorway.va_pos95 <= vaLimits.motorway : null],
-        ['§7.4', '<span class="swatch" style="background:var(--motorway);"></span>Motorway RPA', `≥ ${fmt(rpaLimits.motorway)} m/s²`, motorway.rpa, 'm/s²', typeof motorway.rpa === 'number' && typeof rpaLimits.motorway === 'number' ? motorway.rpa >= rpaLimits.motorway : null],
-        ['§7.4', 'Acceleration points (urban / motorway)', 'Descriptive', `${fmt(urban.accel_points)} / ${fmt(motorway.accel_points)}`, '', 'na'],
+        ['§7.4', '<span class="swatch" style="background:var(--urban);"></span>Urban v̄', 'Descriptive', window.RDE.util.fmt(speeds.urban), 'km/h', 'na'],
+        ['§7.4', '<span class="swatch" style="background:var(--urban);"></span>Urban a⁺95', `≤ ${window.RDE.util.fmt(vaLimits.urban)} m²/s³`, urban.va_pos95, 'm²/s³', typeof urban.va_pos95 === 'number' && typeof vaLimits.urban === 'number' ? urban.va_pos95 <= vaLimits.urban : null],
+        ['§7.4', '<span class="swatch" style="background:var(--urban);"></span>Urban RPA', `≥ ${window.RDE.util.fmt(rpaLimits.urban)} m/s²`, urban.rpa, 'm/s²', typeof urban.rpa === 'number' && typeof rpaLimits.urban === 'number' ? urban.rpa >= rpaLimits.urban : null],
+        ['§7.4', '<span class="swatch" style="background:var(--motorway);"></span>Motorway v̄', 'Descriptive', window.RDE.util.fmt(speeds.motorway), 'km/h', 'na'],
+        ['§7.4', '<span class="swatch" style="background:var(--motorway);"></span>Motorway a⁺95', `≤ ${window.RDE.util.fmt(vaLimits.motorway)} m²/s³`, motorway.va_pos95, 'm²/s³', typeof motorway.va_pos95 === 'number' && typeof vaLimits.motorway === 'number' ? motorway.va_pos95 <= vaLimits.motorway : null],
+        ['§7.4', '<span class="swatch" style="background:var(--motorway);"></span>Motorway RPA', `≥ ${window.RDE.util.fmt(rpaLimits.motorway)} m/s²`, motorway.rpa, 'm/s²', typeof motorway.rpa === 'number' && typeof rpaLimits.motorway === 'number' ? motorway.rpa >= rpaLimits.motorway : null],
+        ['§7.4', 'Acceleration points (urban / motorway)', 'Descriptive', `${window.RDE.util.fmt(urban.accel_points)} / ${window.RDE.util.fmt(motorway.accel_points)}`, '', 'na'],
       ];
     }
 
     function rowsMawCoverage(payload) {
       const block = (payload && payload.maw_coverage) || {};
       return [
-        ['§7.5', 'Low speed coverage', `≥ ${fmt(block.low_limit_pct)} %`, `${fmt(block.low_pct)} %`, '%', typeof block.low_pct === 'number' && typeof block.low_limit_pct === 'number' ? block.low_pct >= block.low_limit_pct : null],
-        ['§7.5', 'High speed coverage', `≥ ${fmt(block.high_limit_pct)} %`, `${fmt(block.high_pct)} %`, '%', typeof block.high_pct === 'number' && typeof block.high_limit_pct === 'number' ? block.high_pct >= block.high_limit_pct : null],
+        ['§7.5', 'Low speed coverage', `≥ ${window.RDE.util.fmt(block.low_limit_pct)} %`, `${window.RDE.util.fmt(block.low_pct)} %`, '%', typeof block.low_pct === 'number' && typeof block.low_limit_pct === 'number' ? block.low_pct >= block.low_limit_pct : null],
+        ['§7.5', 'High speed coverage', `≥ ${window.RDE.util.fmt(block.high_limit_pct)} %`, `${window.RDE.util.fmt(block.high_pct)} %`, '%', typeof block.high_pct === 'number' && typeof block.high_limit_pct === 'number' ? block.high_pct >= block.high_limit_pct : null],
         ['§7.5', 'Windows analysed', 'Descriptive', Array.isArray(block.windows) && block.windows.length ? `${block.windows.length} windows` : 'n/a', '', 'na'],
       ];
     }
@@ -740,10 +560,10 @@ if (window.RDE.initialized) {
         }
         rows.push([
           label,
-          data.NOx_mg_km != null ? `${fmt(data.NOx_mg_km)} mg/km` : 'n/a',
-          data.PN10_hash_km != null ? `${fmt(data.PN10_hash_km)} #/km` : 'n/a',
-          data.CO_mg_km != null ? `${fmt(data.CO_mg_km)} mg/km` : 'n/a',
-          data.CO2_g_km != null ? `${fmt(data.CO2_g_km)} g/km` : 'n/a',
+          data.NOx_mg_km != null ? `${window.RDE.util.fmt(data.NOx_mg_km)} mg/km` : 'n/a',
+          data.PN10_hash_km != null ? `${window.RDE.util.fmt(data.PN10_hash_km)} #/km` : 'n/a',
+          data.CO_mg_km != null ? `${window.RDE.util.fmt(data.CO_mg_km)} mg/km` : 'n/a',
+          data.CO2_g_km != null ? `${window.RDE.util.fmt(data.CO2_g_km)} g/km` : 'n/a',
           key === 'trip' ? tripState : 'na',
         ]);
       });
@@ -755,11 +575,11 @@ if (window.RDE.initialized) {
       const limits = (payload && payload.limits) || {};
       const entries = [];
       if (fc.NOx_mg_km) {
-        entries.push(['NOx', `≤ ${fmt(fc.NOx_mg_km.limit || limits.NOx_mg_km_RDE)} mg/km`, fc.NOx_mg_km.value, 'mg/km', fc.NOx_mg_km.pass]);
+        entries.push(['NOx', `≤ ${window.RDE.util.fmt(fc.NOx_mg_km.limit || limits.NOx_mg_km_RDE)} mg/km`, fc.NOx_mg_km.value, 'mg/km', fc.NOx_mg_km.pass]);
       }
       if (fc.PN10_hash_km) {
         const limit = fc.PN10_hash_km.limit || limits.PN10_hash_km_RDE || limits.PN_hash_km_RDE;
-        entries.push(['PN10', `≤ ${fmt(limit)} #/km`, fc.PN10_hash_km.value, '#/km', fc.PN10_hash_km.pass]);
+        entries.push(['PN10', `≤ ${window.RDE.util.fmt(limit)} #/km`, fc.PN10_hash_km.value, '#/km', fc.PN10_hash_km.pass]);
       }
       if (fc.CO_mg_km) {
         entries.push(['CO', 'Informative', fc.CO_mg_km.value, 'mg/km', fc.CO_mg_km.pass]);
@@ -987,7 +807,7 @@ if (window.RDE.initialized) {
         }
         ctx.fillStyle = 'rgba(255,255,255,0.8)';
         ctx.font = '12px Inter, sans-serif';
-        ctx.fillText(`${item.label}: ${fmt(item.value)}%`, x, height - 8);
+        ctx.fillText(`${item.label}: ${window.RDE.util.fmt(item.value)}%`, x, height - 8);
       });
       canvas.dataset.rendered = '1';
     }
