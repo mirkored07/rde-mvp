@@ -122,9 +122,6 @@
   document.dispatchEvent(new Event("rde:payload-ready"));
 </script>
 
-<!-- Then load the bundle -->
-<script src="{{ url_for('static', path='js/app.js') }}"></script>
-
 <!-- (If you use HTMX, keep afterSwap trigger as well) -->
 <script>
   document.addEventListener("htmx:afterSwap", function() {
